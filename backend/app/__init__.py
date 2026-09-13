@@ -1,0 +1,2 @@
+"""Maeglagi backend application."""
+

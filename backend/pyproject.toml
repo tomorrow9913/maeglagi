@@ -1,0 +1,36 @@
+[project]
+name = "maeglagi-backend"
+version = "0.1.0"
+description = "Organizational context platform API"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "pydantic-settings>=2.7,<3",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "asyncpg>=0.30,<1",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<1",
+  "ruff>=0.9,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
