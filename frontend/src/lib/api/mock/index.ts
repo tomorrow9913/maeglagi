@@ -1,7 +1,16 @@
 import { ApiError, type UploadOptions } from "../client";
 import { MOCK_LATENCY_MS } from "../config";
 import type { MaeglagiApi } from "../contract";
-import type { AnswerEvent, ContextItem, ProcessingJob, Source, Workspace } from "../types";
+import type {
+  AnswerEvent,
+  ApiKeyValidation,
+  ContextItem,
+  LlmProvider,
+  ProcessingJob,
+  Source,
+  Workspace,
+  WorkspaceSecrets,
+} from "../types";
 import {
   answers,
   contextItems,
@@ -45,7 +54,52 @@ const state = {
   workspaces: [...seedWorkspaces],
   sources: [...seedSources],
   jobs: new Map<string, ProcessingJob & { startedAt: number }>(),
+  /** 키 원문은 저장하지 않고, 서버가 내려줄 힌트만 흉내 냅니다. */
+  secrets: new Map<string, WorkspaceSecrets>([
+    ["demo", { provider: "anthropic", keyHint: "4f2a", updatedAt: "2026-09-08T09:00:00Z" }],
+  ]),
 };
+
+/** provider별 키 접두사. 실제 서비스의 키 형식과 맞춥니다. */
+const keyPrefix: Record<LlmProvider, string> = {
+  anthropic: "sk-ant-",
+  openai: "sk-",
+};
+
+/**
+ * 키 검증을 흉내 냅니다.
+ *
+ * 실제 서버는 provider에 호출을 보내 확인하므로, 형식이 맞아도 실패할 수
+ * 있습니다. mock은 접두사와 길이만 봅니다.
+ */
+function checkApiKey(provider: LlmProvider, apiKey: string): ApiKeyValidation {
+  const key = apiKey.trim();
+
+  if (!key) return { valid: false, message: "API key를 입력해 주세요." };
+  if (!key.startsWith(keyPrefix[provider])) {
+    return {
+      valid: false,
+      message: `${provider} 키는 ${keyPrefix[provider]}로 시작해야 합니다.`,
+    };
+  }
+  // anthropic 키도 "sk-"로 시작하므로 provider를 잘못 고른 경우를 따로 잡습니다.
+  if (provider === "openai" && key.startsWith(keyPrefix.anthropic)) {
+    return { valid: false, message: "Anthropic 키로 보입니다. provider를 확인해 주세요." };
+  }
+  if (key.length < 20) return { valid: false, message: "키 길이가 올바르지 않습니다." };
+
+  return { valid: true, message: "정상적으로 확인했습니다." };
+}
+
+function storeKey(workspaceId: string, provider: LlmProvider, apiKey: string): WorkspaceSecrets {
+  const secrets: WorkspaceSecrets = {
+    provider,
+    keyHint: apiKey.trim().slice(-4),
+    updatedAt: new Date().toISOString(),
+  };
+  state.secrets.set(workspaceId, secrets);
+  return secrets;
+}
 
 let sequence = 0;
 const nextId = (prefix: string) => `${prefix}-${++sequence}`;
@@ -123,7 +177,9 @@ export const mockApi: MaeglagiApi = {
     if (!input.name.trim()) throw new ApiError(422, "워크스페이스 이름을 입력해 주세요.");
     if (!input.llmApiKey.trim()) throw new ApiError(422, "API key를 입력해 주세요.");
 
-    // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
+    const check = checkApiKey(input.llmProvider, input.llmApiKey);
+    if (!check.valid) throw new ApiError(422, check.message);
+
     const workspace: Workspace = {
       id: nextId("ws"),
       name: input.name.trim(),
@@ -131,7 +187,33 @@ export const mockApi: MaeglagiApi = {
       sourceCount: 0,
     };
     state.workspaces.push(workspace);
+
+    // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
+    storeKey(workspace.id, input.llmProvider, input.llmApiKey);
     return { ...workspace };
+  },
+
+  async validateApiKey(input, signal) {
+    // 실제 provider 호출을 흉내 내느라 조금 더 걸립니다.
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    return checkApiKey(input.provider, input.apiKey);
+  },
+
+  async getWorkspaceSecrets(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return state.secrets.get(workspaceId) ?? null;
+  },
+
+  async updateApiKey(workspaceId, input, signal) {
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    if (!state.workspaces.some((item) => item.id === workspaceId)) {
+      throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
+    }
+
+    const check = checkApiKey(input.provider, input.apiKey);
+    if (!check.valid) throw new ApiError(422, check.message);
+
+    return storeKey(workspaceId, input.provider, input.apiKey);
   },
 
   async listSources(workspaceId, signal) {
