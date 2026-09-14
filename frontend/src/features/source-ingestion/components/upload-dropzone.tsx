@@ -6,11 +6,8 @@ import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import {
-  ACCEPTED_DOCUMENT_EXTENSIONS,
-  MAX_DOCUMENT_BYTES,
-  formatBytes,
-} from "../lib/validate-file";
+import { formatBytes } from "../lib/format";
+import { ACCEPTED_DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES } from "../lib/validate-file";
 
 export type UploadDropzoneProps = {
   /** 허용 확장자. 기본값은 PoC 범위인 PDF/DOCX/TXT/MD 입니다. */

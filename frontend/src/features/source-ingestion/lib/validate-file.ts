@@ -1,3 +1,5 @@
+import { formatBytes } from "./format";
+
 /** PoC에서 받는 문서 포맷. 백엔드 파서가 지원하는 범위와 같습니다. */
 export const ACCEPTED_DOCUMENT_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"] as const;
 
@@ -14,12 +16,6 @@ export type ValidationResult = {
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot === -1 ? "" : name.slice(dot).toLowerCase();
-}
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
