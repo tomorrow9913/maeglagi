@@ -12,4 +12,3 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   return response.json() as Promise<T>;
 }
-
