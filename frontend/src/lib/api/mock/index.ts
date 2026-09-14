@@ -1,4 +1,4 @@
-import { ApiError } from "../client";
+import { ApiError, type UploadOptions } from "../client";
 import { MOCK_LATENCY_MS } from "../config";
 import type { MaeglagiApi } from "../contract";
 import type { AnswerEvent, ContextItem, ProcessingJob, Source, Workspace } from "../types";
@@ -72,6 +72,15 @@ function advanceJob(job: ProcessingJob & { startedAt: number }): ProcessingJob {
   return { ...rest };
 }
 
+/** 실제 업로드처럼 보이도록 전송 진행률을 단계적으로 올립니다. */
+async function simulateTransfer({ signal, onProgress }: UploadOptions = {}): Promise<void> {
+  const steps = 12;
+  for (let step = 1; step <= steps; step += 1) {
+    await delay(MOCK_LATENCY_MS / steps, signal);
+    onProgress?.(step / steps);
+  }
+}
+
 function registerUpload(workspaceId: string, source: Source): ProcessingJob {
   state.sources.unshift(source);
 
@@ -136,8 +145,8 @@ export const mockApi: MaeglagiApi = {
     return structuredClone(content);
   },
 
-  async uploadDocument(workspaceId, file, signal) {
-    await delay(MOCK_LATENCY_MS, signal);
+  async uploadDocument(workspaceId, file, options) {
+    await simulateTransfer(options);
     return registerUpload(workspaceId, {
       id: nextId("src"),
       workspaceId,
@@ -149,8 +158,8 @@ export const mockApi: MaeglagiApi = {
     });
   },
 
-  async uploadRecording(workspaceId, audio, signal) {
-    await delay(MOCK_LATENCY_MS, signal);
+  async uploadRecording(workspaceId, audio, options) {
+    await simulateTransfer(options);
     return registerUpload(workspaceId, {
       id: nextId("src"),
       workspaceId,

@@ -44,16 +44,16 @@ export const httpApi: MaeglagiApi = {
   getSourceContent: (sourceId, signal) =>
     apiFetch<SourceContent>(`/sources/${sourceId}/content`, { signal }),
 
-  uploadDocument: (workspaceId, file, signal) => {
+  uploadDocument: (workspaceId, file, options) => {
     const form = new FormData();
     form.append("file", file);
-    return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/documents`, form, signal);
+    return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/documents`, form, options);
   },
 
-  uploadRecording: (workspaceId, audio, signal) => {
+  uploadRecording: (workspaceId, audio, options) => {
     const form = new FormData();
     form.append("audio", audio, "recording.webm");
-    return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/recordings`, form, signal);
+    return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/recordings`, form, options);
   },
 
   getJob: (jobId, signal) => apiFetch<ProcessingJob>(`/jobs/${jobId}`, { signal }),

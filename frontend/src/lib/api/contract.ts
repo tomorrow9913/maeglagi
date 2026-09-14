@@ -1,3 +1,4 @@
+import type { UploadOptions } from "./client";
 import type {
   AnswerEvent,
   ContextItem,
@@ -24,10 +25,14 @@ export interface MaeglagiApi {
 
   listSources(workspaceId: string, signal?: AbortSignal): Promise<Source[]>;
   getSourceContent(sourceId: string, signal?: AbortSignal): Promise<SourceContent>;
-  /** 문서 업로드. 반환된 job으로 진행률을 폴링합니다. */
-  uploadDocument(workspaceId: string, file: File, signal?: AbortSignal): Promise<ProcessingJob>;
-  /** 회의 녹음 업로드. STT 이후 파이프라인은 동일합니다. */
-  uploadRecording(workspaceId: string, audio: Blob, signal?: AbortSignal): Promise<ProcessingJob>;
+  /** 문서 업로드. 전송이 끝나면 반환된 job으로 처리 진행률을 폴링합니다. */
+  uploadDocument(workspaceId: string, file: File, options?: UploadOptions): Promise<ProcessingJob>;
+  /** 회의 녹음 업로드. STT 이후 파이프라인은 문서와 동일합니다. */
+  uploadRecording(
+    workspaceId: string,
+    audio: Blob,
+    options?: UploadOptions,
+  ): Promise<ProcessingJob>;
   getJob(jobId: string, signal?: AbortSignal): Promise<ProcessingJob>;
 
   listContextItems(

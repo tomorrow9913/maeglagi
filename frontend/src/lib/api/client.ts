@@ -58,10 +58,63 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
-/** multipart/form-data 업로드. Content-Type은 브라우저가 boundary와 함께 붙입니다. */
-export async function apiUpload<T>(path: string, body: FormData, signal?: AbortSignal): Promise<T> {
-  const response = await request(path, { method: "POST", body, signal });
-  return (await response.json()) as T;
+/** 업로드 호출에 공통으로 붙는 옵션 */
+export type UploadOptions = {
+  signal?: AbortSignal;
+  /** 0..1. 전송 바이트 기준이며 서버 처리 시간은 포함하지 않습니다. */
+  onProgress?: (ratio: number) => void;
+};
+
+/**
+ * multipart/form-data 업로드.
+ *
+ * fetch에는 업로드 진행률 이벤트가 없어 XMLHttpRequest를 씁니다.
+ * Content-Type은 브라우저가 boundary와 함께 붙이므로 직접 지정하지 않습니다.
+ */
+export function apiUpload<T>(
+  path: string,
+  body: FormData,
+  options: UploadOptions = {},
+): Promise<T> {
+  const { signal, onProgress } = options;
+
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}${path}`);
+    xhr.responseType = "json";
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(1);
+        resolve(xhr.response as T);
+        return;
+      }
+
+      const detail: unknown = xhr.response;
+      const message =
+        detail &&
+        typeof detail === "object" &&
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : `업로드에 실패했습니다 (${xhr.status})`;
+      reject(new ApiError(xhr.status, message, detail));
+    });
+
+    xhr.addEventListener("error", () => reject(new ApiError(0, "서버에 연결하지 못했습니다.")));
+    xhr.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(body);
+  });
 }
 
 /** Server-Sent Events 스트림을 한 줄씩 파싱해 넘겨줍니다. */
