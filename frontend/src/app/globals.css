@@ -2,11 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
-
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: var(--font-sans);
+  /* Geist(라틴) + 시스템 한글 폰트. 한글 자소는 OS 기본 폰트가 받습니다. */
+  --font-sans:
+    var(--font-geist), "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -24,6 +25,13 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -47,73 +55,73 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * 맥락이 디자인 토큰 — 라이트 모드 한 세트 (PoC 확정본)
+ *
+ * 색은 sage green(브랜드) + warm buff(배경) 조합입니다.
+ * 디자인 팀에서 정식 토큰을 받으면 아래 :root 값만 교체하세요.
+ * 컴포넌트는 이 변수만 참조하므로 하드코딩된 색을 새로 넣지 않습니다.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
+  color-scheme: light;
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Surface */
+  --background: oklch(0.9643 0.007 88.64); /* #f5f3ee */
+  --foreground: oklch(0.2737 0.0223 171.93); /* #1c2b26 */
+  --card: oklch(0.9945 0.0057 84.57); /* #fffdf9 */
+  --card-foreground: oklch(0.2737 0.0223 171.93);
+  --popover: oklch(0.9945 0.0057 84.57);
+  --popover-foreground: oklch(0.2737 0.0223 171.93);
+
+  /* Brand */
+  --primary: oklch(0.5071 0.0627 168.97); /* #3e715f */
+  --primary-foreground: oklch(0.9945 0.0057 84.57);
+
+  /* Neutral */
+  --secondary: oklch(0.946 0.0124 91.52); /* #f0ede4 */
+  --secondary-foreground: oklch(0.2737 0.0223 171.93);
+  --muted: oklch(0.946 0.0124 91.52);
+  --muted-foreground: oklch(0.5431 0.0174 170.56); /* #66736e */
+  --accent: oklch(0.919 0.0154 90.24); /* #e8e4d9 */
+  --accent-foreground: oklch(0.4315 0.0547 169.06); /* #2f5a4b */
+
+  /* Line & focus */
+  --border: oklch(0.893 0.008 139.44); /* #d9ddd8 */
+  --input: oklch(0.893 0.008 139.44);
+  --ring: oklch(0.5071 0.0627 168.97);
+
+  /* Status */
+  --destructive: oklch(0.5175 0.1659 27.99); /* #b4342c */
+  --destructive-foreground: oklch(0.9945 0.0057 84.57);
+  --success: oklch(0.5214 0.0981 156.97); /* #2f7a52 */
+  --success-foreground: oklch(0.9945 0.0057 84.57);
+  --warning: oklch(0.6258 0.1238 72.39); /* #b57a1e */
+  --warning-foreground: oklch(0.9945 0.0057 84.57);
+  --info: oklch(0.5285 0.1031 251.92); /* #3b6ea5 */
+  --info-foreground: oklch(0.9945 0.0057 84.57);
+
+  /*
+   * Knowledge Graph 노드 색.
+   * chart-1..5는 Ontology entity 종류에 1:1로 대응시킵니다.
+   * 순서: Person / Project / Decision / Task / Event
+   */
+  --chart-1: oklch(0.5071 0.0627 168.97); /* Person   — sage */
+  --chart-2: oklch(0.5285 0.1031 251.92); /* Project  — blue */
+  --chart-3: oklch(0.6269 0.1219 49.89); /* Decision — clay */
+  --chart-4: oklch(0.542 0.1155 300.02); /* Task     — violet */
+  --chart-5: oklch(0.6427 0.0712 95.54); /* Event    — olive */
+
+  /* Sidebar */
+  --sidebar: oklch(0.946 0.0124 91.52);
+  --sidebar-foreground: oklch(0.2737 0.0223 171.93);
+  --sidebar-primary: oklch(0.5071 0.0627 168.97);
+  --sidebar-primary-foreground: oklch(0.9945 0.0057 84.57);
+  --sidebar-accent: oklch(0.919 0.0154 90.24);
+  --sidebar-accent-foreground: oklch(0.4315 0.0547 169.06);
+  --sidebar-border: oklch(0.893 0.008 139.44);
+  --sidebar-ring: oklch(0.5071 0.0627 168.97);
+
+  --radius: 0.75rem;
 }
 
 @layer base {
