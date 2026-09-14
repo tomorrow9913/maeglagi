@@ -4,7 +4,7 @@ import { StatusBadge, type StatusTone } from "@/components/common/status-badge";
 import type { Source } from "@/lib/api";
 import { processingStatusLabel, type ProcessingStatus } from "@/types/context";
 
-import { formatBytes } from "../lib/validate-file";
+import { formatBytes } from "../lib/format";
 
 const statusTone: Record<ProcessingStatus, StatusTone> = {
   queued: "neutral",

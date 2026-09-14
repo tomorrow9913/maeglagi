@@ -7,8 +7,8 @@ import { Progress } from "@/components/ui/progress";
 import type { ProcessingJob } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-import type { UploadItem } from "../hooks/use-document-upload";
-import { formatBytes } from "../lib/validate-file";
+import type { UploadItem } from "../hooks/use-source-upload";
+import { formatBytes, formatDuration } from "../lib/format";
 import { ProcessingTracker } from "./processing-tracker";
 
 /**
@@ -51,7 +51,9 @@ export function UploadQueue({
               <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
                 {item.status === "uploading"
                   ? `${Math.round(item.progress * 100)}%`
-                  : formatBytes(item.sizeBytes)}
+                  : item.durationSeconds !== undefined
+                    ? formatDuration(item.durationSeconds)
+                    : formatBytes(item.sizeBytes)}
               </span>
               <Button
                 type="button"
