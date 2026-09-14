@@ -2,6 +2,7 @@ import { apiFetch, apiStream, apiUpload } from "../client";
 import type { MaeglagiApi } from "../contract";
 import type {
   AnswerEvent,
+  ApiKeyValidation,
   ContextItem,
   ContextTimelineQuery,
   CreateWorkspaceInput,
@@ -10,6 +11,7 @@ import type {
   Source,
   SourceContent,
   Workspace,
+  WorkspaceSecrets,
 } from "../types";
 
 function timelineQuery(query?: ContextTimelineQuery): string {
@@ -34,6 +36,23 @@ export const httpApi: MaeglagiApi = {
   createWorkspace: (input: CreateWorkspaceInput, signal) =>
     apiFetch<Workspace>("/workspaces", {
       method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
+  validateApiKey: (input, signal) =>
+    apiFetch<ApiKeyValidation>("/llm-keys/validate", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
+  getWorkspaceSecrets: (workspaceId, signal) =>
+    apiFetch<WorkspaceSecrets | null>(`/workspaces/${workspaceId}/llm-key`, { signal }),
+
+  updateApiKey: (workspaceId, input, signal) =>
+    apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/llm-key`, {
+      method: "PUT",
       body: JSON.stringify(input),
       signal,
     }),

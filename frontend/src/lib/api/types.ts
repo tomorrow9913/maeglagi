@@ -24,11 +24,32 @@ export type Workspace = {
   sourceCount: number;
 };
 
+export type LlmProvider = "anthropic" | "openai";
+
 export type CreateWorkspaceInput = {
   name: string;
-  /** BYOK. 서버는 암호화해 저장하고 다시 내려주지 않습니다. */
+  /** BYOK. 서버는 암호화해 저장하고 어떤 응답으로도 다시 내려주지 않습니다. */
   llmApiKey: string;
-  llmProvider: "anthropic" | "openai";
+  llmProvider: LlmProvider;
+};
+
+/** 키 유효성 검증 결과. 실제 호출로 확인하므로 형식만 맞아도 실패할 수 있습니다. */
+export type ApiKeyValidation = {
+  valid: boolean;
+  /** 사용자에게 그대로 보여줄 결과 문구 */
+  message: string;
+};
+
+/**
+ * 워크스페이스에 저장된 BYOK 키 정보.
+ *
+ * 키 원문은 포함되지 않습니다. 사용자가 어떤 키를 넣었는지 알아볼 수 있도록
+ * 마지막 4자만 `keyHint`로 내려줍니다.
+ */
+export type WorkspaceSecrets = {
+  provider: LlmProvider;
+  keyHint: string;
+  updatedAt: string;
 };
 
 export type Source = {

@@ -1,16 +1,27 @@
 "use client";
 
+import { useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CreateWorkspaceDialog } from "@/features/workspace/components/create-workspace-dialog";
 import { useAsync } from "@/hooks/use-async";
 import { api, isMockMode } from "@/lib/api";
+import type { Workspace } from "@/lib/api";
 import { workspacePath } from "@/lib/navigation";
 
 export default function WorkspacesPage() {
+  const router = useRouter();
   const { data, error, isLoading, reload } = useAsync((signal) => api.listWorkspaces(signal));
+
+  // 만들자마자 바로 들어가는 편이 자연스러워 새 워크스페이스로 이동합니다.
+  const onCreated = useCallback(
+    (created: Workspace) => router.push(workspacePath(created.id)),
+    [router],
+  );
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10">
@@ -21,6 +32,7 @@ export default function WorkspacesPage() {
             ? "맥락을 모을 공간을 고르거나 새로 만듭니다. (mock 데이터)"
             : "맥락을 모을 공간을 고르거나 새로 만듭니다."
         }
+        action={<CreateWorkspaceDialog onCreated={onCreated} />}
       />
 
       {isLoading ? (
