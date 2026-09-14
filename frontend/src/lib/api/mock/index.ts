@@ -7,7 +7,7 @@ import {
   contextItems,
   fallbackAnswer,
   knowledgeGraph,
-  processingStages,
+  stageSequence,
   sourceContents,
   sources as seedSources,
   workspaces as seedWorkspaces,
@@ -52,15 +52,17 @@ const nextId = (prefix: string) => `${prefix}-${++sequence}`;
 
 /** 경과 시간으로 진행률과 단계를 계산합니다. */
 function advanceJob(job: ProcessingJob & { startedAt: number }): ProcessingJob {
+  const stages = stageSequence[job.sourceKind];
   const elapsed = Date.now() - job.startedAt;
   const ratio = Math.min(elapsed / JOB_DURATION_MS, 1);
-  const stageIndex = Math.min(
-    Math.floor(ratio * processingStages.length),
-    processingStages.length - 1,
-  );
+
+  // 마지막 `completed`는 진행률 100%에서만 들어갑니다.
+  const workStages = stages.length - 1;
+  const stageIndex =
+    ratio >= 1 ? workStages : Math.min(Math.floor(ratio * workStages), workStages - 1);
 
   job.progress = ratio;
-  job.stage = processingStages[stageIndex];
+  job.stage = stages[stageIndex];
   job.status = ratio >= 1 ? "succeeded" : "processing";
 
   if (job.status === "succeeded") {
@@ -90,9 +92,10 @@ function registerUpload(workspaceId: string, source: Source): ProcessingJob {
   const job: ProcessingJob & { startedAt: number } = {
     id: nextId("job"),
     sourceId: source.id,
+    sourceKind: source.kind,
     status: "queued",
     progress: 0,
-    stage: processingStages[0],
+    stage: "uploaded",
     startedAt: Date.now(),
   };
   state.jobs.set(job.id, job);

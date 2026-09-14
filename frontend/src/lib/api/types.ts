@@ -8,6 +8,9 @@
 
 import type { ContextKind, ProcessingStatus, SourceKind } from "@/types/context";
 
+// API 소비자가 도메인 타입까지 한 곳에서 가져올 수 있게 다시 내보냅니다.
+export type { ContextKind, ProcessingStatus, SourceKind };
+
 /** Ontology entity 종류. Graph 노드 색(chart-1..5)과 순서를 맞춥니다. */
 export type EntityType = "person" | "project" | "decision" | "task" | "event";
 
@@ -50,15 +53,24 @@ export type SourceContent = {
   chunks: { id: string; text: string }[];
 };
 
+/**
+ * 처리 파이프라인의 단계.
+ *
+ * 회의 녹음은 `transcribing`을 거치고 문서는 건너뜁니다. 표시 문구는
+ * 프론트가 소유하므로 서버는 이 키만 내려줍니다.
+ */
+export type ProcessingStage = "uploaded" | "transcribing" | "analyzing" | "graphing" | "completed";
+
 /** 업로드 직후의 비동기 처리 상태 */
 export type ProcessingJob = {
   id: string;
   sourceId: string;
+  /** 어떤 단계를 거치는지 화면이 판단할 수 있게 소스 종류를 함께 내려줍니다. */
+  sourceKind: SourceKind;
   status: ProcessingStatus;
   /** 0..1 */
   progress: number;
-  /** 사용자에게 보여줄 현재 단계 */
-  stage: string;
+  stage: ProcessingStage;
   errorMessage?: string;
 };
 

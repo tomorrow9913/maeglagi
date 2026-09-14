@@ -1,9 +1,11 @@
 import type {
   AnswerSource,
+  ProcessingStage,
   ContextItem,
   KnowledgeGraph,
   Source,
   SourceContent,
+  SourceKind,
   Workspace,
 } from "../types";
 
@@ -237,11 +239,13 @@ export const fallbackAnswer = {
   sources: [] as AnswerSource[],
 };
 
-/** 업로드한 소스가 처리되는 동안 보여줄 단계 이름 */
-export const processingStages = [
-  "원문 정규화",
-  "청킹·임베딩",
-  "엔티티 추출",
-  "관계 추출",
-  "맥락 갱신",
-];
+/**
+ * 소스 종류별 처리 단계 시퀀스.
+ *
+ * 회의 녹음만 STT(`transcribing`)를 거칩니다. mock은 이 순서대로
+ * 진행률을 나눠 단계를 넘깁니다.
+ */
+export const stageSequence: Record<SourceKind, ProcessingStage[]> = {
+  document: ["uploaded", "analyzing", "graphing", "completed"],
+  meeting: ["uploaded", "transcribing", "analyzing", "graphing", "completed"],
+};
