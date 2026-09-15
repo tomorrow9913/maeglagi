@@ -14,6 +14,9 @@ export const api: MaeglagiApi = USE_MOCKS ? mockApi : httpApi;
 /** 현재 mock이 붙어 있는지. 데모 배지 같은 안내 문구에만 씁니다. */
 export const isMockMode = USE_MOCKS;
 
+/** 시드 데이터가 들어 있는 워크스페이스. 데모 진입 경로가 참조합니다. */
+export { DEMO_WORKSPACE_ID } from "./mock/fixtures";
+
 export { ApiError } from "./client";
 export type { MaeglagiApi } from "./contract";
 export * from "./types";

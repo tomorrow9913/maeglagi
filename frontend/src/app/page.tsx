@@ -19,12 +19,20 @@ export default function HomePage() {
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-muted-foreground">
           회의와 문서에서 결정, 이슈, 할 일을 연결하고 왜 그런 결정이 나왔는지 근거와 함께 답합니다.
         </p>
-        <Link
-          href="/workspaces"
-          className="mt-8 inline-flex h-10 items-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          워크스페이스 열기
-        </Link>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href="/demo"
+            className="inline-flex h-10 items-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            데모 바로 보기
+          </Link>
+          <Link
+            href="/workspaces"
+            className="inline-flex h-10 items-center rounded-md border border-border px-5 text-sm font-medium transition-colors hover:border-foreground/30"
+          >
+            워크스페이스 열기
+          </Link>
+        </div>
       </section>
 
       <section aria-label="핵심 기능" className="mt-20 grid gap-4 md:grid-cols-3">
