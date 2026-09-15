@@ -65,6 +65,12 @@
  * 표기는 HSL이 아니라 oklch입니다. Tailwind v4와 shadcn 기본 테마가 oklch를 쓰고,
  * 밝기를 고정한 채 색상만 조정할 때 결과가 예측 가능해서입니다.
  * 디자인 도구에서 옮겨올 때만 주석의 hex를 참고합니다.
+ *
+ * 색을 고를 때 지키는 규칙 두 가지입니다.
+ * 1. 면과 선 같은 중립은 배경의 warm buff 계열(H 88~91)로 통일합니다.
+ *    캐릭터가 이 바탕 위에 앉으므로, 중립이 다른 계열이면 캐릭터의 sage만 떠 보입니다.
+ * 2. 유채색 축은 캐릭터가 쓰는 sage 하나뿐입니다. 나머지 색은 의미를 구분하려고 쓰는
+ *    것이므로 배경 대비 4.5:1 이상을 지킵니다. 대비가 모자라면 채도가 아니라 명도를 내립니다.
  */
 :root {
   color-scheme: light;
@@ -72,7 +78,7 @@
   /* Surface */
   --background: oklch(0.9643 0.007 88.64); /* #f5f3ee */
   --foreground: oklch(0.2737 0.0223 171.93); /* #1c2b26 */
-  --card: oklch(0.9945 0.0057 84.57); /* #fffdf9 */
+  --card: oklch(0.9945 0.0057 88); /* #fffdf9 */
   --card-foreground: oklch(0.2737 0.0223 171.93);
   --popover: oklch(0.9945 0.0057 84.57);
   --popover-foreground: oklch(0.2737 0.0223 171.93);
@@ -85,13 +91,13 @@
   --secondary: oklch(0.946 0.0124 91.52); /* #f0ede4 */
   --secondary-foreground: oklch(0.2737 0.0223 171.93);
   --muted: oklch(0.946 0.0124 91.52);
-  --muted-foreground: oklch(0.5431 0.0174 170.56); /* #66736e */
+  --muted-foreground: oklch(0.515 0.02 169); /* #5d6b65 */
   --accent: oklch(0.919 0.0154 90.24); /* #e8e4d9 */
   --accent-foreground: oklch(0.4315 0.0547 169.06); /* #2f5a4b */
 
   /* Line & focus */
-  --border: oklch(0.893 0.008 139.44); /* #d9ddd8 */
-  --input: oklch(0.893 0.008 139.44);
+  --border: oklch(0.888 0.014 89); /* #dedad0 */
+  --input: oklch(0.888 0.014 89);
   --ring: oklch(0.5071 0.0627 168.97);
 
   /* Status */
@@ -99,7 +105,7 @@
   --destructive-foreground: oklch(0.9945 0.0057 84.57);
   --success: oklch(0.5214 0.0981 156.97); /* #2f7a52 */
   --success-foreground: oklch(0.9945 0.0057 84.57);
-  --warning: oklch(0.6258 0.1238 72.39); /* #b57a1e */
+  --warning: oklch(0.545 0.12 70); /* #9c6100 */
   --warning-foreground: oklch(0.9945 0.0057 84.57);
   --info: oklch(0.5285 0.1031 251.92); /* #3b6ea5 */
   --info-foreground: oklch(0.9945 0.0057 84.57);
@@ -109,25 +115,25 @@
    * chart-1..5는 Ontology entity 종류에 1:1로 대응시킵니다.
    * 순서: Person / Project / Decision / Task / Event
    */
-  --chart-1: oklch(0.5071 0.0627 168.97); /* Person   — sage */
-  --chart-2: oklch(0.5285 0.1031 251.92); /* Project  — blue */
-  --chart-3: oklch(0.6269 0.1219 49.89); /* Decision — clay */
-  --chart-4: oklch(0.542 0.1155 300.02); /* Task     — violet */
-  --chart-5: oklch(0.6427 0.0712 95.54); /* Event    — olive */
+  --chart-1: oklch(0.52 0.085 165); /* Person   — sage */
+  --chart-2: oklch(0.53 0.105 252); /* Project  — blue */
+  --chart-3: oklch(0.54 0.12 45); /* Decision — clay */
+  --chart-4: oklch(0.54 0.115 300); /* Task     — violet */
+  --chart-5: oklch(0.535 0.095 92); /* Event    — olive */
 
   /*
    * 위 chart 색의 hex 표기입니다.
    * <canvas>에 직접 그리는 라이브러리(그래프 뷰)는 oklch() 문자열을 해석하지
    * 못해 색을 잃어버립니다. 값을 바꿀 때 두 줄을 함께 고쳐야 합니다.
    */
-  --chart-1-hex: #3e715f;
-  --chart-2-hex: #3b6ea5;
-  --chart-3-hex: #c2703f;
-  --chart-4-hex: #7a5ea8;
-  --chart-5-hex: #9a8d5a;
-  --border-hex: #d9ddd8;
+  --chart-1-hex: #30785d;
+  --chart-2-hex: #3a6ea7;
+  --chart-3-hex: #a6552d;
+  --chart-4-hex: #795ea7;
+  --chart-5-hex: #816b21;
+  --border-hex: #dedad0;
   --foreground-hex: #1c2b26;
-  --muted-foreground-hex: #66736e;
+  --muted-foreground-hex: #5d6b65;
 
   /* Sidebar */
   --sidebar: oklch(0.946 0.0124 91.52);
@@ -136,7 +142,7 @@
   --sidebar-primary-foreground: oklch(0.9945 0.0057 84.57);
   --sidebar-accent: oklch(0.919 0.0154 90.24);
   --sidebar-accent-foreground: oklch(0.4315 0.0547 169.06);
-  --sidebar-border: oklch(0.893 0.008 139.44);
+  --sidebar-border: oklch(0.888 0.014 89);
   --sidebar-ring: oklch(0.5071 0.0627 168.97);
 
   --radius: 0.75rem;

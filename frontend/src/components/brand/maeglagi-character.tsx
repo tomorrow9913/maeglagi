@@ -24,7 +24,7 @@ export function MaeglagiCharacter({
   return (
     <svg viewBox="0 0 32 32" className={cn("size-8", className)} fill="none" aria-hidden>
       {/* 몸통 — 감긴 실타래 */}
-      <circle cx="16" cy="15" r="9.5" fill="currentColor" fillOpacity="0.12" />
+      <circle cx="16" cy="15" r="9.5" fill="currentColor" fillOpacity="0.16" />
       <circle cx="16" cy="15" r="9.5" stroke="currentColor" strokeWidth="1.8" />
 
       {/* 감긴 결. 얼굴을 피해 위아래 가장자리에만 둡니다. */}

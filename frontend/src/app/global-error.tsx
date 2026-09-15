@@ -23,7 +23,7 @@ export default function GlobalError({ reset }: { error: Error; reset: () => void
       >
         <main style={{ textAlign: "center", padding: 24 }}>
           <h1 style={{ fontSize: 18, margin: "0 0 8px" }}>앱을 불러오지 못했습니다</h1>
-          <p style={{ fontSize: 14, color: "#66736e", margin: "0 0 16px" }}>
+          <p style={{ fontSize: 14, color: "#5d6b65", margin: "0 0 16px" }}>
             잠시 후 다시 시도해 주세요.
           </p>
           <button
