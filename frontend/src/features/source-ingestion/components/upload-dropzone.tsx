@@ -63,7 +63,7 @@ export function UploadDropzone({
     >
       <Upload className="size-6 text-muted-foreground" aria-hidden />
       <div className="space-y-1">
-        <p className="text-sm font-medium">파일을 여기에 끌어다 놓으세요</p>
+        <p className="text-sm font-medium">파일을 여기에 끌어다 놓아보세요</p>
         <p className="text-xs text-muted-foreground">{hint}</p>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}>

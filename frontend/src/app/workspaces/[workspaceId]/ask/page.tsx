@@ -100,7 +100,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
       >
         <Input
           value={draft}
-          placeholder="이 워크스페이스에 대해 질문하세요"
+          placeholder="이 워크스페이스에 대해 질문해 보세요"
           disabled={isStreaming}
           onChange={(event) => setDraft(event.target.value)}
           aria-label="질문"
