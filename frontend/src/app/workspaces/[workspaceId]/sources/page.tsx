@@ -1,7 +1,7 @@
 "use client";
 
-import { use, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, use, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecordingControls } from "@/features/source-ingestion/components/recording-controls";
 import { SourceList } from "@/features/source-ingestion/components/source-list";
+import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { UploadDropzone } from "@/features/source-ingestion/components/upload-dropzone";
 import { UploadQueue } from "@/features/source-ingestion/components/upload-queue";
 import { useAudioRecorder } from "@/features/source-ingestion/hooks/use-audio-recorder";
@@ -22,7 +23,38 @@ import { workspacePath } from "@/lib/navigation";
 
 export default function SourcesPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
+
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full rounded-xl" />}>
+      <SourcesView workspaceId={workspaceId} />
+    </Suspense>
+  );
+}
+
+function SourcesView({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  /*
+   * 다른 화면(Timeline·Graph·Ask)이 `?source=&chunk=`로 원문을 열어달라고
+   * 요청합니다. URL을 상태로 삼아 뒤로 가기로도 닫히게 둡니다.
+   */
+  const [viewer, setViewer] = useState<{ sourceId: string; chunkId?: string }>();
+
+  useEffect(() => {
+    const sourceId = searchParams.get("source");
+    if (!sourceId) {
+      setViewer(undefined);
+      return;
+    }
+    setViewer({ sourceId, chunkId: searchParams.get("chunk") ?? undefined });
+  }, [searchParams]);
+
+  const closeViewer = useCallback(() => {
+    setViewer(undefined);
+    // 쿼리를 지워 새로고침해도 다시 열리지 않게 합니다.
+    if (searchParams.get("source")) router.replace(workspacePath(workspaceId, "sources"));
+  }, [router, searchParams, workspaceId]);
 
   const {
     data: sources,
@@ -110,13 +142,19 @@ export default function SourcesPage({ params }: { params: Promise<{ workspaceId:
             </Button>
           </div>
         ) : sources && sources.length > 0 ? (
-          <SourceList sources={sources} />
+          <SourceList sources={sources} onOpen={(sourceId) => setViewer({ sourceId })} />
         ) : (
           <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
             아직 올라온 소스가 없습니다. 문서나 회의 녹음을 올려 맥락을 쌓아보세요.
           </div>
         )}
       </section>
+
+      <SourceViewer
+        sourceId={viewer?.sourceId}
+        highlightChunkId={viewer?.chunkId}
+        onClose={closeViewer}
+      />
     </>
   );
 }

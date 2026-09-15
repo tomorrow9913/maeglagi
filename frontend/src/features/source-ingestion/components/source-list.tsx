@@ -1,4 +1,4 @@
-import { FileText, Mic } from "lucide-react";
+import { ChevronRight, FileText, Mic } from "lucide-react";
 
 import { StatusBadge, type StatusTone } from "@/components/common/status-badge";
 import type { Source } from "@/lib/api";
@@ -21,25 +21,41 @@ function detailOf(source: Source): string {
   return source.sizeBytes !== undefined ? formatBytes(source.sizeBytes) : "";
 }
 
-/** 워크스페이스에 올라온 소스 목록입니다. */
-export function SourceList({ sources }: { sources: Source[] }) {
+/** 워크스페이스에 올라온 소스 목록입니다. 항목을 누르면 원문이 열립니다. */
+export function SourceList({
+  sources,
+  onOpen,
+}: {
+  sources: Source[];
+  onOpen: (sourceId: string) => void;
+}) {
   return (
     <ul className="divide-y divide-border rounded-xl border border-border bg-card">
       {sources.map((source) => {
         const Icon = source.kind === "meeting" ? Mic : FileText;
 
         return (
-          <li key={source.id} className="flex items-center gap-3 p-4">
-            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{source.title}</p>
-              <p className="text-xs text-muted-foreground">
-                {[detailOf(source), source.createdAt.slice(0, 10)].filter(Boolean).join(" · ")}
-              </p>
-            </div>
-            <StatusBadge tone={statusTone[source.status]}>
-              {processingStatusLabel[source.status]}
-            </StatusBadge>
+          <li key={source.id}>
+            <button
+              type="button"
+              onClick={() => onOpen(source.id)}
+              disabled={source.status !== "succeeded"}
+              className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-accent/40 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{source.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {[detailOf(source), source.createdAt.slice(0, 10)].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+              <StatusBadge tone={statusTone[source.status]}>
+                {processingStatusLabel[source.status]}
+              </StatusBadge>
+              {source.status === "succeeded" ? (
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              ) : null}
+            </button>
           </li>
         );
       })}
