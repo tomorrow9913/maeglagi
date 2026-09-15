@@ -15,12 +15,22 @@ Next.js App Router 기반 웹 클라이언트입니다.
 
 shadcn은 React + Tailwind + Radix를 전제로 하므로 위 조합은 Day 1에 고정합니다.
 
+## 검사
+
+`pnpm lint`는 ESLint와 타입 검사를 함께 돌립니다. 둘의 역할이 다릅니다.
+
+- `tsc --noEmit` — 타입이 맞지 않는 코드를 막습니다.
+- `eslint` — 타입은 맞지만 의도와 어긋난 코드를 막습니다. 선언만 하고 쓰지 않는 prop, Hook 의존성 누락 등입니다. 경고도 실패로 처리합니다(`--max-warnings 0`).
+
+`src/components/ui`는 shadcn 원본이라 규칙을 완화해 뒀습니다. 변형이 필요하면 원본을 고치지 말고 래퍼를 만드세요.
+
 ## 실행
 
 ```bash
 pnpm install
 pnpm dev      # http://localhost:3000
-pnpm lint     # tsc --noEmit
+pnpm lint     # eslint + tsc --noEmit
+pnpm lint:fix # 자동 수정 가능한 것만 고침
 pnpm build
 ```
 

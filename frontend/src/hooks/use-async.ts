@@ -47,6 +47,11 @@ export function useAsync<T>(
       });
 
     return () => controller.abort();
+    /*
+     * `fn`을 의존성에서 일부러 뺍니다. 호출부가 인라인 화살표 함수를 넘기는
+     * 경우가 대부분이라 매 렌더마다 새 함수가 되고, 그대로 두면 요청이
+     * 무한히 반복됩니다. 재실행 시점은 호출부가 deps로 결정합니다.
+     */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, nonce]);
 
