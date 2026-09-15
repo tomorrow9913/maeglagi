@@ -19,6 +19,7 @@ function timelineQuery(query?: ContextTimelineQuery): string {
 
   const params = new URLSearchParams();
   for (const kind of query.kinds ?? []) params.append("kind", kind);
+  for (const kind of query.sourceKinds ?? []) params.append("source_kind", kind);
   if (query.from) params.set("from", query.from);
   if (query.to) params.set("to", query.to);
 

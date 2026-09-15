@@ -109,7 +109,14 @@ export const contextItems: ContextItem[] = [
     title: "PoC 범위를 회의 녹음과 문서 업로드로 한정",
     summary: "슬랙·지라 연동은 이번 PoC에서 제외하고, 소스 두 갈래에 집중하기로 했습니다.",
     occurredAt: "2026-09-08T10:42:00Z",
-    sourceIds: ["src-kickoff"],
+    sources: [
+      {
+        id: "src-kickoff",
+        kind: "meeting",
+        title: "9/8 제품 킥오프 회의",
+        chunkId: "src-kickoff#1",
+      },
+    ],
   },
   {
     id: "ctx-2",
@@ -117,7 +124,14 @@ export const contextItems: ContextItem[] = [
     title: "저장소를 PostgreSQL·MinIO·pgvector·Neo4j 4종으로 확정",
     summary: "원문, 메타데이터, 임베딩, 그래프를 각각의 저장소가 맡습니다.",
     occurredAt: "2026-09-08T10:55:00Z",
-    sourceIds: ["src-kickoff"],
+    sources: [
+      {
+        id: "src-kickoff",
+        kind: "meeting",
+        title: "9/8 제품 킥오프 회의",
+        chunkId: "src-kickoff#3",
+      },
+    ],
   },
   {
     id: "ctx-3",
@@ -125,7 +139,14 @@ export const contextItems: ContextItem[] = [
     title: "벡터 검색만으로는 근거가 약함",
     summary: "질문이 여러 회의에 걸치면 관련 청크를 놓치는 사례가 나왔습니다.",
     occurredAt: "2026-09-11T06:20:00Z",
-    sourceIds: ["src-tech-review"],
+    sources: [
+      {
+        id: "src-tech-review",
+        kind: "meeting",
+        title: "9/11 기술 검토 회의",
+        chunkId: "src-tech-review#2",
+      },
+    ],
     supersededBy: "ctx-4",
   },
   {
@@ -134,7 +155,14 @@ export const contextItems: ContextItem[] = [
     title: "Hybrid retrieval(벡터 + 그래프) 채택",
     summary: "벡터 검색 결과를 그래프 이웃으로 확장해 근거 후보를 넓힙니다.",
     occurredAt: "2026-09-11T06:35:00Z",
-    sourceIds: ["src-tech-review"],
+    sources: [
+      {
+        id: "src-tech-review",
+        kind: "meeting",
+        title: "9/11 기술 검토 회의",
+        chunkId: "src-tech-review#2",
+      },
+    ],
   },
   {
     id: "ctx-5",
@@ -142,7 +170,14 @@ export const contextItems: ContextItem[] = [
     title: "BYOK 키 암호화 저장 구현",
     summary: "키는 저장 시 암호화하고 어떤 응답으로도 원문을 내보내지 않습니다.",
     occurredAt: "2026-09-11T06:48:00Z",
-    sourceIds: ["src-tech-review"],
+    sources: [
+      {
+        id: "src-tech-review",
+        kind: "meeting",
+        title: "9/11 기술 검토 회의",
+        chunkId: "src-tech-review#1",
+      },
+    ],
   },
   {
     id: "ctx-6",
@@ -150,7 +185,9 @@ export const contextItems: ContextItem[] = [
     title: "PRD v0.2 공유",
     summary: "제품 정의와 답변 원칙을 문서로 정리해 공유했습니다.",
     occurredAt: "2026-09-09T02:10:00Z",
-    sourceIds: ["src-prd"],
+    sources: [
+      { id: "src-prd", kind: "document", title: "맥락이 PRD v0.2.pdf", chunkId: "src-prd#1" },
+    ],
   },
 ];
 

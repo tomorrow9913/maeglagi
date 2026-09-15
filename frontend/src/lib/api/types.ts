@@ -95,19 +95,30 @@ export type ProcessingJob = {
   errorMessage?: string;
 };
 
+/** 맥락 항목이 어떤 소스에서 나왔는지. 카드에서 바로 보여줄 수 있게 함께 내려줍니다. */
+export type ContextItemSource = {
+  id: string;
+  kind: SourceKind;
+  title: string;
+  /** 근거가 된 청크. 원문 뷰어가 이 위치로 이동합니다. */
+  chunkId?: string;
+};
+
 export type ContextItem = {
   id: string;
   kind: ContextKind;
   title: string;
   summary: string;
   occurredAt: string;
-  sourceIds: string[];
+  sources: ContextItemSource[];
   /** Temporal 규칙: 이후 결정으로 대체되면 대체한 항목의 id */
   supersededBy?: string;
 };
 
 export type ContextTimelineQuery = {
   kinds?: ContextKind[];
+  /** 근거 소스의 종류로 거릅니다. 비우면 전체입니다. */
+  sourceKinds?: SourceKind[];
   /** ISO-8601 (inclusive) */
   from?: string;
   to?: string;

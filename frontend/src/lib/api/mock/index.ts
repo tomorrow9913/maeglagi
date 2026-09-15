@@ -268,8 +268,13 @@ export const mockApi: MaeglagiApi = {
     await delay(MOCK_LATENCY_MS, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId)) return [];
 
-    let items: ContextItem[] = contextItems.map((item) => ({ ...item }));
+    let items: ContextItem[] = contextItems.map((item) => structuredClone(item));
     if (query?.kinds?.length) items = items.filter((item) => query.kinds!.includes(item.kind));
+    if (query?.sourceKinds?.length) {
+      items = items.filter((item) =>
+        item.sources.some((source) => query.sourceKinds!.includes(source.kind)),
+      );
+    }
     if (query?.from) items = items.filter((item) => item.occurredAt >= query.from!);
     if (query?.to) items = items.filter((item) => item.occurredAt <= query.to!);
 
