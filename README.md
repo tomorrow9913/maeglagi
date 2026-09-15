@@ -1,6 +1,10 @@
 # 맥락이 (Maeglagi)
 
-회의와 문서처럼 흩어진 업무 정보를 연결해 사람, 프로젝트, 결정, 업무, 이벤트의 맥락을 만드는 Organizational Context Platform의 PoC 모노레포입니다.
+> 흩어진 업무의 맥락을 잇다.
+
+회의와 문서처럼 흩어진 업무 정보를 AI가 연결해 사람·프로젝트·결정·업무·이벤트의 관계와 현재 맥락을 자동으로 만드는 Organizational Context Platform입니다. 이 저장소는 그 PoC 모노레포입니다.
+
+제품 정의와 슬로건, 브랜드 자산, 디자인 토큰의 기준은 [docs/brand.md](docs/brand.md), 화면 문구와 AI 답변의 말투 기준은 [docs/voice.md](docs/voice.md)에 있습니다.
 
 ## 구조
 

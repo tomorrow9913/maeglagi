@@ -122,7 +122,7 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
           <div className="flex size-full items-center justify-center p-10 text-center text-sm text-muted-foreground">
             {hidden.length > 0
               ? "선택한 종류의 노드가 없습니다. 필터를 풀어보세요."
-              : "표시할 노드가 없습니다. 회의나 문서를 올리면 관계가 만들어집니다."}
+              : "표시할 노드가 없습니다. 회의나 문서를 올리면 관계가 만들어져요."}
           </div>
         ) : (
           <GraphCanvas

@@ -358,7 +358,7 @@ export const answers: { match: RegExp; text: string; sources: AnswerSource[] }[]
 ];
 
 export const fallbackAnswer = {
-  text: "이 워크스페이스의 소스에서는 질문에 답할 근거를 찾지 못했습니다. 관련 회의나 문서를 먼저 올려주세요.",
+  text: "이 워크스페이스의 소스에서는 답할 근거를 찾지 못했어요. 관련 회의나 문서를 먼저 올려주세요.",
   sources: [] as AnswerSource[],
 };
 
