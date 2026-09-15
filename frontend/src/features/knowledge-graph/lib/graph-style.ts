@@ -45,13 +45,13 @@ export function readGraphPalette(): GraphPalette {
     styles.getPropertyValue(token).trim() || fallback;
 
   return {
-    person: read(tokenByEntity.person, "#3e715f"),
-    project: read(tokenByEntity.project, "#3b6ea5"),
-    decision: read(tokenByEntity.decision, "#c2703f"),
-    task: read(tokenByEntity.task, "#7a5ea8"),
-    event: read(tokenByEntity.event, "#9a8d5a"),
-    edge: read("--border-hex", "#d9ddd8"),
+    person: read(tokenByEntity.person, "#30785d"),
+    project: read(tokenByEntity.project, "#3a6ea7"),
+    decision: read(tokenByEntity.decision, "#a6552d"),
+    task: read(tokenByEntity.task, "#795ea7"),
+    event: read(tokenByEntity.event, "#816b21"),
+    edge: read("--border-hex", "#dedad0"),
     text: read("--foreground-hex", "#1c2b26"),
-    muted: read("--muted-foreground-hex", "#66736e"),
+    muted: read("--muted-foreground-hex", "#5d6b65"),
   };
 }
