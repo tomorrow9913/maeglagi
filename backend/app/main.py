@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +10,18 @@ from app.core.config import get_settings
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # Initialize shared DB, queue, object, vector and graph clients here.
+    settings = get_settings()
+    if settings.database_auto_create:
+        from sqlmodel import SQLModel
+
+        from app.core.database import engine
+        from app.modules.workspaces.infrastructure import models  # noqa: F401
+
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
     yield
+    if settings.database_auto_create:
+        await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -33,4 +43,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "meeting": {
+    "title": "아키텍처 결정 회의",
+    "started_at": "2026-09-12T10:00:00+09:00",
+    "ended_at": null,
+    "source_id": "00000000-0000-4000-8000-000000000004"
+  },
+  "participants": [
+    { "name": "김민수", "email": null },
+    { "name": "이지은", "email": null },
+    { "name": "박현우", "email": null }
+  ],
+  "summary": "캐시 PoC 결과를 근거로 Context 조회에 Redis를 도입하고 재생성 가능한 캐시로만 사용하기로 했다.",
+  "decisions": [
+    {
+      "local_id": "decision-redis-adoption",
+      "title": "Context 조회에 Redis 도입",
+      "summary": "p95 320ms를 달성한 PoC 결과를 근거로 반복되는 Context 조회에 Redis를 도입한다.",
+      "source_refs": [
+        {
+          "source_id": "00000000-0000-4000-8000-000000000004",
+          "chunk_id": null,
+          "timestamp_seconds": null,
+          "quote": "Redis를 도입하는 것으로 결정하겠습니다."
+        }
+      ],
+      "decided_at": "2026-09-12T10:00:00+09:00",
+      "decided_by": ["김민수"],
+      "supersedes_local_id": null
+    }
+  ],
+  "action_items": [
+    {
+      "local_id": "task-context-cache",
+      "title": "Context 조회 캐시 구현",
+      "summary": "Context 조회 캐시와 Context 갱신 시 무효화 로직을 구현한다.",
+      "source_refs": [
+        {
+          "source_id": "00000000-0000-4000-8000-000000000004",
+          "chunk_id": null,
+          "timestamp_seconds": null,
+          "quote": "제가 9월 15일까지 Context 조회 캐시와 갱신 시 무효화 로직을 구현하겠습니다."
+        }
+      ],
+      "assignees": ["이지은"],
+      "due_at": "2026-09-15T23:59:59+09:00",
+      "status": "open"
+    }
+  ],
+  "issues": []
+}
+

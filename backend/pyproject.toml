@@ -7,13 +7,17 @@ dependencies = [
   "fastapi>=0.115,<1",
   "pydantic-settings>=2.7,<3",
   "sqlalchemy[asyncio]>=2.0,<3",
+  "sqlmodel>=0.0.24,<1",
   "asyncpg>=0.30,<1",
+  "pyjwt[crypto]>=2.10,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [dependency-groups]
 dev = [
   "httpx>=0.28,<1",
+  "jsonschema[format]>=4.25,<5",
+  "pyyaml>=6,<7",
   "pytest>=8.3,<9",
   "pytest-asyncio>=0.25,<1",
   "ruff>=0.9,<1",
@@ -34,3 +38,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

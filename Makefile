@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend test lint format infra-up infra-down
+.PHONY: dev backend frontend test lint format infra-up infra-down auth-key
 
 dev:
 	@echo "Run 'make backend' and 'make frontend' in separate terminals."
@@ -26,3 +26,5 @@ infra-up:
 infra-down:
 	docker compose -f infrastructure/docker-compose.yml down
 
+auth-key:
+	@openssl rand -hex 16

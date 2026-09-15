@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maeglagi.local/schemas/meeting-analysis.schema.json",
+  "title": "MeetingAnalysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "meeting", "participants", "summary", "decisions", "action_items", "issues"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "meeting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "started_at", "source_id"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "started_at": { "type": ["string", "null"], "format": "date-time" },
+        "ended_at": { "type": ["string", "null"], "format": "date-time" },
+        "source_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "email"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "email": { "type": ["string", "null"], "format": "email" }
+        }
+      }
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "common.schema.json#/$defs/extractedItem" },
+          {
+            "type": "object",
+            "properties": {
+              "decided_at": { "type": ["string", "null"], "format": "date-time" },
+              "decided_by": { "type": "array", "items": { "type": "string" } },
+              "supersedes_local_id": { "type": ["string", "null"] }
+            },
+            "required": ["decided_at", "decided_by", "supersedes_local_id"]
+          }
+        ]
+      }
+    },
+    "action_items": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "common.schema.json#/$defs/extractedItem" },
+          {
+            "type": "object",
+            "properties": {
+              "assignees": { "type": "array", "items": { "type": "string" } },
+              "due_at": { "type": ["string", "null"], "format": "date-time" },
+              "status": { "enum": ["open", "in_progress", "done", "cancelled"] }
+            },
+            "required": ["assignees", "due_at", "status"]
+          }
+        ]
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "common.schema.json#/$defs/extractedItem" },
+          {
+            "type": "object",
+            "properties": {
+              "status": { "enum": ["open", "resolved", "wont_fix"] },
+              "severity": { "enum": ["low", "medium", "high", "critical", "unknown"] }
+            },
+            "required": ["status", "severity"]
+          }
+        ]
+      }
+    }
+  }
+}
+

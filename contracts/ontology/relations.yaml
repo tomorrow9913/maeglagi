@@ -1,0 +1,48 @@
+version: 1
+additional_relation_types_allowed: false
+relation_types:
+  - name: WORKS_ON
+    from: [Person, Organization]
+    to: [Project]
+  - name: PARTICIPATED_IN
+    from: [Person]
+    to: [Meeting, Event]
+  - name: MENTIONED_IN
+    from: [Person, Project, Organization, Issue, Task, Decision, Event, Technology]
+    to: [Meeting, Document]
+  - name: CREATED
+    from: [Person, Meeting, Document]
+    to: [Document, Issue, Task, Decision, Event]
+  - name: ASSIGNED_TO
+    from: [Task, Issue]
+    to: [Person, Organization]
+  - name: RELATED_TO
+    from: [Person, Project, Organization, Meeting, Document, Issue, Task, Decision, Event, Technology]
+    to: [Person, Project, Organization, Meeting, Document, Issue, Task, Decision, Event, Technology]
+  - name: DECIDED_IN
+    from: [Decision]
+    to: [Meeting, Document]
+  - name: RESULTED_IN
+    from: [Meeting, Document, Issue, Decision, Event]
+    to: [Issue, Task, Decision, Event]
+  - name: BLOCKED_BY
+    from: [Project, Issue, Task]
+    to: [Issue, Task, Decision]
+  - name: DUE_ON
+    from: [Project, Issue, Task]
+    to: [Event]
+
+common_properties:
+  required: [id, type, from_entity_id, to_entity_id, valid_from, source_refs]
+  properties:
+    valid_from: 관계가 유효해진 ISO 8601 시점
+    valid_to: 관계가 종료된 ISO 8601 시점, 현재 유효하면 null
+    confidence: 0 이상 1 이하의 추출 신뢰도
+    source_refs: 관계를 뒷받침하는 원문 근거 위치 목록
+
+temporal_rules:
+  - 동일한 from/type/to 관계는 유효 기간이 겹치지 않는다.
+  - 새 근거가 기존 관계를 명시적으로 종료할 때만 valid_to를 기록한다.
+  - 새 결정이 기존 결정을 명시적으로 대체하면 기존 Decision에 superseded_by를 연결한다.
+  - 단순한 후속 언급이나 의견 변화만으로 기존 결정을 대체 처리하지 않는다.
+

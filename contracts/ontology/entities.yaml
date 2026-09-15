@@ -1,0 +1,44 @@
+version: 1
+additional_entity_types_allowed: false
+entity_types:
+  - name: Person
+    description: 업무에 참여하거나 문서에서 언급된 사람
+    identity_keys: [email, canonical_name]
+  - name: Project
+    description: 목표와 기간을 가진 업무 단위
+    identity_keys: [workspace_id, canonical_name]
+  - name: Organization
+    description: 회사, 팀 또는 외부 협력 조직
+    identity_keys: [workspace_id, canonical_name]
+  - name: Meeting
+    description: 특정 시점에 열린 회의
+    identity_keys: [source_id]
+  - name: Document
+    description: 업로드된 문서 또는 기획서
+    identity_keys: [source_id]
+  - name: Issue
+    description: 해결하거나 추적해야 하는 문제
+    identity_keys: [workspace_id, canonical_name]
+  - name: Task
+    description: 수행 주체나 완료 조건을 가진 실행 항목
+    identity_keys: [source_id, source_local_id]
+  - name: Decision
+    description: 선택지가 확정되거나 기존 방향을 대체한 결정
+    identity_keys: [source_id, source_local_id]
+  - name: Event
+    description: 프로젝트 상태를 변화시킨 시점 기반 사건
+    identity_keys: [source_id, source_local_id]
+  - name: Technology
+    description: 제품, 라이브러리, 플랫폼 또는 기술 요소
+    identity_keys: [canonical_name]
+
+common_properties:
+  required: [id, type, name, source_refs]
+  properties:
+    id: 내부 UUID
+    type: 위 목록의 Entity type
+    name: 사용자에게 표시할 원문 기반 이름
+    canonical_name: 중복 병합에 사용하는 정규화된 이름
+    summary: 근거에서 추출한 짧은 설명
+    source_refs: 원문 근거 위치 목록
+

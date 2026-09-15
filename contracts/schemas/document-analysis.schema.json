@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maeglagi.local/schemas/document-analysis.schema.json",
+  "title": "DocumentAnalysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document", "summary", "projects", "entities", "issues", "tasks", "decisions"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "title", "document_type", "authored_at", "authors"],
+      "properties": {
+        "source_id": { "type": "string", "format": "uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "document_type": { "enum": ["plan", "minutes", "report", "specification", "note", "other"] },
+        "authored_at": { "type": ["string", "null"], "format": "date-time" },
+        "authors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "projects": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/extractedItem" } },
+    "entities": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "common.schema.json#/$defs/extractedItem" },
+          {
+            "type": "object",
+            "properties": {
+              "entity_type": { "enum": ["Person", "Project", "Organization", "Meeting", "Document", "Issue", "Task", "Decision", "Event", "Technology"] }
+            },
+            "required": ["entity_type"]
+          }
+        ]
+      }
+    },
+    "issues": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/extractedItem" } },
+    "tasks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/extractedItem" } },
+    "decisions": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/extractedItem" } }
+  }
+}
+

@@ -4,7 +4,9 @@ const capabilities = [
   ["Knowledge Graph", "사람·프로젝트·업무의 연결을 탐색합니다."],
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const session = await auth();
+
   return (
     <main>
       <section className="hero">
@@ -13,6 +15,30 @@ export default function HomePage() {
         <p className="lead">
           회의와 문서에서 결정, 이슈, 할 일을 연결하고 왜 그런 결정이 나왔는지 근거와 함께 답합니다.
         </p>
+        <div className="auth-actions">
+          {session?.user ? (
+            <>
+              <p>{session.user.name ?? session.user.email}님으로 로그인했습니다.</p>
+              <form
+                action={async () => {
+                  "use server";
+                  await signOut({ redirectTo: "/" });
+                }}
+              >
+                <button type="submit">로그아웃</button>
+              </form>
+            </>
+          ) : (
+            <form
+              action={async () => {
+                "use server";
+                await signIn("zitadel", { redirectTo: "/" });
+              }}
+            >
+              <button type="submit">로그인</button>
+            </form>
+          )}
+        </div>
       </section>
       <section className="cards" aria-label="핵심 기능">
         {capabilities.map(([title, description]) => (
@@ -26,4 +52,5 @@ export default function HomePage() {
     </main>
   );
 }
+import { auth, signIn, signOut } from "@/auth";
 

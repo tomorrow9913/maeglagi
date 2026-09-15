@@ -37,6 +37,53 @@ pnpm dev
 - Swagger UI: http://localhost:8000/docs
 - OpenAPI JSON: http://localhost:8000/openapi.json
 - Health: http://localhost:8000/api/v1/health
+- ZITADEL: http://localhost:8081
+
+## 로컬 인증 설정
+
+인증은 오픈소스 ZITADEL을 로컬 Docker로 실행합니다. 사용자·워크스페이스 데이터는
+애플리케이션 PostgreSQL에 남기고, 외부 인증 주체(`sub`)는 `user_identities` 테이블을
+통해 내부 사용자 UUID에 매핑합니다. 따라서 인증 제공자를 바꾸더라도 도메인 FK는
+변경하지 않아도 됩니다.
+
+1. 환경 파일을 만들고 네 개의 비밀 값을 교체합니다.
+
+   ```bash
+   cp .env.example .env
+   make auth-key # ZITADEL_MASTERKEY용 정확히 32자인 키 출력
+   openssl rand -base64 32 # DB/admin/Auth.js 비밀 값은 각각 새로 생성
+   make infra-up
+   ```
+
+2. `http://localhost:8081`에서 `.env`의 관리자 계정으로 로그인합니다. 최초 인스턴스의
+   로그인 이름에는 보통 `@zitadel.localhost`가 붙습니다(예:
+   `zitadel-admin@zitadel.localhost`).
+
+3. ZITADEL Console에서 프로젝트와 **Web** OIDC 애플리케이션을 만듭니다.
+
+   - 개발 모드: 활성화(로컬 HTTP 허용)
+   - 인증 방식: `POST`(client secret 사용)
+   - Access token type: `JWT`
+   - Redirect URI: `http://localhost:3000/api/auth/callback/zitadel`
+   - Post logout URI: `http://localhost:3000`
+
+4. 발급된 Client ID/Secret을 `.env`의 `AUTH_ZITADEL_ID`와
+   `AUTH_ZITADEL_SECRET`에 넣고 백엔드와 프론트를 실행합니다.
+
+   ```bash
+   make backend
+   make frontend
+   ```
+
+FastAPI의 보호 API는 `Authorization: Bearer <access-token>`을 요구합니다. 현재
+`GET /api/v1/auth/me`가 JWT의 서명·issuer·만료를 검증하고 최초 요청 시 내부 User를
+생성하는 기준 구현입니다. API audience를 ZITADEL에서 토큰에 추가했다면
+`AUTH_AUDIENCE`도 설정해 audience 검증을 활성화하세요.
+
+> `ZITADEL_MASTERKEY`는 첫 초기화 뒤 단순 교체하면 암호화된 데이터에 접근할 수
+> 없습니다. 운영 환경에서는 비밀 저장소에 보관하고 ZITADEL의 공식 마이그레이션
+> 절차로만 변경하세요. 현재 Compose의 HTTP와 자동 테이블 생성은 로컬/해커톤용이며,
+> 외부 공개 전에는 TLS와 Alembic migration으로 전환해야 합니다.
 
 ## 설계 원칙
 
