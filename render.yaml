@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: maeglagi-api
+    runtime: python
+    rootDir: backend
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: maeglagi-web
+    runtime: node
+    buildCommand: corepack pnpm@10.6.0 install --frozen-lockfile && corepack pnpm@10.6.0 --filter @maeglagi/frontend build
+    startCommand: corepack pnpm@10.6.0 --filter @maeglagi/frontend start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_USE_MOCKS
+        value: "false"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false

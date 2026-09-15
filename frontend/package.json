@@ -11,6 +11,8 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.57.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.0",
     "cytoscape": "^3.34.3",
