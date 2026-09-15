@@ -5,24 +5,35 @@ import cytoscape, { type Core, type ElementDefinition, type NodeSingular } from 
 
 import type { KnowledgeGraph } from "@/lib/api";
 
+import { readGraphPalette, relationLabel } from "../lib/graph-style";
+
 /**
  * 노드가 적어도 캔버스를 채우도록 간격을 넓게 잡습니다.
+ *
  * 간격이 좁으면 fit()이 크게 확대하고, 라벨까지 함께 확대돼 서로 겹칩니다.
+ * 라벨은 노드 아래 가운데 정렬이라 가로로 가까운 노드끼리 특히 부딪히므로,
+ * 노드 간 반발력을 라벨 폭(`LABEL_MAX_WIDTH`)보다 넉넉하게 둡니다.
  */
 const LAYOUT = {
   name: "cose" as const,
   animate: false,
-  padding: 48,
-  nodeRepulsion: () => 400_000,
-  idealEdgeLength: () => 150,
-  nodeOverlap: 24,
-  gravity: 60,
+  padding: 56,
+  nodeRepulsion: () => 900_000,
+  idealEdgeLength: () => 210,
+  nodeOverlap: 40,
+  gravity: 45,
 };
 
 /** 라벨이 읽기 어려워지지 않는 선의 초기 확대 배율 */
 const MAX_INITIAL_ZOOM = 1.25;
 
-import { readGraphPalette, relationLabel } from "../lib/graph-style";
+/**
+ * 라벨 한 줄의 최대 폭.
+ *
+ * 좁힐수록 여러 줄로 접혀 가로 폭이 줄고, 옆 노드의 라벨과 부딪힐 확률이
+ * 낮아집니다. 세 어절짜리 항목 이름이 두 줄로 접히는 선입니다.
+ */
+const LABEL_MAX_WIDTH = "82px";
 
 /**
  * Knowledge Graph를 캔버스에 그립니다.
@@ -65,13 +76,20 @@ export function GraphCanvas({
             "font-size": 12,
             "font-weight": 500,
             "text-valign": "bottom",
-            "text-margin-y": 8,
+            "text-margin-y": 10,
             "text-wrap": "wrap",
-            "text-max-width": "110px",
-            "text-background-color": "#ffffff",
-            "text-background-opacity": 0.85,
-            "text-background-padding": "3px",
+            "text-max-width": LABEL_MAX_WIDTH,
+            /*
+             * 라벨 배경을 불투명하게 깔고 테두리를 둡니다. 노드를 끌어다
+             * 겹쳐 놓아도 어느 글자가 어느 라벨인지 구분됩니다.
+             */
+            "text-background-color": palette.surface,
+            "text-background-opacity": 1,
+            "text-background-padding": "4px",
             "text-background-shape": "roundrectangle",
+            "text-border-width": 1,
+            "text-border-color": palette.edge,
+            "text-border-opacity": 1,
             width: (node: NodeSingular) => 26 + Number(node.data("degree") ?? 1) * 5,
             height: (node: NodeSingular) => 26 + Number(node.data("degree") ?? 1) * 5,
             "border-width": 0,
@@ -91,11 +109,17 @@ export function GraphCanvas({
             "arrow-scale": 0.8,
             "curve-style": "bezier",
             label: "data(label)",
-            "font-size": 9,
+            "font-size": 10,
             color: palette.muted,
-            "text-background-color": "#ffffff",
-            "text-background-opacity": 0.75,
-            "text-background-padding": "2px",
+            /*
+             * 선을 따라 눕혀 노드 라벨과 부딪히는 면적을 줄입니다.
+             * 가로로 놓으면 노드 아래 라벨과 같은 방향이라 자주 겹칩니다.
+             */
+            "text-rotation": "autorotate",
+            "text-background-color": palette.surface,
+            "text-background-opacity": 1,
+            "text-background-padding": "3px",
+            "text-background-shape": "roundrectangle",
           },
         },
       ],

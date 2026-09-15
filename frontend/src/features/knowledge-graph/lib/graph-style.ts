@@ -30,7 +30,7 @@ const tokenByEntity: Record<EntityType, string> = {
   event: "--chart-5-hex",
 };
 
-export type GraphPalette = Record<EntityType | "edge" | "text" | "muted", string>;
+export type GraphPalette = Record<EntityType | "edge" | "text" | "muted" | "surface", string>;
 
 /**
  * 디자인 토큰에서 실제 색 값을 읽어옵니다.
@@ -53,5 +53,7 @@ export function readGraphPalette(): GraphPalette {
     edge: read("--border-hex", "#dedad0"),
     text: read("--foreground-hex", "#1c2b26"),
     muted: read("--muted-foreground-hex", "#5d6b65"),
+    // 라벨 배경. 캔버스를 감싼 카드 면과 같은 색이어야 떠 보이지 않습니다.
+    surface: read("--card-hex", "#fffdf9"),
   };
 }
