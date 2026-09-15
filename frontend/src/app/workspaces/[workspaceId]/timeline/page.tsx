@@ -4,8 +4,7 @@ import { use, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { TimelineCard } from "@/features/context-timeline/components/timeline-card";
 import {
   TimelineFilters,
@@ -38,6 +37,7 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
   );
 
   const groups = useMemo(() => groupByDate(data ?? []), [data]);
+  const hasFilter = filters.kinds.length > 0 || filters.sourceKinds.length > 0;
 
   // 대체 관계를 보여주려면 필터에 걸러진 항목의 제목도 필요합니다.
   const titleById = useMemo(
@@ -69,22 +69,18 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
 
       <div className="mt-6">
         {isLoading ? (
-          <div className="space-y-3">
-            {[0, 1, 2].map((key) => (
-              <Skeleton key={key} className="h-32 w-full rounded-xl" />
-            ))}
-          </div>
+          <ListSkeleton count={3} className="h-32" />
         ) : error ? (
-          <div className="rounded-xl border border-border bg-card p-10 text-center">
-            <p className="text-sm">{error.message}</p>
-            <Button variant="outline" size="sm" className="mt-4" onClick={reload}>
-              다시 시도
-            </Button>
-          </div>
+          <ErrorState error={error} onRetry={reload} />
         ) : groups.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-            조건에 맞는 맥락이 없습니다. 필터를 풀거나 소스를 더 올려보세요.
-          </div>
+          <EmptyState
+            title={hasFilter ? "조건에 맞는 맥락이 없습니다" : "아직 쌓인 맥락이 없습니다"}
+            description={
+              hasFilter
+                ? "필터를 풀면 더 많은 항목을 볼 수 있습니다."
+                : "회의나 문서를 올리면 결정과 이벤트가 여기에 쌓입니다."
+            }
+          />
         ) : (
           <ol className="space-y-8">
             {groups.map((group) => (

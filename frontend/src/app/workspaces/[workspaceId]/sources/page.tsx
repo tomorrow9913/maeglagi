@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
+import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RecordingControls } from "@/features/source-ingestion/components/recording-controls";
@@ -133,20 +133,16 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         <h2 className="mb-3 text-sm font-medium">올라온 소스</h2>
 
         {isLoading ? (
-          <Skeleton className="h-40 w-full rounded-xl" />
+          <ListSkeleton count={2} className="h-20" />
         ) : error ? (
-          <div className="rounded-xl border border-border bg-card p-10 text-center">
-            <p className="text-sm">{error.message}</p>
-            <Button variant="outline" size="sm" className="mt-4" onClick={reload}>
-              다시 시도
-            </Button>
-          </div>
+          <ErrorState error={error} onRetry={reload} />
         ) : sources && sources.length > 0 ? (
           <SourceList sources={sources} onOpen={(sourceId) => setViewer({ sourceId })} />
         ) : (
-          <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-            아직 올라온 소스가 없습니다. 문서나 회의 녹음을 올려 맥락을 쌓아보세요.
-          </div>
+          <EmptyState
+            title="아직 올라온 소스가 없습니다"
+            description="위에서 문서를 올리거나 회의를 녹음해 맥락을 쌓아보세요."
+          />
         )}
       </section>
 

@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/common/state-views";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GraphCanvas } from "@/features/knowledge-graph/components/graph-canvas";
 import { NodeDetailSheet } from "@/features/knowledge-graph/components/node-detail-sheet";
@@ -113,15 +113,16 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
         {isLoading ? (
           <Skeleton className="size-full rounded-none" />
         ) : error ? (
-          <div className="flex size-full flex-col items-center justify-center gap-4 p-10 text-center">
-            <p className="text-sm">{error.message}</p>
-            <Button variant="outline" size="sm" onClick={reload}>
-              다시 시도
-            </Button>
-          </div>
+          <ErrorState
+            error={error}
+            onRetry={reload}
+            className="size-full justify-center border-0"
+          />
         ) : graph.nodes.length === 0 ? (
           <div className="flex size-full items-center justify-center p-10 text-center text-sm text-muted-foreground">
-            표시할 노드가 없습니다. 소스를 올리거나 필터를 풀어보세요.
+            {hidden.length > 0
+              ? "선택한 종류의 노드가 없습니다. 필터를 풀어보세요."
+              : "표시할 노드가 없습니다. 회의나 문서를 올리면 관계가 만들어집니다."}
           </div>
         ) : (
           <GraphCanvas

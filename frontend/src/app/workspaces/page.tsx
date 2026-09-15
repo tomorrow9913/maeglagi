@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { CreateWorkspaceDialog } from "@/features/workspace/components/create-workspace-dialog";
 import { useAsync } from "@/hooks/use-async";
 import { api, isMockMode } from "@/lib/api";
@@ -36,20 +35,14 @@ export default function WorkspacesPage() {
       />
 
       {isLoading ? (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[0, 1, 2].map((key) => (
-            <li key={key}>
-              <Skeleton className="h-24 w-full rounded-xl" />
-            </li>
-          ))}
-        </ul>
+        <ListSkeleton count={3} />
       ) : error ? (
-        <div className="rounded-xl border border-border bg-card p-10 text-center">
-          <p className="text-sm">{error.message}</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={reload}>
-            다시 시도
-          </Button>
-        </div>
+        <ErrorState error={error} onRetry={reload} />
+      ) : data && data.length === 0 ? (
+        <EmptyState
+          title="아직 워크스페이스가 없습니다"
+          description="새 워크스페이스를 만들고 회의와 문서를 올려보세요."
+        />
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.map((workspace) => (
