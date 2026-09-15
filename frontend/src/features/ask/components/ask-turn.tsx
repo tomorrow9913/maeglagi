@@ -38,13 +38,13 @@ export function AskTurn({
           ) : isWaiting ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" aria-hidden />
-              근거를 찾는 중…
+              관련 회의와 문서를 찾아보고 있어요
             </p>
           ) : (
             <>
               <AnswerBody text={turn.answer} sources={turn.sources} onOpenSource={onOpenSource} />
               {turn.status === "aborted" ? (
-                <p className="text-xs text-muted-foreground">답변이 중단됐습니다.</p>
+                <p className="text-xs text-muted-foreground">여기서 답변을 멈췄어요.</p>
               ) : null}
             </>
           )}
@@ -69,7 +69,7 @@ export function AskTurn({
               </ul>
             </section>
           ) : turn.status === "done" ? (
-            <p className="text-xs text-muted-foreground">이 답변에는 인용할 근거가 없습니다.</p>
+            <p className="text-xs text-muted-foreground">이 답변에는 인용할 근거가 없어요.</p>
           ) : null}
         </div>
       </div>
