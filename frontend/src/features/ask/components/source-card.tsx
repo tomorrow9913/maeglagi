@@ -1,7 +1,7 @@
 import { FileText, Mic } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { SourceKind } from "@/types/context";
+import type { SourceKind } from "@/lib/api";
 
 export type SourceCardProps = {
   /** 답변에서 [1], [2]로 참조하는 번호 */
@@ -17,8 +17,8 @@ export type SourceCardProps = {
 /**
  * Ask 답변의 근거 카드입니다.
  *
- * 답변 본문의 인용 번호와 1:1로 대응합니다. 원문 뷰어 연결은
- * Day 4 Sources 작업에서 `onOpen`에 붙입니다.
+ * 답변 본문의 인용 번호와 1:1로 대응하며, 누르면 원문의 해당 구간으로
+ * 이동합니다.
  */
 export function SourceCard({ index, kind, title, excerpt, onOpen, className }: SourceCardProps) {
   const Icon = kind === "meeting" ? Mic : FileText;
@@ -38,7 +38,7 @@ export function SourceCard({ index, kind, title, excerpt, onOpen, className }: S
         <span className="flex size-5 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground tabular-nums">
           {index}
         </span>
-        <Icon className="size-4 text-muted-foreground" aria-hidden />
+        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         <span className="truncate text-sm font-medium">{title}</span>
       </div>
       {excerpt ? (
