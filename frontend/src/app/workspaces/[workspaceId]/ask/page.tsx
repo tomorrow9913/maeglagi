@@ -60,7 +60,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
       <div className="flex-1">
         {turns.length === 0 ? (
           <div className="flex flex-col items-center gap-4 py-16 text-center">
-            <MaeglagiAvatar className="size-12" />
+            <MaeglagiAvatar variant="resting" className="size-12" />
             <div className="space-y-1">
               <p className="font-medium">무엇이든 물어보세요</p>
               <p className="text-sm text-muted-foreground">

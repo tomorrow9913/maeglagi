@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
-import { AlertCircle, Inbox } from "lucide-react";
+import { AlertCircle } from "lucide-react";
+
+import { MaeglagiCharacter } from "@/components/brand/maeglagi-character";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,7 +35,7 @@ export function EmptyState({
       )}
     >
       <span className="text-muted-foreground" aria-hidden>
-        {icon ?? <Inbox className="size-5" />}
+        {icon ?? <MaeglagiCharacter variant="resting" className="size-9 text-primary" />}
       </span>
       <div className="space-y-1">
         <p className="text-sm font-medium">{title}</p>
