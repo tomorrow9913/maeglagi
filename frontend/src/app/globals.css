@@ -111,6 +111,20 @@
   --chart-4: oklch(0.542 0.1155 300.02); /* Task     — violet */
   --chart-5: oklch(0.6427 0.0712 95.54); /* Event    — olive */
 
+  /*
+   * 위 chart 색의 hex 표기입니다.
+   * <canvas>에 직접 그리는 라이브러리(그래프 뷰)는 oklch() 문자열을 해석하지
+   * 못해 색을 잃어버립니다. 값을 바꿀 때 두 줄을 함께 고쳐야 합니다.
+   */
+  --chart-1-hex: #3e715f;
+  --chart-2-hex: #3b6ea5;
+  --chart-3-hex: #c2703f;
+  --chart-4-hex: #7a5ea8;
+  --chart-5-hex: #9a8d5a;
+  --border-hex: #d9ddd8;
+  --foreground-hex: #1c2b26;
+  --muted-foreground-hex: #66736e;
+
   /* Sidebar */
   --sidebar: oklch(0.946 0.0124 91.52);
   --sidebar-foreground: oklch(0.2737 0.0223 171.93);

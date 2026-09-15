@@ -59,6 +59,15 @@ src/
 - 메뉴 항목은 `src/lib/navigation.ts`의 `workspaceNavItems` 한 곳에서 관리합니다. 화면을 추가할 때 라우트와 이 배열을 함께 수정합니다.
 - 경로 문자열은 직접 조합하지 말고 `workspacePath(workspaceId, segment)`를 사용합니다.
 
+## 데모 모드
+
+`NEXT_PUBLIC_USE_MOCKS=true`이면 in-memory mock이 붙고, 화면 상단에 데모 배너가 뜹니다. 백엔드 없이도 전 화면을 시연할 수 있습니다.
+
+- `/demo` — 시드 데이터가 들어 있는 워크스페이스의 Timeline으로 바로 진입합니다. 발표 때 목록을 거치지 않으려고 둔 경로입니다.
+- 업로드한 파일과 만든 워크스페이스는 새로고침하면 초기 시드로 돌아갑니다.
+
+실 API가 붙으면 `NEXT_PUBLIC_USE_MOCKS=false`로 바꾸기만 하면 되고, 배너도 자동으로 사라집니다.
+
 ## 배포 (Vercel)
 
 모노레포이므로 Vercel 프로젝트에서 **Root Directory를 `frontend`로 지정**해야 합니다.
