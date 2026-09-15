@@ -193,13 +193,99 @@ export const contextItems: ContextItem[] = [
 
 export const knowledgeGraph: KnowledgeGraph = {
   nodes: [
-    { id: "person-minkyu", type: "person", label: "정민규", degree: 4 },
-    { id: "person-heewon", type: "person", label: "윤희원", degree: 4 },
-    { id: "project-maeglagi", type: "project", label: "맥락이 PoC", degree: 5 },
-    { id: "decision-scope", type: "decision", label: "PoC 범위 한정", degree: 2 },
-    { id: "decision-hybrid", type: "decision", label: "Hybrid retrieval 채택", degree: 3 },
-    { id: "task-byok", type: "task", label: "BYOK 키 암호화", degree: 2 },
-    { id: "event-kickoff", type: "event", label: "9/8 킥오프", degree: 3 },
+    {
+      id: "person-minkyu",
+      type: "person",
+      label: "정민규",
+      degree: 4,
+      sources: [
+        {
+          id: "src-kickoff",
+          kind: "meeting",
+          title: "9/8 제품 킥오프 회의",
+          chunkId: "src-kickoff#1",
+        },
+      ],
+    },
+    {
+      id: "person-heewon",
+      type: "person",
+      label: "윤희원",
+      degree: 4,
+      sources: [
+        {
+          id: "src-tech-review",
+          kind: "meeting",
+          title: "9/11 기술 검토 회의",
+          chunkId: "src-tech-review#2",
+        },
+      ],
+    },
+    {
+      id: "project-maeglagi",
+      type: "project",
+      label: "맥락이 PoC",
+      degree: 5,
+      sources: [
+        { id: "src-prd", kind: "document", title: "맥락이 PRD v0.2.pdf", chunkId: "src-prd#1" },
+      ],
+    },
+    {
+      id: "decision-scope",
+      type: "decision",
+      label: "PoC 범위 한정",
+      degree: 2,
+      sources: [
+        {
+          id: "src-kickoff",
+          kind: "meeting",
+          title: "9/8 제품 킥오프 회의",
+          chunkId: "src-kickoff#1",
+        },
+      ],
+    },
+    {
+      id: "decision-hybrid",
+      type: "decision",
+      label: "Hybrid retrieval 채택",
+      degree: 3,
+      sources: [
+        {
+          id: "src-tech-review",
+          kind: "meeting",
+          title: "9/11 기술 검토 회의",
+          chunkId: "src-tech-review#2",
+        },
+      ],
+    },
+    {
+      id: "task-byok",
+      type: "task",
+      label: "BYOK 키 암호화",
+      degree: 2,
+      sources: [
+        {
+          id: "src-tech-review",
+          kind: "meeting",
+          title: "9/11 기술 검토 회의",
+          chunkId: "src-tech-review#1",
+        },
+      ],
+    },
+    {
+      id: "event-kickoff",
+      type: "event",
+      label: "9/8 킥오프",
+      degree: 3,
+      sources: [
+        {
+          id: "src-kickoff",
+          kind: "meeting",
+          title: "9/8 제품 킥오프 회의",
+          chunkId: "src-kickoff#3",
+        },
+      ],
+    },
   ],
   edges: [
     { id: "e1", source: "person-minkyu", target: "event-kickoff", type: "participates_in" },

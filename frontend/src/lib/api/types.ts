@@ -130,6 +130,8 @@ export type GraphNode = {
   label: string;
   /** 연결 수. 노드 크기를 정할 때 씁니다. */
   degree: number;
+  /** 이 엔티티가 등장한 근거 소스. 상세 패널에서 원문으로 이동합니다. */
+  sources: ContextItemSource[];
 };
 
 export type GraphEdge = {
