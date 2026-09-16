@@ -18,7 +18,13 @@ class ProviderRegistry:
 
 provider_registry = ProviderRegistry(
     [
-        OpenAICompatibleAdapter("openai", "OpenAI", "https://api.openai.com/v1"),
+        OpenAICompatibleAdapter(
+            "openai",
+            "OpenAI",
+            "https://api.openai.com/v1",
+            supports_embedding=True,
+            supports_structured_output=True,
+        ),
         AnthropicAdapter(),
         OpenAICompatibleAdapter("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1"),
     ]
