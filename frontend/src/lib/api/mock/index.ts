@@ -3,6 +3,7 @@ import { MOCK_LATENCY_MS } from "../config";
 import type { MaeglagiApi } from "../contract";
 import type {
   AnswerEvent,
+  AiProvider,
   ApiKeyValidation,
   ContextItem,
   LlmProvider,
@@ -11,6 +12,7 @@ import type {
   Workspace,
   WorkspaceSecrets,
 } from "../types";
+import { BOOTSTRAP_AI_PROVIDERS } from "../providers";
 import {
   answers,
   contextItems,
@@ -61,7 +63,7 @@ const state = {
 };
 
 /** provider별 키 접두사. 실제 서비스의 키 형식과 맞춥니다. */
-const keyPrefix: Record<LlmProvider, string> = {
+const keyPrefix: Record<string, string> = {
   anthropic: "sk-ant-",
   nvidia: "nvapi-",
   openai: "sk-",
@@ -77,10 +79,11 @@ function checkApiKey(provider: LlmProvider, apiKey: string): ApiKeyValidation {
   const key = apiKey.trim();
 
   if (!key) return { valid: false, message: "API key를 입력해 주세요." };
-  if (!key.startsWith(keyPrefix[provider])) {
+  const prefix = keyPrefix[provider];
+  if (prefix && !key.startsWith(prefix)) {
     return {
       valid: false,
-      message: `${provider} 키는 ${keyPrefix[provider]}로 시작해야 합니다.`,
+      message: `${provider} 키는 ${prefix}로 시작해야 합니다.`,
     };
   }
   // anthropic 키도 "sk-"로 시작하므로 provider를 잘못 고른 경우를 따로 잡습니다.
@@ -192,6 +195,28 @@ export const mockApi: MaeglagiApi = {
     // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
     storeKey(workspace.id, input.llmProvider, input.llmApiKey);
     return { ...workspace };
+  },
+
+  async listWorkspaceProviders(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    if (!state.workspaces.some((item) => item.id === workspaceId)) {
+      throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
+    }
+
+    const configuredProvider = state.secrets.get(workspaceId)?.provider;
+    return BOOTSTRAP_AI_PROVIDERS.map<AiProvider>((provider) => ({
+      ...provider,
+      capabilities: [...provider.capabilities],
+      configured: provider.id === configuredProvider,
+      models:
+        provider.id === configuredProvider
+          ? provider.id === "anthropic"
+            ? ["claude-sonnet-4-20250514"]
+            : provider.id === "nvidia"
+              ? ["meta/llama-3.1-70b-instruct"]
+              : ["gpt-4.1-mini"]
+          : [],
+    }));
   },
 
   async validateApiKey(input, signal) {

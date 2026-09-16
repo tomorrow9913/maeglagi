@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { ApiKeyValidation, LlmProvider } from "@/lib/api";
+import { providerKeyPlaceholder } from "@/lib/api/providers";
 import { cn } from "@/lib/utils";
 
 export type ApiKeyFieldProps = {
@@ -86,9 +87,7 @@ export function ApiKeyField({
           disabled={disabled}
           autoComplete="off"
           spellCheck={false}
-          placeholder={
-            provider === "anthropic" ? "sk-ant-..." : provider === "nvidia" ? "nvapi-..." : "sk-..."
-          }
+          placeholder={providerKeyPlaceholder(provider)}
           onChange={(event) => onChange(event.target.value)}
           className="pr-10 font-mono"
           aria-describedby={`${id}-status`}

@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
+import { api, BOOTSTRAP_AI_PROVIDERS, DEFAULT_BOOTSTRAP_PROVIDER } from "@/lib/api";
 import type { LlmProvider, Workspace } from "@/lib/api";
 
 import { ApiKeyField } from "./api-key-field";
@@ -30,14 +30,14 @@ import { ProviderSelect } from "./provider-select";
 export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Workspace) => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
-  const [provider, setProvider] = useState<LlmProvider>("anthropic");
+  const [provider, setProvider] = useState<LlmProvider>(DEFAULT_BOOTSTRAP_PROVIDER);
   const [apiKey, setApiKey] = useState("");
   const [isKeyValid, setIsKeyValid] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const reset = () => {
     setName("");
-    setProvider("anthropic");
+    setProvider(DEFAULT_BOOTSTRAP_PROVIDER);
     setApiKey("");
     setIsKeyValid(false);
   };
@@ -112,6 +112,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
               id="workspace-provider"
               value={provider}
               onChange={setProvider}
+              providers={BOOTSTRAP_AI_PROVIDERS}
               disabled={isSubmitting}
             />
           </div>

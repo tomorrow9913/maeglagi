@@ -7,39 +7,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { LlmProvider } from "@/lib/api";
-
-const providerLabel: Record<LlmProvider, string> = {
-  anthropic: "Anthropic (Claude)",
-  nvidia: "NVIDIA NIM",
-  openai: "OpenAI",
-};
+import type { AiProvider, LlmProvider } from "@/lib/api";
 
 export function ProviderSelect({
   id,
   value,
   onChange,
+  providers,
   disabled = false,
 }: {
   id: string;
   value: LlmProvider;
   onChange: (value: LlmProvider) => void;
+  providers: readonly AiProvider[];
   disabled?: boolean;
 }) {
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as LlmProvider)}>
+    <Select value={value} onValueChange={onChange}>
       <SelectTrigger id={id} disabled={disabled} className="w-full">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {Object.entries(providerLabel).map(([key, label]) => (
-          <SelectItem key={key} value={key}>
-            {label}
+        {providers.map((provider) => (
+          <SelectItem key={provider.id} value={provider.id}>
+            {provider.displayName}
+            {provider.configured ? " (설정됨)" : ""}
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
   );
 }
-
-export { providerLabel };
