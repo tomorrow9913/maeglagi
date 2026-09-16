@@ -17,8 +17,16 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     app_secret_key: SecretStr = SecretStr("local-development-only-secret-key")
     database_url: str = "postgresql+asyncpg://maeglagi:maeglagi@localhost:5432/maeglagi"
+    supabase_url: str = ""
+    supabase_publishable_key: SecretStr = SecretStr("")
+    supabase_storage_bucket: str = "sources"
+    max_upload_bytes: int = 50 * 1024 * 1024
     cors_origins: list[str] = ["http://localhost:3000"]
     llm_provider: str = "mock"
+
+    @property
+    def supabase_enabled(self) -> bool:
+        return bool(self.supabase_url and self.supabase_publishable_key.get_secret_value())
 
 
 @lru_cache

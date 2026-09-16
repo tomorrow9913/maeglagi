@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { MaeglagiWordmark } from "@/components/brand/logo";
 
+import { AuthButton } from "./auth-button";
+
 export function AppHeader() {
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur">
@@ -15,6 +17,7 @@ export function AppHeader() {
         >
           워크스페이스
         </Link>
+        <AuthButton />
       </div>
     </header>
   );

@@ -1,4 +1,12 @@
 import { API_BASE_URL } from "./config";
+import { isSupabaseConfigured } from "../supabase/config";
+import { createClient } from "../supabase/client";
+
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!isSupabaseConfigured) return {};
+  const { data } = await createClient().auth.getSession();
+  return data.session ? { Authorization: `Bearer ${data.session.access_token}` } : {};
+}
 
 /** 서버가 실패를 돌려줬을 때 화면이 구분해서 처리할 수 있는 오류 타입입니다. */
 export class ApiError extends Error {
@@ -38,7 +46,10 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, init);
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: { ...(await authHeaders()), ...init?.headers },
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(0, "서버에 연결하지 못했습니다.", error);
@@ -71,12 +82,13 @@ export type UploadOptions = {
  * fetch에는 업로드 진행률 이벤트가 없어 XMLHttpRequest를 씁니다.
  * Content-Type은 브라우저가 boundary와 함께 붙이므로 직접 지정하지 않습니다.
  */
-export function apiUpload<T>(
+export async function apiUpload<T>(
   path: string,
   body: FormData,
   options: UploadOptions = {},
 ): Promise<T> {
   const { signal, onProgress } = options;
+  const headers = await authHeaders();
 
   return new Promise<T>((resolve, reject) => {
     if (signal?.aborted) {
@@ -87,6 +99,7 @@ export function apiUpload<T>(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE_URL}${path}`);
     xhr.responseType = "json";
+    Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
 
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) onProgress?.(event.loaded / event.total);
