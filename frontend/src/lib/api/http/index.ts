@@ -2,6 +2,7 @@ import { apiFetch, apiStream, apiUpload } from "../client";
 import type { MaeglagiApi } from "../contract";
 import type {
   AnswerEvent,
+  AiProvider,
   ApiKeyValidation,
   ContextItem,
   ContextTimelineQuery,
@@ -40,6 +41,9 @@ export const httpApi: MaeglagiApi = {
       body: JSON.stringify(input),
       signal,
     }),
+
+  listWorkspaceProviders: (workspaceId, signal) =>
+    apiFetch<AiProvider[]>(`/workspaces/${workspaceId}/ai/providers`, { signal }),
 
   validateApiKey: (input, signal) =>
     apiFetch<ApiKeyValidation>("/llm-keys/validate", {

@@ -25,6 +25,39 @@ class ChatResponse(BaseModel):
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class EmbeddingRequest(BaseModel):
+    input: str | list[str]
+    model: str
+    dimensions: int | None = None
+    provider_options: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmbeddingResponse(BaseModel):
+    embeddings: list[list[float]]
+    model: str
+    provider: str
+    usage: dict[str, int] = Field(default_factory=dict)
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredOutputRequest(BaseModel):
+    messages: list[ChatMessage]
+    model: str
+    schema_name: str
+    json_schema: dict[str, Any]
+    temperature: float | None = None
+    max_tokens: int | None = None
+    provider_options: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredOutputResponse(BaseModel):
+    data: Any
+    model: str
+    provider: str
+    usage: dict[str, int] = Field(default_factory=dict)
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderAdapter(Protocol):
     id: str
     display_name: str
@@ -35,5 +68,11 @@ class ProviderAdapter(Protocol):
     async def list_models(self, api_key: str) -> list[str]: ...
 
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse: ...
+
+    async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse: ...
+
+    async def structured_output(
+        self, request: StructuredOutputRequest, api_key: str
+    ) -> StructuredOutputResponse: ...
 
     def stream(self, request: ChatRequest, api_key: str) -> AsyncIterator[str]: ...

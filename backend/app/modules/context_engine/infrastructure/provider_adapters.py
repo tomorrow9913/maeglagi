@@ -1,22 +1,49 @@
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
-from app.modules.context_engine.application.provider import ChatRequest, ChatResponse
+from app.modules.context_engine.application.provider import (
+    ChatRequest,
+    ChatResponse,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    StructuredOutputRequest,
+    StructuredOutputResponse,
+)
 
 
 class ProviderError(RuntimeError):
     pass
 
 
-class OpenAICompatibleAdapter:
-    capabilities = ("chat", "models")
+class ProviderCapabilityError(ProviderError):
+    pass
 
-    def __init__(self, provider_id: str, display_name: str, base_url: str) -> None:
+
+class OpenAICompatibleAdapter:
+    def __init__(
+        self,
+        provider_id: str,
+        display_name: str,
+        base_url: str,
+        *,
+        supports_embedding: bool = False,
+        supports_structured_output: bool = False,
+    ) -> None:
         self.id = provider_id
         self.display_name = display_name
         self.base_url = base_url.rstrip("/")
+        self._supports_embedding = supports_embedding
+        self._supports_structured_output = supports_structured_output
+        capabilities = ["chat"]
+        if supports_embedding:
+            capabilities.append("embedding")
+        if supports_structured_output:
+            capabilities.append("structuredOutput")
+        capabilities.append("models")
+        self.capabilities = tuple(capabilities)
 
     def _headers(self, api_key: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -74,6 +101,82 @@ class OpenAICompatibleAdapter:
         usage = {key: int(value) for key, value in body.get("usage", {}).items()}
         return ChatResponse(
             text=text,
+            model=body.get("model", request.model),
+            provider=self.id,
+            usage=usage,
+            provider_metadata={"request_id": response.headers.get("x-request-id")},
+        )
+
+    async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse:
+        if not self._supports_embedding:
+            raise ProviderCapabilityError(f"{self.display_name}은 embedding을 지원하지 않습니다.")
+        payload: dict[str, Any] = {
+            **request.provider_options,
+            "model": request.model,
+            "input": request.input,
+        }
+        if request.dimensions is not None:
+            payload["dimensions"] = request.dimensions
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/embeddings",
+                headers=self._headers(api_key),
+                json=payload,
+            )
+        if not response.is_success:
+            raise ProviderError(f"임베딩 요청에 실패했습니다 ({response.status_code}).")
+        body = response.json()
+        items = sorted(body.get("data", []), key=lambda item: item.get("index", 0))
+        usage = {key: int(value) for key, value in body.get("usage", {}).items()}
+        return EmbeddingResponse(
+            embeddings=[item["embedding"] for item in items],
+            model=body.get("model", request.model),
+            provider=self.id,
+            usage=usage,
+            provider_metadata={"request_id": response.headers.get("x-request-id")},
+        )
+
+    async def structured_output(
+        self, request: StructuredOutputRequest, api_key: str
+    ) -> StructuredOutputResponse:
+        if not self._supports_structured_output:
+            raise ProviderCapabilityError(
+                f"{self.display_name}은 structuredOutput을 지원하지 않습니다."
+            )
+        payload: dict[str, Any] = {
+            **request.provider_options,
+            "model": request.model,
+            "messages": [message.model_dump() for message in request.messages],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": request.schema_name,
+                    "strict": True,
+                    "schema": request.json_schema,
+                },
+            },
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.max_tokens is not None:
+            payload["max_tokens"] = request.max_tokens
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(api_key),
+                json=payload,
+            )
+        if not response.is_success:
+            raise ProviderError(f"구조화 출력 요청에 실패했습니다 ({response.status_code}).")
+        body = response.json()
+        content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        try:
+            data = json.loads(content)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ProviderError("Provider가 유효한 JSON 응답을 반환하지 않았습니다.") from exc
+        usage = {key: int(value) for key, value in body.get("usage", {}).items()}
+        return StructuredOutputResponse(
+            data=data,
             model=body.get("model", request.model),
             provider=self.id,
             usage=usage,
@@ -144,6 +247,14 @@ class AnthropicAdapter:
         return ChatResponse(
             text=text, model=body.get("model", request.model), provider=self.id, usage=usage
         )
+
+    async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse:
+        raise ProviderCapabilityError("Anthropic은 embedding을 지원하지 않습니다.")
+
+    async def structured_output(
+        self, request: StructuredOutputRequest, api_key: str
+    ) -> StructuredOutputResponse:
+        raise ProviderCapabilityError("Anthropic structuredOutput은 아직 구현되지 않았습니다.")
 
     async def stream(self, request: ChatRequest, api_key: str) -> AsyncIterator[str]:
         raise NotImplementedError("Streaming adapter는 후속 단계에서 구현합니다.")

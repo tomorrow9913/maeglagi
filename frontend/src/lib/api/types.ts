@@ -24,7 +24,17 @@ export type Workspace = {
   sourceCount: number;
 };
 
-export type LlmProvider = "anthropic" | "nvidia" | "openai";
+/** 백엔드 provider registry가 소유하는 동적 provider 식별자입니다. */
+export type LlmProvider = string;
+
+/** workspace에서 사용할 수 있는 AI provider catalog 항목입니다. */
+export type AiProvider = {
+  id: LlmProvider;
+  displayName: string;
+  capabilities: string[];
+  configured: boolean;
+  models: string[];
+};
 
 export type CreateWorkspaceInput = {
   name: string;

@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_publishable_key: SecretStr = SecretStr("")
     supabase_storage_bucket: str = "sources"
+    neo4j_uri: str = ""
+    neo4j_username: str = ""
+    neo4j_password: SecretStr = SecretStr("")
     max_upload_bytes: int = 50 * 1024 * 1024
     cors_origins: list[str] = ["http://localhost:3000"]
     llm_provider: str = "mock"
@@ -32,6 +35,12 @@ class Settings(BaseSettings):
     @property
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_publishable_key.get_secret_value())
+
+    @property
+    def neo4j_enabled(self) -> bool:
+        return bool(
+            self.neo4j_uri and self.neo4j_username and self.neo4j_password.get_secret_value()
+        )
 
 
 @lru_cache

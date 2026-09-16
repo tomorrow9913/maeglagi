@@ -18,5 +18,6 @@ export const isMockMode = USE_MOCKS;
 export { DEMO_WORKSPACE_ID } from "./mock/fixtures";
 
 export { ApiError } from "./client";
+export { BOOTSTRAP_AI_PROVIDERS, DEFAULT_BOOTSTRAP_PROVIDER } from "./providers";
 export type { MaeglagiApi } from "./contract";
 export * from "./types";

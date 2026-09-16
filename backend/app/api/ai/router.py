@@ -5,11 +5,24 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.ai.schemas import ProviderCatalogItem, ProviderChatRequest
+from app.api.ai.schemas import (
+    ProviderCatalogItem,
+    ProviderChatRequest,
+    ProviderEmbeddingRequest,
+    ProviderStructuredOutputRequest,
+)
 from app.auth import CurrentUser
 from app.core.credentials import decrypt_credential
 from app.core.database import get_session
-from app.modules.context_engine.application.provider import ChatRequest, ChatResponse
+from app.modules.context_engine.application.provider import (
+    ChatRequest,
+    ChatResponse,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    ProviderAdapter,
+    StructuredOutputRequest,
+    StructuredOutputResponse,
+)
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
@@ -32,6 +45,39 @@ async def _workspace_credentials(
         )
     )
     return list(result.all())
+
+
+def _provider_with_credential(
+    provider_id: str,
+    capability: str,
+    credential_label: str | None,
+    credentials: list[ProviderCredential],
+) -> tuple[ProviderAdapter, str]:
+    adapter = provider_registry.get(provider_id)
+    if adapter is None or capability not in adapter.capabilities:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"{capability}을 지원하지 않는 provider입니다.",
+        )
+    credential = next(
+        (
+            item
+            for item in credentials
+            if item.provider == provider_id
+            and (credential_label is None or item.label == credential_label)
+            and (credential_label is not None or item.is_default)
+        ),
+        None,
+    )
+    if credential is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "사용 가능한 API key가 없습니다.")
+    try:
+        api_key = decrypt_credential(credential.encrypted_secret)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "저장된 API key를 사용할 수 없습니다."
+        ) from exc
+    return adapter, api_key
 
 
 @router.get("/providers", response_model=list[ProviderCatalogItem])
@@ -66,21 +112,9 @@ async def chat(
     workspace_id: UUID, body: ProviderChatRequest, user: CurrentUser, session: Session
 ) -> ChatResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
-    adapter = provider_registry.get(body.provider)
-    if adapter is None or "chat" not in adapter.capabilities:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "지원하지 않는 provider입니다.")
-    credential = next(
-        (
-            item
-            for item in credentials
-            if item.provider == body.provider
-            and (body.credential_label is None or item.label == body.credential_label)
-            and (body.credential_label is not None or item.is_default)
-        ),
-        None,
+    adapter, api_key = _provider_with_credential(
+        body.provider, "chat", body.credential_label, credentials
     )
-    if credential is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "사용 가능한 API key가 없습니다.")
     request = ChatRequest(
         messages=body.messages,
         model=body.model,
@@ -89,6 +123,52 @@ async def chat(
         provider_options=body.provider_options,
     )
     try:
-        return await adapter.chat(request, decrypt_credential(credential.encrypted_secret))
+        return await adapter.chat(request, api_key)
+    except ProviderError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+
+@router.post("/embeddings", response_model=EmbeddingResponse)
+async def embedding(
+    workspace_id: UUID, body: ProviderEmbeddingRequest, user: CurrentUser, session: Session
+) -> EmbeddingResponse:
+    credentials = await _workspace_credentials(workspace_id, user, session)
+    adapter, api_key = _provider_with_credential(
+        body.provider, "embedding", body.credential_label, credentials
+    )
+    request = EmbeddingRequest(
+        input=body.input,
+        model=body.model,
+        dimensions=body.dimensions,
+        provider_options=body.provider_options,
+    )
+    try:
+        return await adapter.embedding(request, api_key)
+    except ProviderError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+
+@router.post("/structured-output", response_model=StructuredOutputResponse)
+async def structured_output(
+    workspace_id: UUID,
+    body: ProviderStructuredOutputRequest,
+    user: CurrentUser,
+    session: Session,
+) -> StructuredOutputResponse:
+    credentials = await _workspace_credentials(workspace_id, user, session)
+    adapter, api_key = _provider_with_credential(
+        body.provider, "structuredOutput", body.credential_label, credentials
+    )
+    request = StructuredOutputRequest(
+        messages=body.messages,
+        model=body.model,
+        schema_name=body.schema_name,
+        json_schema=body.json_schema,
+        temperature=body.temperature,
+        max_tokens=body.max_tokens,
+        provider_options=body.provider_options,
+    )
+    try:
+        return await adapter.structured_output(request, api_key)
     except ProviderError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc

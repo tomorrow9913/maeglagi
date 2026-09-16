@@ -1,3 +1,5 @@
+import importlib
+
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -13,6 +15,51 @@ def test_health() -> None:
         "service": "Maeglagi API",
         "version": "0.1.0",
     }
+
+
+def test_readiness_reports_all_storage_roles(monkeypatch) -> None:
+    async def healthy_stores():
+        return {
+            "objectStorage": "ok",
+            "postgresql": "ok",
+            "vector": "ok",
+            "graph": "ok",
+        }
+
+    router_module = importlib.import_module("app.api.system.router")
+    monkeypatch.setattr(router_module, "check_storage_health", healthy_stores)
+
+    response = TestClient(app).get("/api/v1/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "checks": {
+            "objectStorage": "ok",
+            "postgresql": "ok",
+            "vector": "ok",
+            "graph": "ok",
+        },
+    }
+
+
+def test_readiness_is_unavailable_when_a_store_fails(monkeypatch) -> None:
+    async def degraded_stores():
+        return {
+            "objectStorage": "error",
+            "postgresql": "ok",
+            "vector": "ok",
+            "graph": "ok",
+        }
+
+    router_module = importlib.import_module("app.api.system.router")
+    monkeypatch.setattr(router_module, "check_storage_health", degraded_stores)
+
+    response = TestClient(app).get("/api/v1/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+    assert response.json()["checks"]["objectStorage"] == "error"
 
 
 def test_api_documentation_is_disabled_in_production() -> None:
