@@ -36,7 +36,9 @@ app/
 │   └── ai/{router,schemas}.py
 ├── auth/{dependencies,models}.py
 ├── decorators/authorization.py
-├── middleware/{cors,registry}.py
+├── middleware/
+│   ├── http/{rate_limit,request_logging}.py
+│   └── setup.py
 └── modules/context_engine/...
 ```
 
