@@ -11,6 +11,7 @@ import type { LlmProvider } from "@/lib/api";
 
 const providerLabel: Record<LlmProvider, string> = {
   anthropic: "Anthropic (Claude)",
+  nvidia: "NVIDIA NIM",
   openai: "OpenAI",
 };
 

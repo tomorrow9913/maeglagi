@@ -62,17 +62,19 @@ Render 웹 주소를, Redirect URLs에는 `<웹 주소>/auth/callback`을 등록
 
 ## BYOK provider credential
 
-워크스페이스는 OpenAI·Anthropic 등 provider별 키를 여러 개 보관할 수 있습니다.
+워크스페이스는 OpenAI·Anthropic·NVIDIA NIM 등 provider별 키를 여러 개 보관할 수 있습니다.
 각 credential은 `(workspace, provider, label)`로 구분하고 하나를 기본 키로 지정합니다.
 기존 프론트의 단일 키 UI는 기본 credential을 읽고 교체하는 호환 API를 사용합니다.
 
 - `POST /api/v1/llm-keys/validate` — provider에 실제 요청을 보내 키 검증
 - `GET /api/v1/workspaces/{id}/provider-credentials` — 등록된 키 메타데이터 목록
 - `GET|PUT /api/v1/workspaces/{id}/llm-key` — 기존 프론트용 기본 키 호환 API
+- `GET /api/v1/workspaces/{id}/ai/providers` — 구현된 provider, capability, 사용 가능한 모델 목록
+- `POST /api/v1/workspaces/{id}/ai/chat` — 공통 요청을 provider adapter로 위임
 
 키 원문은 API 응답이나 로그로 반환하지 않고 `APP_SECRET_KEY`로 암호화해 저장합니다.
 provider 호출은 공통 adapter 계약으로 정규화하되 provider 고유 옵션과 응답 메타데이터는
-확장 필드에 보존합니다.
+확장 필드에 보존합니다. 새 provider는 registry에 adapter를 등록해야만 API 목록에 노출됩니다.
 
 ## 설계 원칙
 
