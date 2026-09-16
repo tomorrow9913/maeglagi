@@ -14,7 +14,7 @@ export const DEMO_WORKSPACE_ID = "demo";
 export const workspaces: Workspace[] = [
   {
     id: DEMO_WORKSPACE_ID,
-    name: "데모 워크스페이스",
+    name: "맥락이 PoC",
     createdAt: "2026-09-08T09:00:00Z",
     sourceCount: 3,
   },
@@ -337,6 +337,21 @@ export const answers: { match: RegExp; text: string; sources: AnswerSource[] }[]
         title: "9/8 제품 킥오프 회의",
         excerpt:
           "PoC 범위는 회의 녹음과 문서 업로드 두 갈래로 갑니다. 슬랙 연동은 이번 범위에서 뺍니다.",
+      },
+    ],
+  },
+  {
+    match: /저장소|postgres|pgvector|neo4j|minio/i,
+    text: "저장소는 PostgreSQL, MinIO, pgvector, Neo4j 네 가지로 확정했습니다[1]. 원문·메타데이터·임베딩·그래프를 각 저장소가 나눠 맡고, Day 1에 먼저 세워두기로 했습니다[1].",
+    sources: [
+      {
+        index: 1,
+        sourceId: "src-kickoff",
+        chunkId: "src-kickoff#3",
+        kind: "meeting",
+        title: "9/8 제품 킥오프 회의",
+        excerpt:
+          "저장소는 PostgreSQL, MinIO, pgvector, Neo4j 네 가지로 확정합니다. 이건 Day 1에 세워둡니다.",
       },
     ],
   },

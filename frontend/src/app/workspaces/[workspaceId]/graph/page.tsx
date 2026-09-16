@@ -70,10 +70,7 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
 
   return (
     <>
-      <PageHeader
-        title="Knowledge Graph"
-        description="사람·프로젝트·업무의 연결을 그래프로 탐색합니다. 노드를 누르면 상세가 열립니다."
-      />
+      <PageHeader title="Graph" description="사람·프로젝트·업무의 연결을 그래프로 탐색합니다." />
 
       <div className="flex flex-wrap items-center gap-1.5">
         {entityTypes.map((type) => {
@@ -132,10 +129,6 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
           />
         )}
       </div>
-
-      <p className="mt-2 text-xs text-muted-foreground">
-        휠로 확대·축소, 드래그로 이동합니다. 노드를 끌어 위치를 바꿀 수 있습니다.
-      </p>
 
       <NodeDetailSheet
         graph={graph}

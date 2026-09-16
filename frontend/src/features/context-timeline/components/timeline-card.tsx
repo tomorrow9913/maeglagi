@@ -2,17 +2,12 @@
 
 import { ArrowRight, FileText, Mic } from "lucide-react";
 
-import { StatusBadge, type StatusTone } from "@/components/common/status-badge";
+import { StatusBadge } from "@/components/common/status-badge";
 import type { ContextItem, ContextItemSource } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { contextKindLabel, type ContextKind } from "@/types/context";
+import { contextKindLabel } from "@/types/context";
 
-const kindTone: Record<ContextKind, StatusTone> = {
-  decision: "success",
-  issue: "danger",
-  task: "info",
-  event: "neutral",
-};
+import { kindTone } from "../lib/kind-style";
 
 function formatTime(iso: string): string {
   return iso.slice(11, 16);
@@ -39,11 +34,14 @@ export function TimelineCard({
   className?: string;
 }) {
   const isSuperseded = Boolean(item.supersededBy);
+  // 유효한 결정은 타임라인에서 가장 먼저 눈에 들어와야 하는 항목입니다.
+  const isActiveDecision = item.kind === "decision" && !isSuperseded;
 
   return (
     <article
       className={cn(
         "rounded-xl border border-border bg-card p-4",
+        isActiveDecision && "border-success/35 shadow-xs",
         isSuperseded && "opacity-75",
         className,
       )}
@@ -59,7 +57,15 @@ export function TimelineCard({
         </time>
       </div>
 
-      <h3 className={cn("mt-3 font-medium", isSuperseded && "line-through")}>{item.title}</h3>
+      <h3
+        className={cn(
+          "mt-3 font-medium",
+          isActiveDecision && "font-semibold",
+          isSuperseded && "line-through",
+        )}
+      >
+        {item.title}
+      </h3>
       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{item.summary}</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
