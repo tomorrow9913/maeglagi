@@ -60,6 +60,20 @@ Supabase Auth 세션을 쿠키로 유지하고, FastAPI는 전달받은 access t
 `postgresql+asyncpg://` 스킴으로 바꿔 사용합니다. Supabase Auth의 Site URL에는
 Render 웹 주소를, Redirect URLs에는 `<웹 주소>/auth/callback`을 등록합니다.
 
+## BYOK provider credential
+
+워크스페이스는 OpenAI·Anthropic 등 provider별 키를 여러 개 보관할 수 있습니다.
+각 credential은 `(workspace, provider, label)`로 구분하고 하나를 기본 키로 지정합니다.
+기존 프론트의 단일 키 UI는 기본 credential을 읽고 교체하는 호환 API를 사용합니다.
+
+- `POST /api/v1/llm-keys/validate` — provider에 실제 요청을 보내 키 검증
+- `GET /api/v1/workspaces/{id}/provider-credentials` — 등록된 키 메타데이터 목록
+- `GET|PUT /api/v1/workspaces/{id}/llm-key` — 기존 프론트용 기본 키 호환 API
+
+키 원문은 API 응답이나 로그로 반환하지 않고 `APP_SECRET_KEY`로 암호화해 저장합니다.
+provider 호출은 공통 adapter 계약으로 정규화하되 provider 고유 옵션과 응답 메타데이터는
+확장 필드에 보존합니다.
+
 ## 설계 원칙
 
 - 원문, 관계형 메타데이터, 임베딩, 그래프를 각각 Object Storage, PostgreSQL, Vector Store, Graph DB에 저장합니다.

@@ -28,6 +28,9 @@ export type LlmProvider = "anthropic" | "openai";
 
 export type CreateWorkspaceInput = {
   name: string;
+  /** BYOK. 서버는 암호화해 저장하고 어떤 응답으로도 다시 내려주지 않습니다. */
+  llmApiKey: string;
+  llmProvider: LlmProvider;
 };
 
 /** 키 유효성 검증 결과. 실제 호출로 확인하므로 형식만 맞아도 실패할 수 있습니다. */

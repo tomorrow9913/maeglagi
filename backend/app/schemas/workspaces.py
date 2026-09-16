@@ -5,7 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateWorkspaceRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = Field(min_length=1, max_length=120)
+    llm_provider: str = Field(validation_alias="llmProvider")
+    llm_api_key: str = Field(min_length=1, validation_alias="llmApiKey")
 
 
 class WorkspaceResponse(BaseModel):

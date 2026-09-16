@@ -20,12 +20,32 @@ create table if not exists public.sources (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.provider_credentials (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  provider varchar(40) not null,
+  label varchar(80) not null default '기본',
+  encrypted_secret text not null,
+  key_hint varchar(8) not null,
+  status varchar(20) not null default 'active',
+  is_default boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint uq_provider_credential_label unique (workspace_id, provider, label)
+);
+
 create index if not exists workspaces_owner_id_idx on public.workspaces(owner_id);
 create index if not exists sources_workspace_id_idx on public.sources(workspace_id);
 create index if not exists sources_owner_id_idx on public.sources(owner_id);
+create index if not exists provider_credentials_workspace_id_idx
+  on public.provider_credentials(workspace_id);
+create unique index if not exists provider_credentials_one_default_idx
+  on public.provider_credentials(workspace_id) where is_default;
 
 alter table public.workspaces enable row level security;
 alter table public.sources enable row level security;
+alter table public.provider_credentials enable row level security;
 
 create policy "owners manage workspaces" on public.workspaces
   for all to authenticated

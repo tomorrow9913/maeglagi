@@ -1,10 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { isSupabaseConfigured, supabaseConfig } from "./config";
+import { isMockMode, isSupabaseConfigured, supabaseConfig } from "./config";
 
 export async function updateSession(request: NextRequest) {
-  if (!isSupabaseConfigured) return NextResponse.next({ request });
+  if (isMockMode || !isSupabaseConfigured) return NextResponse.next({ request });
 
   let response = NextResponse.next({ request });
   const { url, key } = supabaseConfig();

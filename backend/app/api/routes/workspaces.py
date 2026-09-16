@@ -11,8 +11,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.auth import CurrentUser, bearer
 from app.core.config import get_settings
+from app.core.credentials import encrypt_credential
 from app.core.database import get_session
-from app.modules.workspaces.infrastructure.models import Source, Workspace
+from app.modules.context_engine.infrastructure.credential_validation import (
+    validate_provider_credential,
+)
+from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 from app.schemas.sources import SourceResponse
 from app.schemas.workspaces import CreateWorkspaceRequest, WorkspaceResponse
 
@@ -46,8 +50,22 @@ async def list_workspaces(user: CurrentUser, session: Session) -> list[Workspace
 async def create_workspace(
     body: CreateWorkspaceRequest, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
+    valid, message = await validate_provider_credential(body.llm_provider, body.llm_api_key)
+    if not valid:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
+
     workspace = Workspace(owner_id=user.id, name=body.name.strip())
     session.add(workspace)
+    session.add(
+        ProviderCredential(
+            workspace_id=workspace.id,
+            owner_id=user.id,
+            provider=body.llm_provider,
+            encrypted_secret=encrypt_credential(body.llm_api_key),
+            key_hint=body.llm_api_key[-4:],
+            is_default=True,
+        )
+    )
     await session.commit()
     await session.refresh(workspace)
     return _response(workspace)

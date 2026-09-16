@@ -175,6 +175,10 @@ export const mockApi: MaeglagiApi = {
   async createWorkspace(input, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!input.name.trim()) throw new ApiError(422, "워크스페이스 이름을 입력해 주세요.");
+    if (!input.llmApiKey.trim()) throw new ApiError(422, "API key를 입력해 주세요.");
+
+    const check = checkApiKey(input.llmProvider, input.llmApiKey);
+    if (!check.valid) throw new ApiError(422, check.message);
 
     const workspace: Workspace = {
       id: nextId("ws"),
@@ -184,6 +188,8 @@ export const mockApi: MaeglagiApi = {
     };
     state.workspaces.push(workspace);
 
+    // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
+    storeKey(workspace.id, input.llmProvider, input.llmApiKey);
     return { ...workspace };
   },
 

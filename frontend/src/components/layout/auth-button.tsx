@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isMockMode, isSupabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/client";
 
 export function AuthButton() {
   const router = useRouter();
-  if (!isSupabaseConfigured) return null;
+  if (isMockMode || !isSupabaseConfigured) return null;
 
   return (
     <button
