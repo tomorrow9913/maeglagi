@@ -59,11 +59,16 @@ app/
 
 | 데이터 | 저장소 | 원칙 |
 |---|---|---|
-| User, Workspace, Source, Context, Job metadata | PostgreSQL | 트랜잭션 기준 원장 |
-| 원본 문서와 오디오 | S3/MinIO | 불변 원본 |
-| chunk와 embedding | PostgreSQL + pgvector | 의미 검색 |
-| Entity와 Relation | Neo4j | 원문은 저장하지 않고 source/chunk reference만 유지 |
-| 단기 job 상태/queue | Redis | 재생성 가능한 임시 상태 |
+| 원본 문서와 오디오 | Supabase Object Storage | private `sources` bucket의 불변 원본 |
+| User, Workspace, Source, Context, Job metadata | Supabase PostgreSQL | 트랜잭션 기준 원장 |
+| chunk와 embedding | Supabase PostgreSQL + pgvector | 의미 검색 |
+| Entity와 Relation | Supabase PostgreSQL graph projection | 원문 없이 source/chunk reference만 유지 |
+| 단기 job 상태/queue | PostgreSQL (PoC) | 분리 필요 시 Redis로 교체 |
+
+PoC에서는 네 저장소 역할을 Supabase 프로젝트 하나로 통합합니다. 별도 MinIO,
+Neo4j, Vector DB 컨테이너를 운영하지 않으며 Render에는 FastAPI만 배포합니다.
+`/api/v1/health`는 프로세스 liveness, `/api/v1/ready`는 Object Storage,
+PostgreSQL, pgvector, graph projection의 준비 상태를 확인합니다.
 
 ## API versioning
 
