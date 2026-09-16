@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.http import RateLimitMiddleware
 
 
 def test_request_id_is_preserved_in_response() -> None:
