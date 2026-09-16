@@ -1,0 +1,71 @@
+name: Deploy · Vercel
+
+# Vercel GitHub App을 설치하지 못하는 동안의 자동 배포 경로입니다.
+# App을 설치해 저장소를 연결하면 이 워크플로는 지우고 Vercel에 맡기면 됩니다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/deploy-vercel.yml"
+  workflow_dispatch:
+
+# 배포는 겹치면 안 되므로 이전 실행을 취소하지 않고 줄을 세웁니다.
+concurrency:
+  group: deploy-vercel
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # CLI 버전을 고정합니다. Vercel CLI는 동작이 자주 바뀝니다.
+      - name: Install Vercel CLI
+        run: npm install --global vercel@59.18.0
+
+      # 프로젝트 설정과 Production 환경변수를 내려받습니다.
+      # 환경변수는 Vercel 프로젝트에 등록된 값을 쓰므로 GitHub에 중복으로 두지 않습니다.
+      - name: Pull Vercel settings
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        id: deploy
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "배포 완료: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # 배포본이 실제로 응답하는지 확인합니다. 빌드 성공과 서비스 정상은 다릅니다.
+      - name: Smoke test
+        run: |
+          for path in / /demo /design.html; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L "${{ steps.deploy.outputs.url }}$path")
+            echo "$path -> $code"
+            [ "$code" = "200" ] || exit 1
+          done
