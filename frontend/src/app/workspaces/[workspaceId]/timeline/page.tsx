@@ -11,10 +11,12 @@ import {
   type TimelineFilterState,
 } from "@/features/context-timeline/components/timeline-filters";
 import { groupByDate } from "@/features/context-timeline/lib/group-by-date";
+import { kindDotClass } from "@/features/context-timeline/lib/kind-style";
 import { useAsync } from "@/hooks/use-async";
 import { api } from "@/lib/api";
 import type { ContextItemSource } from "@/lib/api";
 import { workspacePath } from "@/lib/navigation";
+import { cn } from "@/lib/utils";
 
 export default function TimelinePage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -93,7 +95,10 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
                     <li key={item.id} id={item.id} className="relative">
                       <span
                         aria-hidden
-                        className="absolute top-5 -left-[21px] size-2 rounded-full bg-border ring-4 ring-background"
+                        className={cn(
+                          "absolute top-5 -left-5 size-2 rounded-full ring-4 ring-background",
+                          item.supersededBy ? "bg-border" : kindDotClass[item.kind],
+                        )}
                       />
                       <TimelineCard
                         item={item}

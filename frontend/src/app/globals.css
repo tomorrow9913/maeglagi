@@ -131,6 +131,7 @@
   --chart-3-hex: #a6552d;
   --chart-4-hex: #795ea7;
   --chart-5-hex: #816b21;
+  --card-hex: #fffdf9;
   --border-hex: #dedad0;
   --foreground-hex: #1c2b26;
   --muted-foreground-hex: #5d6b65;
@@ -157,5 +158,7 @@
   }
   html {
     @apply font-sans;
+    /* 화면마다 스크롤바 유무가 달라 본문이 좌우로 흔들리지 않도록 자리를 고정합니다. */
+    scrollbar-gutter: stable;
   }
 }

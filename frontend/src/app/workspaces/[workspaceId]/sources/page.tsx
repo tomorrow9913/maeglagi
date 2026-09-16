@@ -130,7 +130,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
       <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} className="mt-4" />
 
       <section className="mt-10">
-        <h2 className="mb-3 text-sm font-medium">올라온 소스</h2>
+        <h2 className="mb-3 text-lg font-semibold">올라온 소스</h2>
 
         {isLoading ? (
           <ListSkeleton count={2} className="h-20" />

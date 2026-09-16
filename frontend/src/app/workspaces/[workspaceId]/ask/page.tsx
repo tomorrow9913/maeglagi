@@ -13,6 +13,7 @@ import { exampleQuestions } from "@/features/ask/lib/example-questions";
 import { useAsk } from "@/features/ask/hooks/use-ask";
 import type { AnswerSource } from "@/lib/api";
 import { workspacePath } from "@/lib/navigation";
+import { cn } from "@/lib/utils";
 
 export default function AskPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -57,9 +58,10 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
         }
       />
 
-      <div className="flex-1">
+      {/* 대화가 없을 때는 안내를 입력창과 헤더 사이 가운데에 둬 빈 화면이 한쪽으로 쏠리지 않게 합니다. */}
+      <div className={cn("flex-1", turns.length === 0 && "flex flex-col justify-center")}>
         {turns.length === 0 ? (
-          <div className="flex flex-col items-center gap-4 py-16 text-center">
+          <div className="flex flex-col items-center gap-4 pb-16 text-center">
             <MaeglagiAvatar variant="resting" className="size-12" />
             <div className="space-y-1">
               <p className="font-medium">무엇이든 물어보세요</p>

@@ -99,6 +99,14 @@ export function GraphCanvas({
           selector: "node:selected",
           style: { "border-width": 3, "border-color": palette.text, "border-opacity": 0.35 },
         },
+        /*
+         * 포커스 모드. 노드를 고르면 직접 연결된 이웃만 남기고 나머지를 흐립니다.
+         * 노드가 많아져도 지금 보고 있는 관계만 읽히게 하려는 것입니다.
+         */
+        {
+          selector: ".faded",
+          style: { opacity: 0.15, "text-opacity": 0 },
+        },
         {
           selector: "edge",
           style: {
@@ -176,13 +184,22 @@ export function GraphCanvas({
     }
   }, [graph]);
 
-  // 사이드 패널에서 선택이 바뀌어도 캔버스 강조가 따라오게 합니다.
+  // 사이드 패널에서 선택이 바뀌어도 캔버스 강조와 포커스 모드가 따라오게 합니다.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
 
-    cy.nodes().unselect();
-    if (selectedNodeId) cy.getElementById(selectedNodeId).select();
+    cy.batch(() => {
+      cy.nodes().unselect();
+      cy.elements().removeClass("faded");
+      if (!selectedNodeId) return;
+
+      const selected = cy.getElementById(selectedNodeId);
+      if (selected.empty()) return;
+
+      selected.select();
+      cy.elements().difference(selected.closedNeighborhood()).addClass("faded");
+    });
   }, [selectedNodeId, graph]);
 
   return (
