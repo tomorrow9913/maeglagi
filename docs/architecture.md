@@ -43,6 +43,14 @@ app/
 `api/ai`는 HTTP 입력 변환과 credential 선택까지만 담당합니다. provider adapter와
 정규화된 AI 호출 계약은 `modules/context_engine`에 남겨 API, worker, batch에서 함께 씁니다.
 
+## 관측성과 요청 보호
+
+- `SENTRY_DSN`이 설정된 환경에서만 Sentry FastAPI/Starlette integration을 활성화합니다.
+- 모든 요청에 `X-Request-ID`를 생성하거나 전달하고 structlog JSON 로그에 함께 기록합니다.
+- `RATE_LIMIT`은 기본 `120/minute`이며 health check와 CORS preflight는 제외합니다.
+- `RATE_LIMIT_STORAGE_URI` 기본값은 `memory://`입니다. 여러 Render instance를 사용할 때는
+  Redis URI로 교체해 인스턴스 간 카운터를 공유합니다.
+
 초기에는 모듈러 모놀리스로 배포합니다. 큐 부하가 커질 때 `context_engine` application service를 worker로 옮겨도 domain contract는 유지됩니다.
 
 ## Source of Truth

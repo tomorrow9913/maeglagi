@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 50 * 1024 * 1024
     cors_origins: list[str] = ["http://localhost:3000"]
     llm_provider: str = "mock"
+    sentry_dsn: SecretStr = SecretStr("")
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    rate_limit: str = "120/minute"
+    rate_limit_storage_uri: str = "memory://"
+    log_level: str = "INFO"
 
     @property
     def supabase_enabled(self) -> bool:

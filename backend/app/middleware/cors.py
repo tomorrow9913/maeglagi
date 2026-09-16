@@ -11,4 +11,5 @@ def register_cors_middleware(application: FastAPI, settings: Settings) -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
