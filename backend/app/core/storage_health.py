@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from app.core.config import Settings, get_settings
 from app.core.database import engine
+from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 
 StoreStatus = Literal["ok", "error", "disabled"]
 
@@ -22,7 +23,6 @@ async def check_storage_health(settings: Settings | None = None) -> dict[str, St
         async with engine.connect() as connection:
             await connection.execute(text("select 1"))
             checks["postgresql"] = "ok"
-            checks["graph"] = "ok"
             vector_enabled = await connection.scalar(
                 text("select exists(select 1 from pg_extension where extname = 'vector')")
             )
@@ -42,5 +42,15 @@ async def check_storage_health(settings: Settings | None = None) -> dict[str, St
             checks["objectStorage"] = "ok" if response.status_code < 500 else "error"
         except httpx.HTTPError:
             checks["objectStorage"] = "error"
+
+    if settings.neo4j_enabled:
+        graph_store = Neo4jGraphStore.from_settings(settings)
+        try:
+            await graph_store.verify_connectivity()
+            checks["graph"] = "ok"
+        except Exception:  # readiness reports graph failure without exposing credentials
+            checks["graph"] = "error"
+        finally:
+            await graph_store.close()
 
     return checks
