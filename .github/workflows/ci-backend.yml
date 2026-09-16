@@ -1,0 +1,48 @@
+name: CI · backend
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+  push:
+    branches: [develop, main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+
+concurrency:
+  group: ci-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ruff · pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          # backend/.python-version(3.13)을 따릅니다.
+          python-version-file: backend/.python-version
+
+      - name: Install dependencies
+        run: uv sync --all-groups --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      # Settings의 모든 필드에 기본값이 있어 비밀값 없이 실행됩니다.
+      # 외부 서비스에 붙는 테스트를 추가하면 여기에 env를 함께 넣어야 합니다.
+      - name: Test
+        run: uv run pytest -q

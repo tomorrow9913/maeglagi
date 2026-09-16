@@ -77,8 +77,8 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
             title={hasFilter ? "조건에 맞는 맥락이 없습니다" : "아직 쌓인 맥락이 없습니다"}
             description={
               hasFilter
-                ? "필터를 풀면 더 많은 항목을 볼 수 있습니다."
-                : "회의나 문서를 올리면 결정과 이벤트가 여기에 쌓입니다."
+                ? "필터를 풀면 더 많은 항목을 볼 수 있어요."
+                : "회의나 문서를 올리면 결정과 이벤트가 여기에 쌓여요."
             }
           />
         ) : (

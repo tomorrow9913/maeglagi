@@ -63,6 +63,7 @@ const state = {
 /** provider별 키 접두사. 실제 서비스의 키 형식과 맞춥니다. */
 const keyPrefix: Record<LlmProvider, string> = {
   anthropic: "sk-ant-",
+  nvidia: "nvapi-",
   openai: "sk-",
 };
 

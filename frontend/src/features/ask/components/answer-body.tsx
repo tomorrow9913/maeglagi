@@ -42,7 +42,7 @@ export function AnswerBody({
           type="button"
           onClick={() => onOpenSource(source)}
           title={source.title}
-          className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 align-super text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
+          className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 align-super text-xs font-medium text-primary transition-colors hover:bg-primary/20"
         >
           {index}
         </button>

@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: maeglagi-api
+    runtime: python
+    rootDir: backend
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.1"
+      - key: RATE_LIMIT
+        value: 120/minute
+      - key: RATE_LIMIT_STORAGE_URI
+        value: memory://
+      - key: LOG_LEVEL
+        value: INFO

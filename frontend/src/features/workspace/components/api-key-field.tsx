@@ -86,7 +86,9 @@ export function ApiKeyField({
           disabled={disabled}
           autoComplete="off"
           spellCheck={false}
-          placeholder={provider === "anthropic" ? "sk-ant-..." : "sk-..."}
+          placeholder={
+            provider === "anthropic" ? "sk-ant-..." : provider === "nvidia" ? "nvapi-..." : "sk-..."
+          }
           onChange={(event) => onChange(event.target.value)}
           className="pr-10 font-mono"
           aria-describedby={`${id}-status`}

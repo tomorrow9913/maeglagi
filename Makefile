@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend test lint format infra-up infra-down
+.PHONY: dev backend frontend test lint format
 
 dev:
 	@echo "Run 'make backend' and 'make frontend' in separate terminals."
@@ -19,10 +19,4 @@ lint:
 format:
 	cd backend && uv run ruff format .
 	cd frontend && pnpm format
-
-infra-up:
-	docker compose -f infrastructure/docker-compose.yml up -d
-
-infra-down:
-	docker compose -f infrastructure/docker-compose.yml down
 

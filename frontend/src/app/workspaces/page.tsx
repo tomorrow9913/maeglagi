@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { CreateWorkspaceDialog } from "@/features/workspace/components/create-workspace-dialog";
 import { useAsync } from "@/hooks/use-async";
-import { api, isMockMode } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { Workspace } from "@/lib/api";
 import { workspacePath } from "@/lib/navigation";
 
@@ -26,11 +26,7 @@ export default function WorkspacesPage() {
     <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10">
       <PageHeader
         title="워크스페이스"
-        description={
-          isMockMode
-            ? "맥락을 모을 공간을 고르거나 새로 만듭니다. (mock 데이터)"
-            : "맥락을 모을 공간을 고르거나 새로 만듭니다."
-        }
+        description="맥락을 모을 공간을 고르거나 새로 만듭니다."
         action={<CreateWorkspaceDialog onCreated={onCreated} />}
       />
 

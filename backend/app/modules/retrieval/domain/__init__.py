@@ -1,2 +1,1 @@
 """Retrieval domain models."""
-

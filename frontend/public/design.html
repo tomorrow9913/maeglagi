@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="맥락이의 로고·캐릭터·색 토큰·타이포·말투 기준. 값의 원본은 globals.css와 docs/brand.md입니다.">
+<meta property="og:title" content="맥락이 디자인 시스템">
+<meta property="og:description" content="로고·캐릭터·색 토큰·타이포·말투 기준">
+<meta property="og:type" content="website">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>맥락이 디자인 시스템</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+
+<style>
+  /*
+   * 맥락이 제품의 토큰을 그대로 씁니다. 디자인 시스템을 보여주는 문서라
+   * 견본이 실제 값으로 렌더돼야 하므로, 뷰어 테마를 따르지 않고
+   * 라이트 한 세트로 고정합니다. 제품도 라이트 한 세트만 운영합니다.
+   */
+  :root {
+    color-scheme: light;
+
+    --bg: #f5f3ee;
+    --surface: #fffdf9;
+    --ink: #1c2b26;
+    --sage: #3e715f;
+    --sage-deep: #2f5a4b;
+    --line: #dedad0;
+    --muted: #5d6b65;
+    --fill: #f0ede4;
+    --accent-fill: #e8e4d9;
+
+    --sans: "Geist", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+      "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--sage); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; }
+
+  /* ── 뼈대 ─────────────────────────────────────────── */
+
+  .bar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 20px;
+  }
+  .bar .spacer { flex: 1 1 auto; }
+  .bar .stamp {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .bar .go {
+    font-size: 13px; font-weight: 500; text-decoration: none;
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; background: var(--surface);
+  }
+  .bar .go:hover { border-color: color-mix(in srgb, var(--ink) 30%, transparent); }
+
+  .page {
+    width: 100%; max-width: 1080px; margin: 0 auto;
+    padding-inline: 20px; padding-block: 0 96px;
+  }
+
+  .wordmark { display: inline-flex; align-items: center; gap: .38em; font-weight: 600; letter-spacing: -.02em; }
+  .wordmark svg { width: 1.15em; height: 1.15em; color: var(--sage); }
+
+  /* ── 섹션 ─────────────────────────────────────────── */
+
+  section { padding-block: 56px; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: 0; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--sage);
+    margin: 0 0 10px;
+  }
+  h2 { font-size: 24px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 6px; text-wrap: balance; }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0 0 28px; }
+  h3 { font-size: 13px; font-weight: 600; margin: 0 0 12px; }
+
+  /* ── 헤드 ─────────────────────────────────────────── */
+
+  .head { padding-block: 64px 56px; }
+  .slogan {
+    font-size: clamp(38px, 6.4vw, 62px); font-weight: 600;
+    letter-spacing: -.045em; line-height: 1.02; margin: 18px 0 20px;
+    text-wrap: balance;
+  }
+  .define { color: var(--muted); max-width: 60ch; margin: 0; }
+
+  .usage { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 36px; }
+  @media (min-width: 720px) { .usage { grid-template-columns: repeat(3, 1fr); } }
+  .usage div { background: var(--surface); padding: 16px 18px; }
+  .usage dt { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  .usage dd { margin: 0; font-size: 14px; }
+
+  /* ── 로고 · 캐릭터 ─────────────────────────────────── */
+
+  .plate {
+    display: grid; gap: 20px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 28px;
+  }
+  @media (min-width: 760px) { .plate.split { grid-template-columns: 220px 1fr; align-items: center; gap: 36px; } }
+
+  .stage {
+    display: grid; place-items: center; min-height: 148px;
+    background: var(--bg); border-radius: 10px; color: var(--sage);
+  }
+  .stage svg { width: 88px; height: 88px; }
+
+  .sizes { display: flex; align-items: baseline; gap: 28px; flex-wrap: wrap; }
+  .sizes .s { font-size: 14px; }
+  .sizes .m { font-size: 18px; }
+  .sizes .l { font-size: 26px; }
+  .size-note { font-family: var(--mono); font-size: 10px; color: var(--muted); display: block; margin-top: 4px; }
+
+  .rules { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+  .rules li { font-size: 14px; color: var(--muted); padding-left: 18px; position: relative; }
+  .rules li::before {
+    content: ""; position: absolute; left: 2px; top: .62em;
+    width: 6px; height: 1.5px; background: var(--line);
+  }
+  .rules li.no { color: var(--ink); }
+  .rules li.no::before { background: #b4342c; }
+
+  .poses { display: grid; gap: 16px; }
+  @media (min-width: 640px) { .poses { grid-template-columns: 1fr 1fr; } }
+  .pose { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .pose .stage { border-radius: 0; min-height: 190px; }
+  .pose .stage svg { width: 108px; height: 108px; }
+  .pose .meta { padding: 16px 18px 18px; border-top: 1px solid var(--line); }
+  .pose .name { font-family: var(--mono); font-size: 12px; color: var(--sage); margin: 0 0 6px; }
+  .pose p { margin: 0; font-size: 14px; color: var(--muted); }
+  .pose .where { color: var(--ink); font-size: 14px; margin: 0 0 4px; }
+
+  /* ── 토큰 표 ──────────────────────────────────────── */
+
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 620px; }
+  caption {
+    text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); padding-bottom: 10px;
+  }
+  th {
+    text-align: left; font-family: var(--mono); font-weight: 500; font-size: 10.5px;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+    padding: 0 12px 8px 0; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  .val { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .val.dim { color: var(--muted); }
+  .use { color: var(--muted); }
+
+  .chip {
+    width: 34px; height: 34px; border-radius: 7px; display: block;
+    border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+  td.chip-cell { width: 34px; padding-right: 14px; }
+
+  .ratio { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .pass { color: var(--sage); }
+
+  /* ── 엔티티 색 ────────────────────────────────────── */
+
+  .entities { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .entity { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .dot { width: 22px; height: 22px; border-radius: 999px; display: block; margin-bottom: 12px; }
+  .entity .ko { font-weight: 500; font-size: 15px; }
+  .entity .en { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .entity .hex { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 8px; font-variant-numeric: tabular-nums; }
+
+  .note {
+    margin-top: 20px; padding: 18px 20px;
+    border-left: 2px solid var(--sage); background: var(--fill);
+    border-radius: 0 10px 10px 0;
+  }
+  .note p { margin: 0; font-size: 14px; color: var(--muted); max-width: 66ch; }
+  .note p + p { margin-top: 8px; }
+  .note code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); background: var(--surface); padding: 1px 5px; border-radius: 4px; }
+
+  /* ── 타이포 견본 ──────────────────────────────────── */
+
+  .spec { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .spec > div { padding: 18px 22px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+  .spec > div:last-child { border-bottom: 0; }
+  @media (min-width: 760px) { .spec > div { grid-template-columns: 210px 1fr; align-items: baseline; gap: 24px; } }
+  .spec .cls { font-family: var(--mono); font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .t-h1 { font-size: clamp(34px, 5vw, 46px); font-weight: 600; letter-spacing: -.045em; line-height: 1.05; }
+  .t-page { font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+  .t-sec { font-size: 18px; font-weight: 600; }
+  .t-body { font-size: 14px; }
+  .t-cap { font-size: 12px; color: var(--muted); }
+  .t-over { font-size: 12px; font-weight: 800; letter-spacing: .16em; color: var(--sage); }
+
+  /* ── 말투 ────────────────────────────────────────── */
+
+  .voice td:first-child { font-weight: 500; white-space: nowrap; }
+  .speaker { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+  .speaker.c { background: color-mix(in srgb, var(--sage) 13%, transparent); color: var(--sage-deep); }
+  .speaker.s { background: var(--accent-fill); color: var(--muted); }
+  .quote { color: var(--muted); }
+
+  /* ── 푸터 ────────────────────────────────────────── */
+
+  footer { border-top: 1px solid var(--line); padding-block: 32px 0; }
+  .files { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .files li { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .files b { color: var(--ink); font-weight: 500; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="wordmark" style="font-size:15px">
+    <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true">
+      <circle cx="16" cy="13.5" r="8.5"></circle>
+      <path d="M11.8 20.9C13.6 24.4 19 25.4 22.4 28.8"></path>
+      <path d="M20.2 20.9C18.4 24.4 13 25.4 9.6 28.8"></path>
+    </svg>
+    맥락이
+  </span>
+  <span class="stamp">디자인 시스템 · PoC</span>
+  <span class="spacer"></span>
+  <a class="go" href="https://deploy-ruddy-phi-73.vercel.app/demo" target="_blank" rel="noopener">데모 화면 열기 →</a>
+</header>
+
+<div class="page">
+
+  <section class="head">
+    <p class="eyebrow">Organizational Context Platform</p>
+    <h1 class="slogan">흩어진 업무의 맥락을 잇다</h1>
+    <p class="define">
+      회의와 문서처럼 흩어진 업무 정보를 AI가 연결해 사람·프로젝트·결정·업무·이벤트의 관계와
+      현재 맥락을 자동으로 만듭니다.
+    </p>
+
+    <dl class="usage">
+      <div>
+        <dt>서비스명</dt>
+        <dd>맥락이 — 서비스명과 캐릭터명을 나누지 않습니다. 영문 <span class="val">Maeglagi</span>는 패키지명·도메인에만 씁니다.</dd>
+      </div>
+      <div>
+        <dt>슬로건 쓰는 곳</dt>
+        <dd>랜딩 h1, 발표 자료 표지, 헤더 태그라인</dd>
+      </div>
+      <div>
+        <dt>한 문장 정의 쓰는 곳</dt>
+        <dd>README 첫 문단, <span class="val">metadata.description</span>, 발표 첫 장</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section>
+    <p class="eyebrow">Mark</p>
+    <h2>로고와 워드마크</h2>
+    <p class="lede">
+      아래로 흩어진 두 가닥이 위에서 하나의 고리로 감기는 실타래입니다. 제품이 하는 일을 그대로
+      형태로 옮긴 것이라 가닥 수나 교차 위치를 바꾸지 않습니다.
+    </p>
+
+    <div class="plate split">
+      <div class="stage">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-label="맥락이 심볼" role="img">
+          <circle cx="16" cy="13.5" r="8.5"></circle>
+          <path d="M11.8 20.9C13.6 24.4 19 25.4 22.4 28.8"></path>
+          <path d="M20.2 20.9C18.4 24.4 13 25.4 9.6 28.8"></path>
+        </svg>
+      </div>
+      <div>
+        <h3>워드마크 — 심볼 + 맥락이</h3>
+        <div class="sizes">
+          <div>
+            <span class="wordmark s">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><circle cx="16" cy="13.5" r="8.5"></circle><path d="M11.8 20.9C13.6 24.4 19 25.4 22.4 28.8"></path><path d="M20.2 20.9C18.4 24.4 13 25.4 9.6 28.8"></path></svg>
+              맥락이
+            </span>
+            <span class="size-note">text-sm · 최소</span>
+          </div>
+          <div>
+            <span class="wordmark m">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><circle cx="16" cy="13.5" r="8.5"></circle><path d="M11.8 20.9C13.6 24.4 19 25.4 22.4 28.8"></path><path d="M20.2 20.9C18.4 24.4 13 25.4 9.6 28.8"></path></svg>
+              맥락이
+            </span>
+            <span class="size-note">text-lg</span>
+          </div>
+          <div>
+            <span class="wordmark l">
+              <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><circle cx="16" cy="13.5" r="8.5"></circle><path d="M11.8 20.9C13.6 24.4 19 25.4 22.4 28.8"></path><path d="M20.2 20.9C18.4 24.4 13 25.4 9.6 28.8"></path></svg>
+              맥락이
+            </span>
+            <span class="size-note">text-2xl</span>
+          </div>
+        </div>
+
+        <h3 style="margin-top:26px">규칙</h3>
+        <ul class="rules">
+          <li>심볼은 글자 크기의 1.15배로 고정 — <span class="val">text-sm</span>, <span class="val">text-lg</span>만 바꾸면 비율이 유지됩니다.</li>
+          <li>심볼 색은 <span class="val">currentColor</span>. 기본 <span class="val">text-primary</span>, 브랜드 색 위에서만 <span class="val">text-card</span>.</li>
+          <li>최소 크기 — 심볼 16px, 워드마크 <span class="val">text-sm</span>. 더 작아지면 심볼만 씁니다.</li>
+          <li class="no">회전, 그림자, 그라디언트, 단색 외 채우기 금지</li>
+          <li class="no">워드마크에 부제·영문 병기·자간 변경 금지</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Character</p>
+    <h2>맥락이 캐릭터</h2>
+    <p class="lede">
+      실타래 몸통에서 실 한 가닥이 풀려 나옵니다. 심볼과 같은 은유를 쓰되 역할을 나눕니다 —
+      심볼은 제품을 가리키는 마크, 캐릭터는 사용자에게 말을 거는 화자입니다.
+      포즈는 두 가지뿐이고 표정을 새로 만들지 않습니다.
+    </p>
+
+    <div class="poses">
+      <div class="pose">
+        <div class="stage">
+          <svg viewBox="0 0 32 32" fill="none" role="img" aria-label="기본 포즈">
+            <circle cx="16" cy="15" r="9.5" fill="currentColor" fill-opacity="0.16"></circle>
+            <circle cx="16" cy="15" r="9.5" stroke="currentColor" stroke-width="1.8"></circle>
+            <g stroke="currentColor" stroke-width="1.2" stroke-opacity="0.45" stroke-linecap="round">
+              <path d="M9.4 9.4C12.5 7.6 19.5 7.6 22.6 9.4"></path>
+              <path d="M10 22C12.4 23.4 19.6 23.4 22 22"></path>
+            </g>
+            <g fill="currentColor">
+              <circle cx="12.8" cy="14" r="1.3"></circle>
+              <circle cx="19.2" cy="14" r="1.3"></circle>
+            </g>
+            <path d="M14.2 17.6C15 18.7 17 18.7 17.8 17.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            <path d="M7.1 18.3C4.6 19.9 5.6 23.2 3.4 24.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          </svg>
+        </div>
+        <div class="meta">
+          <p class="name">default</p>
+          <p class="where">답변 화자 아바타</p>
+          <p>눈을 뜨고 정면. 맥락이가 말하고 있는 자리에 씁니다. 크기는 <span class="val">size-8</span>.</p>
+        </div>
+      </div>
+
+      <div class="pose">
+        <div class="stage">
+          <svg viewBox="0 0 32 32" fill="none" role="img" aria-label="쉬는 포즈">
+            <circle cx="16" cy="15" r="9.5" fill="currentColor" fill-opacity="0.16"></circle>
+            <circle cx="16" cy="15" r="9.5" stroke="currentColor" stroke-width="1.8"></circle>
+            <g stroke="currentColor" stroke-width="1.2" stroke-opacity="0.45" stroke-linecap="round">
+              <path d="M9.4 9.4C12.5 7.6 19.5 7.6 22.6 9.4"></path>
+              <path d="M10 22C12.4 23.4 19.6 23.4 22 22"></path>
+            </g>
+            <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <path d="M11.5 14.4C12.2 13.3 13.4 13.3 14.1 14.4"></path>
+              <path d="M17.9 14.4C18.6 13.3 19.8 13.3 20.5 14.4"></path>
+            </g>
+            <path d="M14.6 17.8C15.2 18.3 16.8 18.3 17.4 17.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            <path d="M7.1 18.3C3.6 20.2 5.6 24.4 2.2 26.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          </svg>
+        </div>
+        <div class="meta">
+          <p class="name">resting</p>
+          <p class="where">빈 상태, 답변 대기</p>
+          <p>눈을 감고 실이 길게 풀립니다. 기다리는 자리에만 씁니다. 빈 상태 <span class="val">size-9</span>, 화면 중앙 안내 <span class="val">size-12</span>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <p>
+        색은 <code>text-primary</code> 하나만 씁니다. 캐릭터 안에서 색을 두 개 이상 쓰지 않습니다.
+      </p>
+      <p>
+        애니메이션은 캐릭터 자체에 넣지 않고 필요하면 쓰는 쪽에서 감쌉니다. 캐릭터가 조용한 동료로
+        읽혀야 하기 때문입니다.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Color</p>
+    <h2>색 토큰</h2>
+    <p class="lede">
+      sage green(브랜드) + warm buff(배경) 조합입니다. 회의록과 문서를 오래 읽는 화면이라 순백 대신
+      따뜻한 종이 톤을 깔고, 강조는 채도가 낮은 초록 하나로만 줍니다. 대비는 배경
+      <span class="val">#f5f3ee</span> 기준입니다.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <caption>면과 글자</caption>
+        <thead>
+          <tr><th></th><th>토큰</th><th>oklch</th><th>hex</th><th>용도</th><th>대비</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#f5f3ee"></span></td>
+            <td class="val">--background</td>
+            <td class="val dim">0.9643 0.007 88.64</td>
+            <td class="val dim">#f5f3ee</td>
+            <td class="use">페이지 바탕</td>
+            <td class="ratio dim">—</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#fffdf9"></span></td>
+            <td class="val">--card</td>
+            <td class="val dim">0.9945 0.0057 88</td>
+            <td class="val dim">#fffdf9</td>
+            <td class="use">카드·팝오버 면</td>
+            <td class="ratio dim">—</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#f0ede4"></span></td>
+            <td class="val">--muted</td>
+            <td class="val dim">0.946 0.0124 91.52</td>
+            <td class="val dim">#f0ede4</td>
+            <td class="use">보조 면</td>
+            <td class="ratio dim">—</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#e8e4d9"></span></td>
+            <td class="val">--accent</td>
+            <td class="val dim">0.919 0.0154 90.24</td>
+            <td class="val dim">#e8e4d9</td>
+            <td class="use">호버·선택 면</td>
+            <td class="ratio dim">—</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#dedad0"></span></td>
+            <td class="val">--border / --input</td>
+            <td class="val dim">0.888 0.014 89</td>
+            <td class="val dim">#dedad0</td>
+            <td class="use">선</td>
+            <td class="ratio dim">—</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#1c2b26"></span></td>
+            <td class="val">--foreground</td>
+            <td class="val dim">0.2737 0.0223 171.93</td>
+            <td class="val dim">#1c2b26</td>
+            <td class="use">본문</td>
+            <td class="ratio pass">13.31</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#5d6b65"></span></td>
+            <td class="val">--muted-foreground</td>
+            <td class="val dim">0.515 0.02 169</td>
+            <td class="val dim">#5d6b65</td>
+            <td class="use">보조 텍스트·캡션</td>
+            <td class="ratio pass">5.04</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="scroll" style="margin-top:36px">
+      <table>
+        <caption>브랜드와 상태</caption>
+        <thead>
+          <tr><th></th><th>토큰</th><th>oklch</th><th>hex</th><th>용도</th><th>대비</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#3e715f"></span></td>
+            <td class="val">--primary / --ring</td>
+            <td class="val dim">0.5071 0.0627 168.97</td>
+            <td class="val dim">#3e715f</td>
+            <td class="use">브랜드, 주요 버튼, 링크, 포커스 링</td>
+            <td class="ratio pass">5.07</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#2f5a4b"></span></td>
+            <td class="val">--accent-foreground</td>
+            <td class="val dim">0.4315 0.0547 169.06</td>
+            <td class="val dim">#2f5a4b</td>
+            <td class="use">강조 면 위 텍스트</td>
+            <td class="ratio pass">7.05</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#2f7a52"></span></td>
+            <td class="val">--success</td>
+            <td class="val dim">0.5214 0.0981 156.97</td>
+            <td class="val dim">#2f7a52</td>
+            <td class="use">완료</td>
+            <td class="ratio pass">4.70</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#9c6100"></span></td>
+            <td class="val">--warning</td>
+            <td class="val dim">0.545 0.12 70</td>
+            <td class="val dim">#9c6100</td>
+            <td class="use">주의·진행 지연</td>
+            <td class="ratio pass">4.59</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#3b6ea5"></span></td>
+            <td class="val">--info</td>
+            <td class="val dim">0.5285 0.1031 251.92</td>
+            <td class="val dim">#3b6ea5</td>
+            <td class="use">안내</td>
+            <td class="ratio pass">4.78</td>
+          </tr>
+          <tr>
+            <td class="chip-cell"><span class="chip" style="background:#b4342c"></span></td>
+            <td class="val">--destructive</td>
+            <td class="val dim">0.5175 0.1659 27.99</td>
+            <td class="val dim">#b4342c</td>
+            <td class="use">오류</td>
+            <td class="ratio pass">5.46</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p>
+        색 표기는 HSL이 아니라 <code>oklch</code>입니다. Tailwind v4와 shadcn 기본 테마가 oklch를 쓰고,
+        밝기를 고정한 채 색상만 바꿀 때 HSL보다 결과가 예측 가능해서입니다.
+      </p>
+      <p>
+        디자인 도구에서 값을 옮겨올 때만 위 표의 hex를 쓰고, 코드에는 oklch를 넣습니다.
+        값의 원본은 <code>frontend/src/app/globals.css</code>의 <code>:root</code>입니다.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Graph</p>
+    <h2>Knowledge Graph 노드 색</h2>
+    <p class="lede">
+      <span class="val">--chart-1..5</span>를 Ontology entity 종류에 1:1로 고정합니다. 순서를 바꾸면
+      그래프 범례가 어긋납니다. 다섯 색의 배경 대비를 4.67~4.78로 맞춰 한 가족으로 보이게 했습니다 —
+      강조를 만드는 것은 색이 아니라 데이터여야 하기 때문입니다.
+    </p>
+
+    <div class="entities">
+      <div class="entity">
+        <span class="dot" style="background:#30785d"></span>
+        <div class="ko">사람</div>
+        <div class="en">Person · chart-1</div>
+        <div class="hex">#30785d · 대비 4.77</div>
+      </div>
+      <div class="entity">
+        <span class="dot" style="background:#3a6ea7"></span>
+        <div class="ko">프로젝트</div>
+        <div class="en">Project · chart-2</div>
+        <div class="hex">#3a6ea7 · 대비 4.77</div>
+      </div>
+      <div class="entity">
+        <span class="dot" style="background:#a6552d"></span>
+        <div class="ko">결정</div>
+        <div class="en">Decision · chart-3</div>
+        <div class="hex">#a6552d · 대비 4.78</div>
+      </div>
+      <div class="entity">
+        <span class="dot" style="background:#795ea7"></span>
+        <div class="ko">업무</div>
+        <div class="en">Task · chart-4</div>
+        <div class="hex">#795ea7 · 대비 4.77</div>
+      </div>
+      <div class="entity">
+        <span class="dot" style="background:#816b21"></span>
+        <div class="ko">이벤트</div>
+        <div class="en">Event · chart-5</div>
+        <div class="hex">#816b21 · 대비 4.67</div>
+      </div>
+    </div>
+
+    <div class="note">
+      <p>
+        <strong>같은 색을 두 번 적는 유일한 자리입니다.</strong>
+        <code>&lt;canvas&gt;</code>에 직접 그리는 그래프 라이브러리는 <code>oklch()</code> 문자열을
+        해석하지 못해 색을 잃어버립니다. 노드가 전부 회색으로 그려지는데, 범례 칩은 CSS라 정상으로
+        보여 알아채기 어렵습니다.
+      </p>
+      <p>
+        그래서 <code>--chart-N-hex</code>를 한 벌 더 둡니다. <strong>값을 바꿀 때 두 줄을 함께
+        고쳐야 합니다.</strong>
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Type</p>
+    <h2>타이포그래피</h2>
+    <p class="lede">
+      Geist(라틴)와 시스템 한글 폰트를 씁니다. 한글 자소는 OS 기본 폰트가 받습니다.
+      크기는 Tailwind 스케일만 쓰고 <span class="val">text-[13px]</span> 같은 임의 px 값은 쓰지 않습니다.
+    </p>
+
+    <div class="spec">
+      <div>
+        <div class="cls">text-5xl sm:text-7xl<br>font-semibold tracking-tighter</div>
+        <div class="t-h1">흩어진 업무의 맥락을 잇다</div>
+      </div>
+      <div>
+        <div class="cls">text-2xl font-semibold<br>tracking-tight</div>
+        <div class="t-page">Context Timeline</div>
+      </div>
+      <div>
+        <div class="cls">text-lg font-semibold</div>
+        <div class="t-sec">올라온 소스</div>
+      </div>
+      <div>
+        <div class="cls">text-sm</div>
+        <div class="t-body">회의와 문서에서 결정, 이슈, 할 일을 연결하고 왜 그런 결정이 나왔는지 근거와 함께 답합니다.</div>
+      </div>
+      <div>
+        <div class="cls">text-xs text-muted-foreground</div>
+        <div class="t-cap">45분 녹음 · 2026-09-11</div>
+      </div>
+      <div>
+        <div class="cls">text-xs font-extrabold<br>tracking-[0.16em] text-primary</div>
+        <div class="t-over">ORGANIZATIONAL CONTEXT PLATFORM</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Voice</p>
+    <h2>화자와 말투</h2>
+    <p class="lede">
+      화면 위치가 아니라 <strong>문장의 성격</strong>으로 화자를 정합니다. 같은 카드 안에서도 제목은
+      시스템, 설명은 맥락이가 될 수 있습니다. 맥락이는 발랄한 마스코트가 아니라 조용하고 성실한
+      동료입니다.
+    </p>
+
+    <div class="scroll">
+      <table class="voice">
+        <thead>
+          <tr><th>문장의 성격</th><th>화자</th><th>어미</th><th>예</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>다음에 뭘 하면 되는지 권함</td>
+            <td><span class="speaker c">맥락이</span></td>
+            <td class="use">해요체</td>
+            <td class="quote">회의나 문서를 올리면 결정과 이벤트가 여기에 쌓여요.</td>
+          </tr>
+          <tr>
+            <td>맥락이가 지금 하는 일</td>
+            <td><span class="speaker c">맥락이</span></td>
+            <td class="use">해요체</td>
+            <td class="quote">관련 회의와 문서를 찾아보고 있어요</td>
+          </tr>
+          <tr>
+            <td>사실·상태·결과를 알림</td>
+            <td><span class="speaker s">시스템</span></td>
+            <td class="use">합니다체, 무주어</td>
+            <td class="quote">API key를 저장했습니다.</td>
+          </tr>
+          <tr>
+            <td>오류와 실패</td>
+            <td><span class="speaker s">시스템</span></td>
+            <td class="use">합니다체, 무주어</td>
+            <td class="quote">업로드에 실패했습니다.</td>
+          </tr>
+          <tr>
+            <td>버튼·라벨·필드</td>
+            <td><span class="speaker s">시스템</span></td>
+            <td class="use">명사형</td>
+            <td class="quote">다시 시도 / 대화 지우기</td>
+          </tr>
+          <tr>
+            <td>AI 답변 본문</td>
+            <td><span class="speaker c">맥락이</span></td>
+            <td class="use"><strong>합니다체</strong></td>
+            <td class="quote">…hybrid retrieval을 채택했습니다[1].</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p>
+        답변 본문만 맥락이가 말하면서도 합니다체를 씁니다. 결정과 근거를 다루는 문장이라 꾸미면
+        신뢰가 떨어지기 때문입니다.
+      </p>
+      <p>
+        금지: 느낌표와 이모지, 과장과 자화자찬, 추측을 단정으로 말하기, 사과 반복,
+        <span class="quote">잠시만 기다려주세요</span> 같은 빈 대기 문구, 근거 없는 시간 약속.
+        자기 호칭은 <code>맥락이</code>이며 <code>저</code>, <code>제가</code>는 쓰지 않습니다.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <h3>값의 원본</h3>
+    <ul class="files">
+      <li><b>frontend/src/app/globals.css</b> — 색·반경 토큰</li>
+      <li><b>frontend/src/components/brand/logo.tsx</b> — 심볼, 워드마크</li>
+      <li><b>frontend/src/components/brand/maeglagi-character.tsx</b> — 캐릭터 2종</li>
+      <li><b>docs/brand.md</b> — 제품 정의, 브랜드 기준</li>
+      <li><b>docs/voice.md</b> — 페르소나, 말투</li>
+    </ul>
+    <p style="color:var(--muted);font-size:13px;margin-top:20px">
+      이 문서와 코드가 어긋나면 코드를 고칩니다.
+      <a href="https://deploy-ruddy-phi-73.vercel.app/demo" target="_blank" rel="noopener">데모 화면에서 적용된 모습 보기 →</a>
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

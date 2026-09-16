@@ -85,6 +85,7 @@ src/
 1. Vercel에서 저장소를 import 합니다.
 2. Root Directory: `frontend`
 3. Framework Preset: Next.js (`vercel.json`에 고정되어 있습니다)
-4. Environment Variables: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_USE_MOCKS`
+4. Environment Variables: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_USE_MOCKS`,
+   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
 `main` 브랜치는 production, 그 외 브랜치는 preview 배포로 연결합니다.
