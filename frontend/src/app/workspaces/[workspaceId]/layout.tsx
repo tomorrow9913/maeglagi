@@ -2,10 +2,12 @@
 
 import { use, type ReactNode } from "react";
 import Link from "next/link";
+import { ChevronsUpDown } from "lucide-react";
 
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { WorkspaceNav } from "@/components/layout/workspace-nav";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAsync } from "@/hooks/use-async";
 import { api, ApiError } from "@/lib/api";
 
@@ -32,6 +34,22 @@ export default function WorkspaceLayout({
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 gap-8 px-5 py-8">
       <aside className="hidden w-48 shrink-0 md:block">
+        {/* 어느 워크스페이스를 보고 있는지 항상 보이게 두고, 누르면 목록에서 바꿉니다. */}
+        {isLoading ? (
+          <Skeleton className="mb-4 h-14" />
+        ) : data ? (
+          <Link
+            href="/workspaces"
+            title="워크스페이스 바꾸기"
+            className="mb-4 flex items-center gap-2 rounded-md px-3 py-2 transition-colors hover:bg-accent/50"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">{data.name}</span>
+              <span className="block text-xs text-muted-foreground">소스 {data.sourceCount}개</span>
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </Link>
+        ) : null}
         <WorkspaceNav workspaceId={workspaceId} />
       </aside>
       <main className="min-w-0 flex-1">

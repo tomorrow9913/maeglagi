@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Square } from "lucide-react";
+import { ArrowUpRight, Send, Square } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { AskTurn } from "@/features/ask/components/ask-turn";
 import { MaeglagiAvatar } from "@/features/ask/components/maeglagi-avatar";
 import { exampleQuestions } from "@/features/ask/lib/example-questions";
 import { useAsk } from "@/features/ask/hooks/use-ask";
+import { useAsync } from "@/hooks/use-async";
+import { api } from "@/lib/api";
 import type { AnswerSource } from "@/lib/api";
 import { workspacePath } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
@@ -21,6 +23,24 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
 
   const [draft, setDraft] = useState("");
   const { turns, isStreaming, ask, stop, clear } = useAsk(workspaceId);
+
+  /*
+   * 빈 화면에는 고정 예시 대신 이 워크스페이스에 실제로 쌓인 결정을 보여줍니다.
+   * "무엇을 물어볼 수 있는지"를 이 팀의 맥락으로 알려주려는 것입니다.
+   * 불러오지 못하거나 결정이 없으면 예시 질문으로 돌아갑니다.
+   */
+  const { data: decisionItems } = useAsync(
+    (signal) => api.listContextItems(workspaceId, { kinds: ["decision"] }, signal),
+    [workspaceId],
+  );
+  const recentDecisions = useMemo(
+    () =>
+      (decisionItems ?? [])
+        .filter((item) => !item.supersededBy)
+        .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+        .slice(0, 3),
+    [decisionItems],
+  );
 
   // 답변이 길어져도 마지막 줄이 보이도록 따라 내려갑니다.
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -47,7 +67,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
   return (
     <div className="flex min-h-[calc(100dvh-8rem)] flex-col">
       <PageHeader
-        title="Ask Workspace"
+        title="Ask"
         description="워크스페이스에 질문하고 근거와 함께 답을 받습니다."
         action={
           turns.length > 0 ? (
@@ -61,27 +81,52 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
       {/* 대화가 없을 때는 안내를 입력창과 헤더 사이 가운데에 둬 빈 화면이 한쪽으로 쏠리지 않게 합니다. */}
       <div className={cn("flex-1", turns.length === 0 && "flex flex-col justify-center")}>
         {turns.length === 0 ? (
-          <div className="flex flex-col items-center gap-4 pb-16 text-center">
+          <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-4 pb-16 text-center">
             <MaeglagiAvatar variant="resting" className="size-12" />
             <div className="space-y-1">
-              <p className="font-medium">무엇이든 물어보세요</p>
+              <p className="font-medium">최근 결정의 근거부터 물어보세요</p>
               <p className="text-sm text-muted-foreground">
                 맥락이가 회의와 문서에서 근거를 찾아 답해요. 근거가 없으면 없다고 말해요.
               </p>
             </div>
-            <ul className="flex flex-wrap justify-center gap-2">
-              {exampleQuestions.map((question) => (
-                <li key={question}>
-                  <button
-                    type="button"
-                    onClick={() => submit(question)}
-                    className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-                  >
-                    {question}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {recentDecisions.length > 0 ? (
+              <ul className="w-full divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                {recentDecisions.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => submit(`'${item.title}' 결정의 근거는 무엇인가요?`)}
+                      className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{item.title}</span>
+                        <span className="block text-xs text-muted-foreground tabular-nums">
+                          {item.occurredAt.slice(0, 10)} 결정
+                        </span>
+                      </span>
+                      <ArrowUpRight
+                        className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+                        aria-hidden
+                      />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul className="flex flex-wrap justify-center gap-2">
+                {exampleQuestions.map((question) => (
+                  <li key={question}>
+                    <button
+                      type="button"
+                      onClick={() => submit(question)}
+                      className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                    >
+                      {question}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         ) : (
           <ul className="space-y-8 pb-4">

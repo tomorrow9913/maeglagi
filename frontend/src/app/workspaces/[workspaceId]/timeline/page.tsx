@@ -63,7 +63,7 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
   return (
     <>
       <PageHeader
-        title="Context Timeline"
+        title="Timeline"
         description="결정과 이벤트가 쌓인 순서를 시간축으로 따라갑니다."
       />
 
