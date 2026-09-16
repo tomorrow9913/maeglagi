@@ -24,7 +24,7 @@ export type Workspace = {
   sourceCount: number;
 };
 
-export type LlmProvider = "anthropic" | "openai";
+export type LlmProvider = "anthropic" | "nvidia" | "openai";
 
 export type CreateWorkspaceInput = {
   name: string;

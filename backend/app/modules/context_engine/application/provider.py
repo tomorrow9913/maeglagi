@@ -26,7 +26,13 @@ class ChatResponse(BaseModel):
 
 
 class ProviderAdapter(Protocol):
+    id: str
+    display_name: str
+    capabilities: tuple[str, ...]
+
     async def validate_credential(self, api_key: str) -> tuple[bool, str]: ...
+
+    async def list_models(self, api_key: str) -> list[str]: ...
 
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse: ...
 

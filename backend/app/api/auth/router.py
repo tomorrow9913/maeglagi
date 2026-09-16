@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.core.auth import CurrentUser
-from app.schemas.auth import MeResponse
+from app.api.auth.schemas import MeResponse
+from app.auth import CurrentUser
 
 router = APIRouter(prefix="/auth")
 

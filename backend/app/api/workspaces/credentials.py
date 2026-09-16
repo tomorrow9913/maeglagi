@@ -6,14 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.auth import CurrentUser
+from app.api.workspaces.schemas import (
+    CredentialInput,
+    CredentialResponse,
+    CredentialValidation,
+)
+from app.auth import CurrentUser
 from app.core.credentials import encrypt_credential
 from app.core.database import get_session
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
-from app.schemas.credentials import CredentialInput, CredentialResponse, CredentialValidation
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -57,10 +61,7 @@ async def list_credentials(
     return [_response(item) for item in result.all()]
 
 
-@router.get(
-    "/workspaces/{workspace_id}/llm-key",
-    response_model=CredentialResponse | None,
-)
+@router.get("/workspaces/{workspace_id}/llm-key", response_model=CredentialResponse | None)
 async def get_default_credential(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> CredentialResponse | None:
@@ -76,10 +77,7 @@ async def get_default_credential(
     return _response(credential) if credential else None
 
 
-@router.put(
-    "/workspaces/{workspace_id}/llm-key",
-    response_model=CredentialResponse,
-)
+@router.put("/workspaces/{workspace_id}/llm-key", response_model=CredentialResponse)
 async def upsert_default_credential(
     workspace_id: UUID,
     body: CredentialInput,

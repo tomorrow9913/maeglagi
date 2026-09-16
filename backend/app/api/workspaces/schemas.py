@@ -1,0 +1,58 @@
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class CreateWorkspaceRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(min_length=1, max_length=120)
+    llm_provider: str = Field(validation_alias="llmProvider")
+    llm_api_key: str = Field(min_length=1, validation_alias="llmApiKey")
+
+
+class WorkspaceResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    name: str
+    created_at: datetime = Field(serialization_alias="createdAt")
+    source_count: int = Field(default=0, serialization_alias="sourceCount")
+
+
+class SourceResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    workspace_id: UUID = Field(serialization_alias="workspaceId")
+    kind: str
+    title: str
+    status: str
+    created_at: datetime = Field(serialization_alias="createdAt")
+    size_bytes: int = Field(serialization_alias="sizeBytes")
+
+
+class CredentialInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    provider: str
+    api_key: str = Field(min_length=1, validation_alias="apiKey")
+    label: str = Field(default="기본", min_length=1, max_length=80)
+
+
+class CredentialValidation(BaseModel):
+    valid: bool
+    message: str
+
+
+class CredentialResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    provider: str
+    label: str
+    key_hint: str = Field(serialization_alias="keyHint")
+    status: str
+    is_default: bool = Field(serialization_alias="isDefault")
+    updated_at: datetime = Field(serialization_alias="updatedAt")
