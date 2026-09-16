@@ -29,18 +29,3 @@ services:
         value: memory://
       - key: LOG_LEVEL
         value: INFO
-
-  - type: web
-    name: maeglagi-web
-    runtime: node
-    buildCommand: corepack pnpm@10.6.0 install --frozen-lockfile && corepack pnpm@10.6.0 --filter @maeglagi/frontend build
-    startCommand: corepack pnpm@10.6.0 --filter @maeglagi/frontend start
-    envVars:
-      - key: NEXT_PUBLIC_API_URL
-        sync: false
-      - key: NEXT_PUBLIC_USE_MOCKS
-        value: "false"
-      - key: NEXT_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-        sync: false

@@ -49,16 +49,19 @@ Supabase Auth 세션을 쿠키로 유지하고, FastAPI는 전달받은 access t
 `storage.objects`의 RLS 정책을 그대로 적용받습니다. `service_role` 키는 필요하지
 않으며 클라이언트와 Render 환경변수 어디에도 저장하지 않습니다.
 
-## Render 배포
+## 배포
 
-저장소 루트의 `render.yaml`을 Blueprint로 가져온 뒤 다음 값을 설정합니다.
+백엔드는 저장소 루트의 `render.yaml`을 Render Blueprint로 가져온 뒤 다음 값을 설정합니다.
 
 - API: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `CORS_ORIGINS`
-- Web: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+프론트엔드는 `frontend`를 Root Directory로 지정해 Vercel에 배포하고
+`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_USE_MOCKS`, `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`를 설정합니다.
 
 `DATABASE_URL`은 Supabase Dashboard의 session pooler 연결 문자열을
 `postgresql+asyncpg://` 스킴으로 바꿔 사용합니다. Supabase Auth의 Site URL에는
-Render 웹 주소를, Redirect URLs에는 `<웹 주소>/auth/callback`을 등록합니다.
+Vercel 웹 주소를, Redirect URLs에는 `<웹 주소>/auth/callback`을 등록합니다.
 
 ## BYOK provider credential
 
