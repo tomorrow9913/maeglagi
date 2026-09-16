@@ -1,4 +1,4 @@
-.PHONY: dev backend frontend test lint format
+.PHONY: dev backend frontend migrate migration test lint format
 
 dev:
 	@echo "Run 'make backend' and 'make frontend' in separate terminals."
@@ -8,6 +8,12 @@ backend:
 
 frontend:
 	cd frontend && pnpm dev
+
+migrate:
+	cd backend && uv run alembic upgrade head
+
+migration:
+	cd backend && uv run alembic revision --autogenerate -m "$(name)"
 
 test:
 	cd backend && uv run pytest
@@ -19,4 +25,3 @@ lint:
 format:
 	cd backend && uv run ruff format .
 	cd frontend && pnpm format
-

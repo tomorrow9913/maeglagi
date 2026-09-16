@@ -26,10 +26,9 @@
 ```bash
 cp .env.example .env
 
-# Supabase SQL Editor에서 supabase/migrations/202609150001_initial.sql 실행
-
 cd backend
 uv sync --all-groups
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 
 cd ../frontend
@@ -62,6 +61,11 @@ Supabase Auth 세션을 쿠키로 유지하고, FastAPI는 전달받은 access t
 `DATABASE_URL`은 Supabase Dashboard의 session pooler 연결 문자열을
 `postgresql+asyncpg://` 스킴으로 바꿔 사용합니다. Supabase Auth의 Site URL에는
 Vercel 웹 주소를, Redirect URLs에는 `<웹 주소>/auth/callback`을 등록합니다.
+
+DB 스키마의 단일 기준은 SQLModel `SQLModel.metadata`와 `backend/migrations`의
+Alembic revision입니다. 배포 전 `make migrate`를 실행하고, 모델 변경 후에는
+`make migration name=변경_설명`으로 revision을 생성합니다. Supabase SQL Editor에서
+별도 migration 파일을 실행하지 않습니다.
 
 ## BYOK provider credential
 
