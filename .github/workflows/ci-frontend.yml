@@ -1,0 +1,55 @@
+name: CI · frontend
+
+# 프론트가 바뀐 PR에서만 돕니다. 문서만 고친 PR까지 5분씩 붙잡지 않기 위해서입니다.
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ci-frontend.yml"
+  push:
+    branches: [develop, main]
+    paths:
+      - "frontend/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/ci-frontend.yml"
+
+# 같은 PR에 연달아 푸시하면 이전 실행을 취소합니다.
+concurrency:
+  group: ci-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint · typecheck · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 루트에 package.json이 없어 packageManager를 읽을 수 없으므로 버전을 명시합니다.
+      # frontend/package.json의 packageManager와 같은 값을 유지해야 합니다.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # eslint(--max-warnings 0) + tsc --noEmit
+      - name: Lint and typecheck
+        run: pnpm --filter @maeglagi/frontend lint
+
+      - name: Build
+        run: pnpm --filter @maeglagi/frontend build
+        env:
+          # 빌드 검증용입니다. Supabase 값이 없어도 앱이 degrade 되도록
+          # config.ts가 막아 두었으므로 CI에는 비밀값을 넣지 않습니다.
+          NEXT_PUBLIC_USE_MOCKS: "true"
