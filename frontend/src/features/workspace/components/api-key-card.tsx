@@ -6,10 +6,10 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import type { LlmProvider, WorkspaceSecrets } from "@/lib/api";
+import type { AiProvider, LlmProvider, WorkspaceSecrets } from "@/lib/api";
 
 import { ApiKeyField } from "./api-key-field";
-import { ProviderSelect, providerLabel } from "./provider-select";
+import { ProviderSelect } from "./provider-select";
 
 function formatUpdatedAt(iso: string): string {
   return iso.slice(0, 10).replaceAll("-", ".");
@@ -24,14 +24,16 @@ function formatUpdatedAt(iso: string): string {
 export function ApiKeyCard({
   workspaceId,
   secrets,
+  providers,
   onUpdated,
 }: {
   workspaceId: string;
   secrets: WorkspaceSecrets | null;
+  providers: AiProvider[];
   onUpdated: (next: WorkspaceSecrets) => void;
 }) {
   const [isEditing, setIsEditing] = useState(secrets === null);
-  const [provider, setProvider] = useState<LlmProvider>(secrets?.provider ?? "anthropic");
+  const [provider, setProvider] = useState<LlmProvider>(secrets?.provider ?? providers[0].id);
   const [apiKey, setApiKey] = useState("");
   const [isKeyValid, setIsKeyValid] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -65,7 +67,10 @@ export function ApiKeyCard({
 
           {secrets && !isEditing ? (
             <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span className="text-sm">{providerLabel[secrets.provider]}</span>
+              <span className="text-sm">
+                {providers.find((item) => item.id === secrets.provider)?.displayName ??
+                  secrets.provider}
+              </span>
               <span className="font-mono text-sm text-muted-foreground">
                 {"•".repeat(12)}
                 {secrets.keyHint}
@@ -98,6 +103,7 @@ export function ApiKeyCard({
                   id="settings-provider"
                   value={provider}
                   onChange={setProvider}
+                  providers={providers}
                   disabled={isSaving}
                 />
               </div>

@@ -1,6 +1,7 @@
 import type { UploadOptions } from "./client";
 import type {
   AnswerEvent,
+  AiProvider,
   ApiKeyValidation,
   ContextItem,
   ContextTimelineQuery,
@@ -25,6 +26,8 @@ export interface MaeglagiApi {
   listWorkspaces(signal?: AbortSignal): Promise<Workspace[]>;
   getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<Workspace>;
   createWorkspace(input: CreateWorkspaceInput, signal?: AbortSignal): Promise<Workspace>;
+  /** 백엔드 registry 기준으로 workspace에서 사용할 수 있는 provider를 조회합니다. */
+  listWorkspaceProviders(workspaceId: string, signal?: AbortSignal): Promise<AiProvider[]>;
 
   /**
    * BYOK 키가 실제로 쓸 수 있는 키인지 확인합니다.
