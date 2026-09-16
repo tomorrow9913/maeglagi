@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
+from app.api.system.schemas import HealthResponse
 from app.core.config import get_settings
-from app.schemas.health import HealthResponse
 
 router = APIRouter()
 
@@ -10,4 +10,3 @@ router = APIRouter()
 async def health() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(service=settings.app_name, version=settings.app_version)
-

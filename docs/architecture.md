@@ -18,11 +18,30 @@ PostgreSQL / Object Storage / Vector Store / Graph DB
 
 ## 백엔드 경계
 
-- `api`: HTTP transport와 dependency wiring. 비즈니스 규칙을 두지 않습니다.
+- `api/<prefix>`: URL prefix 단위의 router와 request/response schema를 함께 둡니다.
+- `auth`: 인증 사용자 모델과 FastAPI dependency를 한곳에서 관리합니다.
+- `decorators`: endpoint에 재사용하는 권한 정책 helper를 둡니다.
+- `middleware`: CORS 등 middleware와 앱 시작 시의 등록 순서를 관리합니다.
 - `modules/*/domain`: 프레임워크에 의존하지 않는 모델과 규칙입니다.
 - `modules/*/application`: use case와 port(protocol)를 정의합니다.
 - `modules/*/infrastructure`: DB, LLM, object/vector/graph store adapter입니다.
 - `core`: 설정, 공통 오류, 로깅과 같은 횡단 관심사입니다.
+
+```text
+app/
+├── api/
+│   ├── auth/{router,schemas}.py
+│   ├── jobs/{router,schemas}.py
+│   ├── workspaces/{router,credentials,schemas}.py
+│   └── ai/{router,schemas}.py
+├── auth/{dependencies,models}.py
+├── decorators/authorization.py
+├── middleware/{cors,registry}.py
+└── modules/context_engine/...
+```
+
+`api/ai`는 HTTP 입력 변환과 credential 선택까지만 담당합니다. provider adapter와
+정규화된 AI 호출 계약은 `modules/context_engine`에 남겨 API, worker, batch에서 함께 씁니다.
 
 초기에는 모듈러 모놀리스로 배포합니다. 큐 부하가 커질 때 `context_engine` application service를 worker로 옮겨도 domain contract는 유지됩니다.
 
@@ -46,4 +65,3 @@ PostgreSQL / Object Storage / Vector Store / Graph DB
 - 개발용 `.env`도 Git에 포함하지 않습니다.
 - 업로드 파일은 확장자만 믿지 않고 크기와 MIME signature를 함께 검증합니다.
 - 질문의 근거가 부족하면 답변을 생성하지 않고 불확실성을 명시합니다.
-

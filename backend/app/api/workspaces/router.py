@@ -9,7 +9,9 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.auth import CurrentUser, bearer
+from app.api.workspaces.credentials import router as credentials_router
+from app.api.workspaces.schemas import CreateWorkspaceRequest, SourceResponse, WorkspaceResponse
+from app.auth import CurrentUser, bearer
 from app.core.config import get_settings
 from app.core.credentials import encrypt_credential
 from app.core.database import get_session
@@ -17,10 +19,10 @@ from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
-from app.schemas.sources import SourceResponse
-from app.schemas.workspaces import CreateWorkspaceRequest, WorkspaceResponse
 
-router = APIRouter(prefix="/workspaces")
+router = APIRouter()
+router.include_router(credentials_router)
+workspaces = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -33,7 +35,7 @@ def _response(workspace: Workspace, source_count: int = 0) -> WorkspaceResponse:
     )
 
 
-@router.get("", response_model=list[WorkspaceResponse])
+@workspaces.get("", response_model=list[WorkspaceResponse])
 async def list_workspaces(user: CurrentUser, session: Session) -> list[WorkspaceResponse]:
     query = (
         select(Workspace, func.count(Source.id))
@@ -46,14 +48,13 @@ async def list_workspaces(user: CurrentUser, session: Session) -> list[Workspace
     return [_response(workspace, count) for workspace, count in rows]
 
 
-@router.post("", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
+@workspaces.post("", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
 async def create_workspace(
     body: CreateWorkspaceRequest, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
     valid, message = await validate_provider_credential(body.llm_provider, body.llm_api_key)
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
-
     workspace = Workspace(owner_id=user.id, name=body.name.strip())
     session.add(workspace)
     session.add(
@@ -71,7 +72,7 @@ async def create_workspace(
     return _response(workspace)
 
 
-@router.get("/{workspace_id}", response_model=WorkspaceResponse)
+@workspaces.get("/{workspace_id}", response_model=WorkspaceResponse)
 async def get_workspace(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
@@ -84,7 +85,7 @@ async def get_workspace(
     return _response(workspace, count.one())
 
 
-@router.get("/{workspace_id}/sources", response_model=list[SourceResponse])
+@workspaces.get("/{workspace_id}/sources", response_model=list[SourceResponse])
 async def list_sources(workspace_id: UUID, user: CurrentUser, session: Session) -> list[Source]:
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
@@ -97,7 +98,7 @@ async def list_sources(workspace_id: UUID, user: CurrentUser, session: Session) 
     return list(result.all())
 
 
-@router.post("/{workspace_id}/sources/documents", status_code=status.HTTP_201_CREATED)
+@workspaces.post("/{workspace_id}/sources/documents", status_code=status.HTTP_201_CREATED)
 async def upload_document(
     workspace_id: UUID,
     file: UploadFile,
@@ -108,7 +109,7 @@ async def upload_document(
     return await _upload_source(workspace_id, file, "document", user, session, credentials)
 
 
-@router.post("/{workspace_id}/sources/recordings", status_code=status.HTTP_201_CREATED)
+@workspaces.post("/{workspace_id}/sources/recordings", status_code=status.HTTP_201_CREATED)
 async def upload_recording(
     workspace_id: UUID,
     audio: UploadFile,
@@ -130,17 +131,14 @@ async def _upload_source(
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-
     content = await file.read()
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
     settings = get_settings()
     if len(content) > settings.max_upload_bytes:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File is too large")
-
-    filename = (file.filename or ("recording.webm" if kind == "meeting" else "document"))
+    filename = file.filename or ("recording.webm" if kind == "meeting" else "document")
     filename = filename.replace("/", "_").replace("\\", "_")
-
     source = Source(
         workspace_id=workspace.id,
         owner_id=user.id,
@@ -151,7 +149,6 @@ async def _upload_source(
         size_bytes=len(content),
     )
     source.object_path = f"{user.id}/{workspace.id}/{source.id}/{source.title}"
-
     storage_url = (
         f"{settings.supabase_url.rstrip('/')}/storage/v1/object/"
         f"{settings.supabase_storage_bucket}/{quote(source.object_path, safe='/')}"
@@ -169,7 +166,6 @@ async def _upload_source(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Storage unavailable") from exc
     if response.status_code not in {status.HTTP_200_OK, status.HTTP_201_CREATED}:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Storage upload failed")
-
     session.add(source)
     await session.commit()
     return {
@@ -180,3 +176,6 @@ async def _upload_source(
         "progress": 0,
         "stage": "uploaded",
     }
+
+
+router.include_router(workspaces)

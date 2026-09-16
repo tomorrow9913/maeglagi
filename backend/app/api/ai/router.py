@@ -5,14 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.auth import CurrentUser
+from app.api.ai.schemas import ProviderCatalogItem, ProviderChatRequest
+from app.auth import CurrentUser
 from app.core.credentials import decrypt_credential
 from app.core.database import get_session
 from app.modules.context_engine.application.provider import ChatRequest, ChatResponse
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
-from app.schemas.providers import ProviderCatalogItem, ProviderChatRequest
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/ai")
 Session = Annotated[AsyncSession, Depends(get_session)]

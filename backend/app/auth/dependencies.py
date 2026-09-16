@@ -1,20 +1,13 @@
-from typing import Annotated, Any
-from uuid import UUID
+from typing import Annotated
 
 import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
 
+from app.auth.models import AuthUser
 from app.core.config import Settings, get_settings
 
 bearer = HTTPBearer(auto_error=False)
-
-
-class AuthUser(BaseModel):
-    id: UUID
-    email: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 async def get_current_user(
