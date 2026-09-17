@@ -13,7 +13,7 @@ from app.api.workspaces.credentials import router as credentials_router
 from app.api.workspaces.schemas import CreateWorkspaceRequest, SourceResponse, WorkspaceResponse
 from app.auth import CurrentUser, bearer
 from app.core.config import get_settings
-from app.core.credentials import encrypt_credential
+from app.core.credentials import store_credential_secret
 from app.core.database import get_session
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
@@ -57,16 +57,21 @@ async def create_workspace(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
     workspace = Workspace(owner_id=user.id, name=body.name.strip())
     session.add(workspace)
-    session.add(
-        ProviderCredential(
-            workspace_id=workspace.id,
-            owner_id=user.id,
-            provider=body.llm_provider,
-            encrypted_secret=encrypt_credential(body.llm_api_key),
-            key_hint=body.llm_api_key[-4:],
-            is_default=True,
-        )
+    credential = ProviderCredential(
+        workspace_id=workspace.id,
+        owner_id=user.id,
+        provider=body.llm_provider,
+        key_hint=body.llm_api_key[-4:],
+        is_default=True,
     )
+    credential.vault_secret_id = await store_credential_secret(
+        session,
+        secret=body.llm_api_key,
+        credential_id=credential.id,
+        workspace_id=workspace.id,
+        provider=body.llm_provider,
+    )
+    session.add(credential)
     await session.commit()
     await session.refresh(workspace)
     return _response(workspace)

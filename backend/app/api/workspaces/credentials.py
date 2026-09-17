@@ -12,7 +12,7 @@ from app.api.workspaces.schemas import (
     CredentialValidation,
 )
 from app.auth import CurrentUser
-from app.core.credentials import encrypt_credential
+from app.core.credentials import credential_vault, store_credential_secret
 from app.core.database import get_session
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
@@ -116,13 +116,31 @@ async def upsert_default_credential(
             owner_id=user.id,
             provider=body.provider,
             label=body.label,
-            encrypted_secret=encrypt_credential(body.api_key),
             key_hint=body.api_key[-4:],
             is_default=True,
             updated_at=now,
         )
+        credential.vault_secret_id = await store_credential_secret(
+            session,
+            secret=body.api_key,
+            credential_id=credential.id,
+            workspace_id=workspace_id,
+            provider=body.provider,
+        )
     else:
-        credential.encrypted_secret = encrypt_credential(body.api_key)
+        if credential.vault_secret_id is None:
+            credential.vault_secret_id = await store_credential_secret(
+                session,
+                secret=body.api_key,
+                credential_id=credential.id,
+                workspace_id=workspace_id,
+                provider=body.provider,
+            )
+        else:
+            await credential_vault.update(
+                session, secret_id=credential.vault_secret_id, secret=body.api_key
+            )
+        credential.encrypted_secret = None
         credential.key_hint = body.api_key[-4:]
         credential.status = "active"
         credential.is_default = True

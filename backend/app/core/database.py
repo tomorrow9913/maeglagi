@@ -20,7 +20,7 @@ def _database_url() -> str:
     return normalize_database_url(get_settings().database_url)
 
 
-engine: AsyncEngine = create_async_engine(_database_url(), pool_pre_ping=True)
+engine: AsyncEngine = create_async_engine(_database_url(), pool_pre_ping=True, hide_parameters=True)
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
