@@ -14,7 +14,7 @@ RawSegment = TypeVar("RawSegment", DocumentSection, TranscriptSegment)
 
 
 class SourceNormalizer(Protocol[RawSegment]):
-    kind: SourceKind
+    kind: str
 
     def normalize(
         self,
@@ -23,6 +23,7 @@ class SourceNormalizer(Protocol[RawSegment]):
         workspace_id: UUID,
         title: str,
         segments: Sequence[RawSegment],
+        source: str | None = None,
         language: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> NormalizedSource: ...
@@ -44,6 +45,7 @@ class DocumentNormalizer:
         workspace_id: UUID,
         title: str,
         segments: Sequence[DocumentSection],
+        source: str | None = None,
         language: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> NormalizedSource:
@@ -51,7 +53,11 @@ class DocumentNormalizer:
             NormalizedSegment(
                 id=_segment_id(source_id, position),
                 position=position,
-                text=section.text,
+                source=source or str(source_id),
+                type=self.kind,
+                timestamp=section.timestamp,
+                author=section.author,
+                content=section.text,
                 page=section.page,
                 heading=section.heading,
                 metadata=dict(section.metadata_),
@@ -79,6 +85,7 @@ class TranscriptNormalizer:
         workspace_id: UUID,
         title: str,
         segments: Sequence[TranscriptSegment],
+        source: str | None = None,
         language: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> NormalizedSource:
@@ -87,7 +94,11 @@ class TranscriptNormalizer:
             NormalizedSegment(
                 id=_segment_id(source_id, position),
                 position=position,
-                text=segment.text,
+                source=source or str(source_id),
+                type=self.kind,
+                timestamp=segment.timestamp,
+                author=segment.speaker,
+                content=segment.text,
                 speaker=segment.speaker,
                 start_seconds=segment.start_seconds,
                 end_seconds=segment.end_seconds,
@@ -110,15 +121,15 @@ class NormalizationService:
     """Routes raw source data to a kind-specific normalizer through one interface."""
 
     def __init__(self) -> None:
-        self._normalizers: dict[SourceKind, SourceNormalizer[Any]] = {}
+        self._normalizers: dict[str, SourceNormalizer[Any]] = {}
         self.register(DocumentNormalizer())
         self.register(TranscriptNormalizer())
 
     def register(self, normalizer: SourceNormalizer[Any]) -> None:
-        self._normalizers[normalizer.kind] = normalizer
+        self._normalizers[str(normalizer.kind)] = normalizer
 
     def normalize(self, kind: SourceKind | str, **kwargs: Any) -> NormalizedSource:
-        source_kind = SourceKind(kind)
+        source_kind = str(kind)
         try:
             normalizer = self._normalizers[source_kind]
         except KeyError as exc:
