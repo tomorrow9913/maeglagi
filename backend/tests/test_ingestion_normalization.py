@@ -33,13 +33,18 @@ def test_document_sections_are_normalized_without_losing_evidence_metadata() -> 
     assert result.segments[0].page == 2
     assert result.segments[0].heading == "Scope"
     assert result.segments[0].metadata_ == {"bbox": [1, 2]}
-    assert result.segments[0].id == service.normalize(
-        "document",
-        source_id=source_id,
-        workspace_id=result.workspace_id,
-        title=result.title,
-        segments=[DocumentSection(text="changed")],
-    ).segments[0].id
+    assert (
+        result.segments[0].id
+        == service.normalize(
+            "document",
+            source_id=source_id,
+            workspace_id=result.workspace_id,
+            title=result.title,
+            segments=[DocumentSection(text="changed")],
+        )
+        .segments[0]
+        .id
+    )
 
 
 def test_transcript_segments_are_sorted_and_normalized_with_speaker_and_timestamps() -> None:
