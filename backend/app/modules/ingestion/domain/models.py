@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -17,6 +18,8 @@ class DocumentSection(SQLModel):
     text: str = Field(min_length=1)
     page: int | None = Field(default=None, ge=1)
     heading: str | None = None
+    timestamp: datetime | None = None
+    author: str | None = None
     metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata")
 
     @field_validator("text")
@@ -35,6 +38,7 @@ class TranscriptSegment(SQLModel):
     start_seconds: float = Field(ge=0)
     end_seconds: float = Field(ge=0)
     speaker: str | None = None
+    timestamp: datetime | None = None
     metadata_: dict[str, Any] = Field(default_factory=dict, alias="metadata")
 
     @field_validator("text")
@@ -57,7 +61,11 @@ class NormalizedSegment(SQLModel):
 
     id: UUID
     position: int = Field(ge=0)
-    text: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    timestamp: datetime | None = None
+    author: str | None = None
+    content: str = Field(min_length=1)
     page: int | None = Field(default=None, ge=1)
     heading: str | None = None
     speaker: str | None = None
@@ -71,7 +79,7 @@ class NormalizedSource(SQLModel):
 
     source_id: UUID
     workspace_id: UUID
-    kind: SourceKind
+    kind: str = Field(min_length=1)
     title: str = Field(min_length=1)
     language: str | None = None
     segments: list[NormalizedSegment] = Field(default_factory=list)
