@@ -5,6 +5,7 @@ from app.modules.context_engine.application.provider import (
     ChatMessage,
     EmbeddingRequest,
     StructuredOutputRequest,
+    TranscriptionRequest,
 )
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderCapabilityError
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
@@ -34,8 +35,56 @@ def test_openai_exposes_completed_adapter_contract() -> None:
         "chat",
         "embedding",
         "structuredOutput",
+        "transcription",
         "models",
     }
+
+
+@pytest.mark.asyncio
+async def test_openai_transcription_normalizes_verbose_segments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "text": "첫 번째 두 번째",
+                "language": "ko",
+                "duration": 4.2,
+                "segments": [
+                    {"text": "첫 번째", "start": 0, "end": 2},
+                    {"text": "두 번째", "start": 2, "end": 4.2},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: async_client(transport=transport, **kwargs),
+    )
+    adapter = provider_registry.get("openai")
+    assert adapter is not None
+
+    response = await adapter.transcribe(
+        TranscriptionRequest(
+            audio=b"audio",
+            filename="meeting.webm",
+            content_type="audio/webm",
+            model="whisper-1",
+        ),
+        "secret",
+    )
+
+    assert response.text == "첫 번째 두 번째"
+    assert response.duration_seconds == 4.2
+    assert [segment.text for segment in response.segments] == ["첫 번째", "두 번째"]
+    assert requests[0].url.path == "/v1/audio/transcriptions"
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,8 @@ def test_public_paths_are_preserved_after_api_package_refactor() -> None:
     assert "/api/v1/jobs/{job_id}" in paths
     assert "/api/v1/workspaces/{workspace_id}/ai/providers" in paths
     assert "/api/v1/workspaces/{workspace_id}/provider-credentials" in paths
+    assert "/api/v1/workspaces/{workspace_id}/sources/transcripts" in paths
+    assert "/api/v1/workspaces/{workspace_id}/search" in paths
 
 
 def test_workspace_schema_is_colocated_with_router() -> None:

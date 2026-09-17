@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Text,
@@ -31,6 +32,15 @@ class Workspace(SQLModel, table=True):
 class Source(SQLModel, table=True):
     __tablename__ = "sources"
     __table_args__ = (
+        CheckConstraint(
+            "transcript_source is null or transcript_source in ('server', 'browser')",
+            name="ck_sources_transcript_source",
+        ),
+        CheckConstraint(
+            "duration_seconds is null or duration_seconds >= 0",
+            name="ck_sources_duration_seconds",
+        ),
+        CheckConstraint("progress >= 0 and progress <= 1", name="ck_sources_progress"),
         Index("sources_workspace_id_idx", "workspace_id"),
         Index("sources_owner_id_idx", "owner_id"),
     )
@@ -45,7 +55,13 @@ class Source(SQLModel, table=True):
     object_path: str = Field(sa_column=Column(Text, nullable=False, unique=True))
     content_type: str = Field(max_length=120)
     size_bytes: int = Field(sa_column=Column(BigInteger, nullable=False))
+    transcript_source: str | None = Field(default=None, max_length=20)
+    duration_seconds: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    transcript_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     status: str = Field(default="queued", max_length=20)
+    processing_stage: str = Field(default="uploaded", max_length=20)
+    progress: float = Field(default=0, ge=0, le=1, sa_column=Column(Float, nullable=False))
+    error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),

@@ -40,6 +40,30 @@ class EmbeddingResponse(BaseModel):
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class TranscriptionRequest(BaseModel):
+    audio: bytes
+    filename: str
+    content_type: str
+    model: str
+    language: str | None = None
+
+
+class TranscriptionSegment(BaseModel):
+    text: str
+    start_seconds: float
+    end_seconds: float
+    speaker: str | None = None
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
+    model: str
+    provider: str
+    language: str | None = None
+    duration_seconds: float | None = None
+    segments: list[TranscriptionSegment] = Field(default_factory=list)
+
+
 class StructuredOutputRequest(BaseModel):
     messages: list[ChatMessage]
     model: str
@@ -70,6 +94,10 @@ class ProviderAdapter(Protocol):
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse: ...
 
     async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse: ...
+
+    async def transcribe(
+        self, request: TranscriptionRequest, api_key: str
+    ) -> TranscriptionResponse: ...
 
     async def structured_output(
         self, request: StructuredOutputRequest, api_key: str

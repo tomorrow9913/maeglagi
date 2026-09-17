@@ -1,4 +1,3 @@
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +9,8 @@ class JobResponse(BaseModel):
     id: UUID
     source_id: UUID = Field(serialization_alias="sourceId")
     source_kind: str = Field(serialization_alias="sourceKind")
-    status: Literal["succeeded"] = "succeeded"
-    progress: Literal[1] = 1
-    stage: Literal["completed"] = "completed"
+    transcript_source: str | None = Field(default=None, serialization_alias="transcriptSource")
+    status: str
+    progress: float = Field(ge=0, le=1)
+    stage: str
+    error_message: str | None = Field(default=None, serialization_alias="errorMessage")

@@ -11,6 +11,9 @@ from app.modules.context_engine.application.provider import (
     EmbeddingResponse,
     StructuredOutputRequest,
     StructuredOutputResponse,
+    TranscriptionRequest,
+    TranscriptionResponse,
+    TranscriptionSegment,
 )
 
 
@@ -31,17 +34,21 @@ class OpenAICompatibleAdapter:
         *,
         supports_embedding: bool = False,
         supports_structured_output: bool = False,
+        supports_transcription: bool = False,
     ) -> None:
         self.id = provider_id
         self.display_name = display_name
         self.base_url = base_url.rstrip("/")
         self._supports_embedding = supports_embedding
         self._supports_structured_output = supports_structured_output
+        self._supports_transcription = supports_transcription
         capabilities = ["chat"]
         if supports_embedding:
             capabilities.append("embedding")
         if supports_structured_output:
             capabilities.append("structuredOutput")
+        if supports_transcription:
+            capabilities.append("transcription")
         capabilities.append("models")
         self.capabilities = tuple(capabilities)
 
@@ -134,6 +141,47 @@ class OpenAICompatibleAdapter:
             provider=self.id,
             usage=usage,
             provider_metadata={"request_id": response.headers.get("x-request-id")},
+        )
+
+    async def transcribe(
+        self, request: TranscriptionRequest, api_key: str
+    ) -> TranscriptionResponse:
+        if not self._supports_transcription:
+            raise ProviderCapabilityError(
+                f"{self.display_name}은 transcription을 지원하지 않습니다."
+            )
+        data = {"model": request.model, "response_format": "verbose_json"}
+        if request.language:
+            data["language"] = request.language
+        async with httpx.AsyncClient(timeout=180) as client:
+            response = await client.post(
+                f"{self.base_url}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                data=data,
+                files={"file": (request.filename, request.audio, request.content_type)},
+            )
+        if not response.is_success:
+            raise ProviderError(f"음성 인식 요청에 실패했습니다 ({response.status_code}).")
+        body = response.json()
+        segments = [
+            TranscriptionSegment(
+                text=item.get("text", "").strip(),
+                start_seconds=float(item.get("start", 0)),
+                end_seconds=float(item.get("end", item.get("start", 0))),
+            )
+            for item in body.get("segments", [])
+            if item.get("text", "").strip()
+        ]
+        text_value = str(body.get("text", "")).strip()
+        if not text_value:
+            raise ProviderError("음성 인식 결과가 비어 있습니다.")
+        return TranscriptionResponse(
+            text=text_value,
+            model=request.model,
+            provider=self.id,
+            language=body.get("language"),
+            duration_seconds=body.get("duration"),
+            segments=segments,
         )
 
     async def structured_output(
@@ -250,6 +298,11 @@ class AnthropicAdapter:
 
     async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse:
         raise ProviderCapabilityError("Anthropic은 embedding을 지원하지 않습니다.")
+
+    async def transcribe(
+        self, request: TranscriptionRequest, api_key: str
+    ) -> TranscriptionResponse:
+        raise ProviderCapabilityError("Anthropic은 transcription을 지원하지 않습니다.")
 
     async def structured_output(
         self, request: StructuredOutputRequest, api_key: str

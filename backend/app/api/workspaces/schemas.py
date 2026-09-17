@@ -30,7 +30,29 @@ class SourceResponse(BaseModel):
     title: str
     status: str
     created_at: datetime = Field(serialization_alias="createdAt")
-    size_bytes: int = Field(serialization_alias="sizeBytes")
+    size_bytes: int | None = Field(default=None, serialization_alias="sizeBytes")
+    duration_seconds: float | None = Field(default=None, serialization_alias="durationSeconds")
+    transcript_source: str | None = Field(default=None, serialization_alias="transcriptSource")
+
+
+class TranscriptSourceRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    text: str = Field(min_length=1)
+    title: str | None = Field(default=None, max_length=255)
+    duration_seconds: float | None = Field(default=None, ge=0, validation_alias="durationSeconds")
+
+
+class SimilarChunkResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID
+    source_id: UUID = Field(serialization_alias="sourceId")
+    position: int
+    content: str
+    distance: float
+    start_seconds: float | None = Field(default=None, serialization_alias="startSeconds")
+    end_seconds: float | None = Field(default=None, serialization_alias="endSeconds")
 
 
 class CredentialInput(BaseModel):
