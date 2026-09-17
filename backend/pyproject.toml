@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Organizational context platform API"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "neo4j>=5.28,<7",

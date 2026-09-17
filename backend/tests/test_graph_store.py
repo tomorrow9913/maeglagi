@@ -7,8 +7,11 @@ from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 
 
 def test_neo4j_requires_all_environment_variables() -> None:
-    assert not Settings(neo4j_uri="neo4j+s://example", neo4j_username="neo4j").neo4j_enabled
+    assert not Settings(
+        _env_file=None, neo4j_uri="neo4j+s://example", neo4j_username="neo4j"
+    ).neo4j_enabled
     assert Settings(
+        _env_file=None,
         neo4j_uri="neo4j+s://example",
         neo4j_username="neo4j",
         neo4j_password="secret",
