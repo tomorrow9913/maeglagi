@@ -11,6 +11,7 @@ import type {
   LlmProvider,
   Source,
   SourceContent,
+  TranscriptSourceInput,
   Workspace,
   WorkspaceSecrets,
 } from "./types";
@@ -57,6 +58,12 @@ export interface MaeglagiApi {
     workspaceId: string,
     audio: Blob,
     options?: UploadOptions,
+  ): Promise<ProcessingJob>;
+  /** 브라우저 받아쓰기 대본. 서버 STT 단계 없이 공통 분석 파이프라인으로 들어갑니다. */
+  uploadTranscript(
+    workspaceId: string,
+    input: TranscriptSourceInput,
+    signal?: AbortSignal,
   ): Promise<ProcessingJob>;
   getJob(jobId: string, signal?: AbortSignal): Promise<ProcessingJob>;
 

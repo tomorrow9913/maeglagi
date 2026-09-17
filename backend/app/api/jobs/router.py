@@ -18,8 +18,13 @@ async def get_job(job_id: UUID, user: CurrentUser, session: Session) -> JobRespo
     source = await session.get(Source, job_id)
     if source is None or source.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-    if source.status != "succeeded":
-        source.status = "succeeded"
-        session.add(source)
-        await session.commit()
-    return JobResponse(id=source.id, source_id=source.id, source_kind=source.kind)
+    return JobResponse(
+        id=source.id,
+        source_id=source.id,
+        source_kind=source.kind,
+        transcript_source=source.transcript_source,
+        status=source.status,
+        progress=source.progress,
+        stage=source.processing_stage,
+        error_message=source.error_message,
+    )

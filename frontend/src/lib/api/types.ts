@@ -73,6 +73,8 @@ export type Source = {
   sizeBytes?: number;
   /** 회의 녹음일 때만 */
   durationSeconds?: number;
+  /** server는 오디오 STT, browser는 브라우저 받아쓰기 원문입니다. */
+  transcriptSource?: "server" | "browser";
 };
 
 /** 원문 뷰어가 쓰는 정규화된 본문 */
@@ -98,11 +100,18 @@ export type ProcessingJob = {
   sourceId: string;
   /** 어떤 단계를 거치는지 화면이 판단할 수 있게 소스 종류를 함께 내려줍니다. */
   sourceKind: SourceKind;
+  transcriptSource?: "server" | "browser";
   status: ProcessingStatus;
   /** 0..1 */
   progress: number;
   stage: ProcessingStage;
   errorMessage?: string;
+};
+
+export type TranscriptSourceInput = {
+  text: string;
+  title?: string;
+  durationSeconds?: number;
 };
 
 /** 맥락 항목이 어떤 소스에서 나왔는지. 카드에서 바로 보여줄 수 있게 함께 내려줍니다. */

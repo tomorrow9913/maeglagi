@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 50 * 1024 * 1024
     cors_origins: list[str] = ["http://localhost:3000"]
     llm_provider: str = "mock"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    transcription_model: str = "whisper-1"
+    chunk_size_chars: int = 1200
+    chunk_overlap_chars: int = 200
     sentry_dsn: SecretStr = SecretStr("")
     sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     rate_limit: str = "120/minute"

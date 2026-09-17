@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
@@ -9,8 +10,15 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.jobs.schemas import JobResponse
 from app.api.workspaces.credentials import router as credentials_router
-from app.api.workspaces.schemas import CreateWorkspaceRequest, SourceResponse, WorkspaceResponse
+from app.api.workspaces.schemas import (
+    CreateWorkspaceRequest,
+    SimilarChunkResponse,
+    SourceResponse,
+    TranscriptSourceRequest,
+    WorkspaceResponse,
+)
 from app.auth import CurrentUser, bearer
 from app.core.config import get_settings
 from app.core.credentials import store_credential_secret
@@ -18,12 +26,27 @@ from app.core.database import get_session
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
+from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
+from app.modules.ingestion.domain.models import TranscriptSegment
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
 router = APIRouter()
 router.include_router(credentials_router)
 workspaces = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _job_response(source: Source) -> JobResponse:
+    return JobResponse(
+        id=source.id,
+        source_id=source.id,
+        source_kind=source.kind,
+        transcript_source=source.transcript_source,
+        status=source.status,
+        progress=source.progress,
+        stage=source.processing_stage,
+        error_message=source.error_message,
+    )
 
 
 def _response(workspace: Workspace, source_count: int = 0) -> WorkspaceResponse:
@@ -103,26 +126,190 @@ async def list_sources(workspace_id: UUID, user: CurrentUser, session: Session) 
     return list(result.all())
 
 
-@workspaces.post("/{workspace_id}/sources/documents", status_code=status.HTTP_201_CREATED)
+@workspaces.post(
+    "/{workspace_id}/sources/documents",
+    status_code=status.HTTP_201_CREATED,
+    response_model=JobResponse,
+)
 async def upload_document(
     workspace_id: UUID,
     file: UploadFile,
     user: CurrentUser,
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
-) -> dict[str, object]:
-    return await _upload_source(workspace_id, file, "document", user, session, credentials)
+) -> JobResponse:
+    source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
+    source.status = "succeeded"
+    source.processing_stage = "completed"
+    source.progress = 1
+    await session.commit()
+    return _job_response(source)
 
 
-@workspaces.post("/{workspace_id}/sources/recordings", status_code=status.HTTP_201_CREATED)
+@workspaces.post(
+    "/{workspace_id}/sources/recordings",
+    status_code=status.HTTP_201_CREATED,
+    response_model=JobResponse,
+)
 async def upload_recording(
     workspace_id: UUID,
     audio: UploadFile,
     user: CurrentUser,
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
-) -> dict[str, object]:
-    return await _upload_source(workspace_id, audio, "meeting", user, session, credentials)
+) -> JobResponse:
+    source, content = await _upload_source(
+        workspace_id, audio, "meeting", user, session, credentials
+    )
+    source.transcript_source = "server"
+    source.status = "processing"
+    source.processing_stage = "transcribing"
+    source.progress = 0.2
+    pipeline = IngestionPipeline()
+    try:
+        transcription = await pipeline.transcribe(
+            session,
+            source=source,
+            audio=content,
+            filename=source.title,
+            content_type=source.content_type,
+        )
+        source.transcript_text = transcription.text
+        source.duration_seconds = transcription.duration_seconds
+        source.processing_stage = "analyzing"
+        source.progress = 0.55
+        segments = [
+            TranscriptSegment(
+                text=item.text,
+                start_seconds=item.start_seconds,
+                end_seconds=item.end_seconds,
+                speaker=item.speaker,
+            )
+            for item in transcription.segments
+        ] or [
+            TranscriptSegment(
+                text=transcription.text,
+                start_seconds=0,
+                end_seconds=transcription.duration_seconds or 0,
+            )
+        ]
+        await pipeline.index_transcript(
+            session, source=source, segments=segments, language=transcription.language
+        )
+        source.processing_stage = "completed"
+        source.progress = 1
+        await session.commit()
+    except IngestionError as exc:
+        source.status = "failed"
+        source.error_message = str(exc)
+        session.add(source)
+        await session.commit()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    return _job_response(source)
+
+
+@workspaces.post(
+    "/{workspace_id}/sources/transcripts",
+    status_code=status.HTTP_201_CREATED,
+    response_model=JobResponse,
+)
+async def create_transcript_source(
+    workspace_id: UUID,
+    body: TranscriptSourceRequest,
+    user: CurrentUser,
+    session: Session,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
+) -> JobResponse:
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None or workspace.owner_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    text_value = body.text.strip()
+    if not text_value:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Transcript text is required")
+    now = datetime.now(UTC)
+    title = (
+        body.title.strip()
+        if body.title and body.title.strip()
+        else now.strftime("회의 대본 %Y-%m-%d %H:%M")
+    )
+    content = text_value.encode()
+    source = Source(
+        workspace_id=workspace.id,
+        owner_id=user.id,
+        kind="meeting",
+        title=title,
+        object_path="pending",
+        content_type="text/plain; charset=utf-8",
+        size_bytes=len(content),
+        transcript_source="browser",
+        duration_seconds=body.duration_seconds,
+        transcript_text=text_value,
+        status="processing",
+        processing_stage="analyzing",
+        progress=0.4,
+    )
+    source.object_path = f"{user.id}/{workspace.id}/{source.id}/transcript.txt"
+    await _upload_object(source, content, credentials)
+    session.add(source)
+    try:
+        await IngestionPipeline().index_transcript(
+            session,
+            source=source,
+            segments=[
+                TranscriptSegment(
+                    text=text_value,
+                    start_seconds=0,
+                    end_seconds=body.duration_seconds or 0,
+                )
+            ],
+        )
+        source.processing_stage = "completed"
+        source.progress = 1
+        await session.commit()
+    except IngestionError as exc:
+        source.status = "failed"
+        source.error_message = str(exc)
+        session.add(source)
+        await session.commit()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    return _job_response(source)
+
+
+@workspaces.get("/{workspace_id}/search", response_model=list[SimilarChunkResponse])
+async def search_workspace(
+    workspace_id: UUID,
+    q: str,
+    user: CurrentUser,
+    session: Session,
+    limit: int = 10,
+) -> list[SimilarChunkResponse]:
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None or workspace.owner_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    if not q.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Search query is required")
+    try:
+        rows = await IngestionPipeline().search(
+            session,
+            workspace_id=workspace_id,
+            owner_id=user.id,
+            query=q.strip(),
+            limit=max(1, min(limit, 50)),
+        )
+    except IngestionError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    return [
+        SimilarChunkResponse(
+            id=chunk.id,
+            source_id=chunk.source_id,
+            position=chunk.position,
+            content=chunk.content,
+            distance=distance,
+            start_seconds=chunk.start_seconds,
+            end_seconds=chunk.end_seconds,
+        )
+        for chunk, distance in rows
+    ]
 
 
 async def _upload_source(
@@ -132,7 +319,7 @@ async def _upload_source(
     user: CurrentUser,
     session: AsyncSession,
     credentials: HTTPAuthorizationCredentials,
-) -> dict[str, object]:
+) -> tuple[Source, bytes]:
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
@@ -154,6 +341,15 @@ async def _upload_source(
         size_bytes=len(content),
     )
     source.object_path = f"{user.id}/{workspace.id}/{source.id}/{source.title}"
+    await _upload_object(source, content, credentials)
+    session.add(source)
+    return source, content
+
+
+async def _upload_object(
+    source: Source, content: bytes, credentials: HTTPAuthorizationCredentials
+) -> None:
+    settings = get_settings()
     storage_url = (
         f"{settings.supabase_url.rstrip('/')}/storage/v1/object/"
         f"{settings.supabase_storage_bucket}/{quote(source.object_path, safe='/')}"
@@ -171,16 +367,6 @@ async def _upload_source(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Storage unavailable") from exc
     if response.status_code not in {status.HTTP_200_OK, status.HTTP_201_CREATED}:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Storage upload failed")
-    session.add(source)
-    await session.commit()
-    return {
-        "id": str(source.id),
-        "sourceId": str(source.id),
-        "sourceKind": kind,
-        "status": "queued",
-        "progress": 0,
-        "stage": "uploaded",
-    }
 
 
 router.include_router(workspaces)
