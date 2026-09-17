@@ -12,7 +12,7 @@ from app.api.ai.schemas import (
     ProviderStructuredOutputRequest,
 )
 from app.auth import CurrentUser
-from app.core.credentials import decrypt_credential
+from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
 from app.core.database import get_session
 from app.modules.context_engine.application.provider import (
     ChatRequest,
@@ -47,11 +47,12 @@ async def _workspace_credentials(
     return list(result.all())
 
 
-def _provider_with_credential(
+async def _provider_with_credential(
     provider_id: str,
     capability: str,
     credential_label: str | None,
     credentials: list[ProviderCredential],
+    session: AsyncSession,
 ) -> tuple[ProviderAdapter, str]:
     adapter = provider_registry.get(provider_id)
     if adapter is None or capability not in adapter.capabilities:
@@ -72,8 +73,8 @@ def _provider_with_credential(
     if credential is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "사용 가능한 API key가 없습니다.")
     try:
-        api_key = decrypt_credential(credential.encrypted_secret)
-    except ValueError as exc:
+        api_key = await resolve_credential_secret(session, credential)
+    except CredentialUnavailableError as exc:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, "저장된 API key를 사용할 수 없습니다."
         ) from exc
@@ -92,8 +93,9 @@ async def list_available_providers(
         models: list[str] = []
         if credential is not None:
             try:
-                models = await adapter.list_models(decrypt_credential(credential.encrypted_secret))
-            except (ProviderError, ValueError):
+                api_key = await resolve_credential_secret(session, credential)
+                models = await adapter.list_models(api_key)
+            except (ProviderError, CredentialUnavailableError):
                 models = []
         items.append(
             ProviderCatalogItem(
@@ -112,8 +114,8 @@ async def chat(
     workspace_id: UUID, body: ProviderChatRequest, user: CurrentUser, session: Session
 ) -> ChatResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
-    adapter, api_key = _provider_with_credential(
-        body.provider, "chat", body.credential_label, credentials
+    adapter, api_key = await _provider_with_credential(
+        body.provider, "chat", body.credential_label, credentials, session
     )
     request = ChatRequest(
         messages=body.messages,
@@ -133,8 +135,8 @@ async def embedding(
     workspace_id: UUID, body: ProviderEmbeddingRequest, user: CurrentUser, session: Session
 ) -> EmbeddingResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
-    adapter, api_key = _provider_with_credential(
-        body.provider, "embedding", body.credential_label, credentials
+    adapter, api_key = await _provider_with_credential(
+        body.provider, "embedding", body.credential_label, credentials, session
     )
     request = EmbeddingRequest(
         input=body.input,
@@ -156,8 +158,8 @@ async def structured_output(
     session: Session,
 ) -> StructuredOutputResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
-    adapter, api_key = _provider_with_credential(
-        body.provider, "structuredOutput", body.credential_label, credentials
+    adapter, api_key = await _provider_with_credential(
+        body.provider, "structuredOutput", body.credential_label, credentials, session
     )
     request = StructuredOutputRequest(
         messages=body.messages,

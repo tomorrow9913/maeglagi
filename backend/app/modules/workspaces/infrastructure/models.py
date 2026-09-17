@@ -1,7 +1,17 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlmodel import Field, SQLModel
 
 
@@ -46,6 +56,10 @@ class ProviderCredential(SQLModel, table=True):
     __tablename__ = "provider_credentials"
     __table_args__ = (
         UniqueConstraint("workspace_id", "provider", "label", name="uq_provider_credential_label"),
+        CheckConstraint(
+            "vault_secret_id is not null or encrypted_secret is not null",
+            name="ck_provider_credentials_has_secret",
+        ),
         Index("provider_credentials_workspace_id_idx", "workspace_id"),
         Index(
             "provider_credentials_one_default_idx",
@@ -62,7 +76,9 @@ class ProviderCredential(SQLModel, table=True):
     owner_id: UUID
     provider: str = Field(max_length=40)
     label: str = Field(default="기본", max_length=80)
-    encrypted_secret: str = Field(sa_column=Column(Text, nullable=False))
+    vault_secret_id: UUID | None = Field(default=None)
+    # Compatibility for pre-Vault credentials. New writes leave this empty.
+    encrypted_secret: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     key_hint: str = Field(max_length=8)
     status: str = Field(default="active", max_length=20)
     is_default: bool = Field(default=False)

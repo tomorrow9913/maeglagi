@@ -15,3 +15,8 @@ uv run alembic current
 
 모델 변경 시 `uv run alembic revision --autogenerate -m "description"`으로 revision을
 만들고 생성된 diff를 반드시 검토합니다.
+
+Provider API key는 애플리케이션 테이블에 직접 저장하지 않고 Supabase Vault에
+저장합니다. `provider_credentials`와 작업 큐에는 Vault secret UUID만 전달하며,
+provider 호출 직전에만 secret을 해석합니다. 운영 연결에는 `anon` 또는
+`authenticated`가 아닌 제한된 서버용 DB 역할을 사용해야 합니다.
