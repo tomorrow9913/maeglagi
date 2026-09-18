@@ -58,6 +58,7 @@ class Source(SQLModel, table=True):
     transcript_source: str | None = Field(default=None, max_length=20)
     duration_seconds: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     transcript_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    content_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     status: str = Field(default="queued", max_length=20)
     processing_stage: str = Field(default="uploaded", max_length=20)
     progress: float = Field(default=0, ge=0, le=1, sa_column=Column(Float, nullable=False))

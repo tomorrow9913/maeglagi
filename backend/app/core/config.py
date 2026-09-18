@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://maeglagi:maeglagi@localhost:5432/maeglagi"
     supabase_url: str = ""
     supabase_publishable_key: SecretStr = SecretStr("")
+    supabase_service_role_key: SecretStr = SecretStr("")
     supabase_storage_bucket: str = "sources"
     neo4j_uri: str = ""
     neo4j_username: str = ""
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
     rate_limit: str = "120/minute"
     rate_limit_storage_uri: str = "memory://"
     log_level: str = "INFO"
+    celery_broker_url: SecretStr = SecretStr("memory://")
+    celery_task_always_eager: bool = False
 
     @property
     def supabase_enabled(self) -> bool:

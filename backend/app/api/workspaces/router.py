@@ -6,6 +6,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials
+from kombu.exceptions import OperationalError
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -27,7 +28,7 @@ from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
-from app.modules.ingestion.domain.models import TranscriptSegment
+from app.modules.ingestion.infrastructure.tasks import process_source
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
 router = APIRouter()
@@ -56,6 +57,30 @@ def _response(workspace: Workspace, source_count: int = 0) -> WorkspaceResponse:
         created_at=workspace.created_at,
         source_count=source_count,
     )
+
+
+def _validate_document(file: UploadFile) -> None:
+    filename = (file.filename or "").lower()
+    allowed = (".pdf", ".docx", ".txt", ".md", ".markdown")
+    if not filename.endswith(allowed):
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "Supported document types: PDF, DOCX, TXT, MD",
+        )
+
+
+async def _enqueue_source(source: Source, session: AsyncSession) -> None:
+    try:
+        process_source.apply_async(args=[str(source.id)], task_id=str(source.id))
+    except (OperationalError, ConnectionError) as exc:
+        source.status = "failed"
+        source.error_message = "Processing queue unavailable"
+        session.add(source)
+        await session.commit()
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Processing queue unavailable",
+        ) from exc
 
 
 @workspaces.get("", response_model=list[WorkspaceResponse])
@@ -128,7 +153,7 @@ async def list_sources(workspace_id: UUID, user: CurrentUser, session: Session) 
 
 @workspaces.post(
     "/{workspace_id}/sources/documents",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     response_model=JobResponse,
 )
 async def upload_document(
@@ -138,17 +163,18 @@ async def upload_document(
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
+    _validate_document(file)
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
-    source.status = "succeeded"
-    source.processing_stage = "completed"
-    source.progress = 1
+    source.status = "queued"
+    source.processing_stage = "uploaded"
     await session.commit()
+    await _enqueue_source(source, session)
     return _job_response(source)
 
 
 @workspaces.post(
     "/{workspace_id}/sources/recordings",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     response_model=JobResponse,
 )
 async def upload_recording(
@@ -158,59 +184,21 @@ async def upload_recording(
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
-    source, content = await _upload_source(
+    source, _ = await _upload_source(
         workspace_id, audio, "meeting", user, session, credentials
     )
     source.transcript_source = "server"
-    source.status = "processing"
-    source.processing_stage = "transcribing"
-    source.progress = 0.2
-    pipeline = IngestionPipeline()
-    try:
-        transcription = await pipeline.transcribe(
-            session,
-            source=source,
-            audio=content,
-            filename=source.title,
-            content_type=source.content_type,
-        )
-        source.transcript_text = transcription.text
-        source.duration_seconds = transcription.duration_seconds
-        source.processing_stage = "analyzing"
-        source.progress = 0.55
-        segments = [
-            TranscriptSegment(
-                text=item.text,
-                start_seconds=item.start_seconds,
-                end_seconds=item.end_seconds,
-                speaker=item.speaker,
-            )
-            for item in transcription.segments
-        ] or [
-            TranscriptSegment(
-                text=transcription.text,
-                start_seconds=0,
-                end_seconds=transcription.duration_seconds or 0,
-            )
-        ]
-        await pipeline.index_transcript(
-            session, source=source, segments=segments, language=transcription.language
-        )
-        source.processing_stage = "completed"
-        source.progress = 1
-        await session.commit()
-    except IngestionError as exc:
-        source.status = "failed"
-        source.error_message = str(exc)
-        session.add(source)
-        await session.commit()
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    source.status = "queued"
+    source.processing_stage = "uploaded"
+    source.progress = 0
+    await session.commit()
+    await _enqueue_source(source, session)
     return _job_response(source)
 
 
 @workspaces.post(
     "/{workspace_id}/sources/transcripts",
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     response_model=JobResponse,
 )
 async def create_transcript_source(
@@ -244,34 +232,15 @@ async def create_transcript_source(
         transcript_source="browser",
         duration_seconds=body.duration_seconds,
         transcript_text=text_value,
-        status="processing",
-        processing_stage="analyzing",
-        progress=0.4,
+        status="queued",
+        processing_stage="uploaded",
+        progress=0,
     )
     source.object_path = f"{user.id}/{workspace.id}/{source.id}/transcript.txt"
     await _upload_object(source, content, credentials)
     session.add(source)
-    try:
-        await IngestionPipeline().index_transcript(
-            session,
-            source=source,
-            segments=[
-                TranscriptSegment(
-                    text=text_value,
-                    start_seconds=0,
-                    end_seconds=body.duration_seconds or 0,
-                )
-            ],
-        )
-        source.processing_stage = "completed"
-        source.progress = 1
-        await session.commit()
-    except IngestionError as exc:
-        source.status = "failed"
-        source.error_message = str(exc)
-        session.add(source)
-        await session.commit()
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    await session.commit()
+    await _enqueue_source(source, session)
     return _job_response(source)
 
 

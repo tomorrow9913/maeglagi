@@ -1,4 +1,11 @@
 services:
+  - type: keyvalue
+    name: maeglagi-valkey
+    plan: 256mb
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
   - type: web
     name: maeglagi-api
     runtime: python
@@ -17,6 +24,13 @@ services:
         sync: false
       - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: maeglagi-valkey
+          type: keyvalue
+          property: connectionString
       - key: NEO4J_URI
         sync: false
       - key: NEO4J_USERNAME
@@ -33,5 +47,44 @@ services:
         value: 120/minute
       - key: RATE_LIMIT_STORAGE_URI
         value: memory://
+      - key: LOG_LEVEL
+        value: INFO
+
+  - type: worker
+    name: maeglagi-worker
+    runtime: python
+    rootDir: backend
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run --no-sync celery -A app.core.celery:celery_app worker --loglevel=INFO --concurrency=2
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_SECRET_KEY
+        fromService:
+          name: maeglagi-api
+          type: web
+          envVarKey: APP_SECRET_KEY
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: sources
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: maeglagi-valkey
+          type: keyvalue
+          property: connectionString
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
       - key: LOG_LEVEL
         value: INFO

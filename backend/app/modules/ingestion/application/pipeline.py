@@ -17,7 +17,7 @@ from app.modules.context_engine.infrastructure.provider_adapters import Provider
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.ingestion.application.chunking import CharacterOverlapChunker
 from app.modules.ingestion.application.normalization import NormalizationService
-from app.modules.ingestion.domain.models import TranscriptSegment
+from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source
 
 
@@ -88,16 +88,16 @@ class IngestionPipeline:
         except ProviderError as exc:
             raise IngestionError(str(exc)) from exc
 
-    async def index_transcript(
+    async def index_source(
         self,
         session: AsyncSession,
         *,
         source: Source,
-        segments: list[TranscriptSegment],
+        segments: list[TranscriptSegment] | list[DocumentSection],
         language: str | None = None,
     ) -> int:
         normalized = self.normalizer.normalize(
-            "meeting",
+            source.kind,
             source_id=source.id,
             workspace_id=source.workspace_id,
             title=source.title,
@@ -147,9 +147,20 @@ class IngestionPipeline:
                     embedding=embedding,
                 )
             )
-        source.status = "succeeded"
         session.add(source)
         return len(chunks)
+
+    async def index_transcript(
+        self,
+        session: AsyncSession,
+        *,
+        source: Source,
+        segments: list[TranscriptSegment],
+        language: str | None = None,
+    ) -> int:
+        return await self.index_source(
+            session, source=source, segments=segments, language=language
+        )
 
     async def search(
         self,
