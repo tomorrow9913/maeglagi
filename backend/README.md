@@ -20,3 +20,16 @@ Provider API key는 애플리케이션 테이블에 직접 저장하지 않고 S
 저장합니다. `provider_credentials`와 작업 큐에는 Vault secret UUID만 전달하며,
 provider 호출 직전에만 secret을 해석합니다. 운영 연결에는 `anon` 또는
 `authenticated`가 아닌 제한된 서버용 DB 역할을 사용해야 합니다.
+
+## Background worker
+
+로컬 Valkey/Redis를 실행하고 API와 worker에 같은 `CELERY_BROKER_URL`을 설정합니다.
+
+```bash
+uv run celery -A app.core.celery:celery_app worker --loglevel=INFO --concurrency=2
+```
+
+API는 원본을 Supabase Storage에 저장하고 즉시 `202`와 job을 반환합니다. Celery 메시지는
+민감한 키나 파일 대신 `source_id`만 전달합니다. worker는 문서를 MarkItDown으로 파싱하거나
+회의를 STT 처리한 뒤 Source의 단계와 진행률을 갱신합니다. 작업은 late acknowledgement,
+worker-loss 재전달, 최대 3회 exponential backoff 재시도를 사용합니다.
