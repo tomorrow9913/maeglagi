@@ -1,7 +1,10 @@
+from datetime import date
+
 import pytest
 
 from app.modules.context_engine.application.model_pricing import _parse_prices
 from app.modules.context_engine.application.model_roles import ModelRole, options_by_role
+from app.modules.context_engine.application.provider import ModelInfo
 
 
 class Adapter:
@@ -32,7 +35,15 @@ def test_prices_only_use_matching_direct_provider_and_token_rates() -> None:
 
 def test_live_models_are_ordered_by_known_price_then_unknown_price() -> None:
     options = options_by_role(
-        [(Adapter(), ["gpt-expensive-mini", "gpt-unknown", "gpt-cheap"])],
+        [
+            (
+                Adapter(),
+                [
+                    ModelInfo(id=model)
+                    for model in ("gpt-expensive-mini", "gpt-unknown", "gpt-cheap")
+                ],
+            )
+        ],
         {("openai", "gpt-expensive-mini"): 8.0, ("openai", "gpt-cheap"): 1.0},
     )
 
@@ -41,3 +52,22 @@ def test_live_models_are_ordered_by_known_price_then_unknown_price() -> None:
         "gpt-expensive-mini",
         "gpt-unknown",
     ]
+
+
+def test_offered_default_leads_with_price_order_for_other_live_models() -> None:
+    options = options_by_role(
+        [
+            (
+                Adapter(),
+                [
+                    ModelInfo(id="gpt-default"),
+                    ModelInfo(id="gpt-cheap"),
+                    ModelInfo(id="gpt-retired", shutdown_date=date(2020, 1, 1)),
+                ],
+            )
+        ],
+        {("openai", "gpt-default"): 8.0, ("openai", "gpt-cheap"): 1.0},
+        defaults={"openai": {"answer": "gpt-default"}},
+    )
+
+    assert [item.model for item in options[ModelRole.ANSWER]] == ["gpt-default", "gpt-cheap"]

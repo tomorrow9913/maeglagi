@@ -1,3 +1,4 @@
+from datetime import date
 from typing import NamedTuple
 from uuid import UUID
 
@@ -52,8 +53,18 @@ class IngestionPipeline:
             self.settings.chunk_size_chars, self.settings.chunk_overlap_chars
         )
 
+    def _default_model(self, provider_id: str, role: ModelRole) -> str:
+        """Use the legacy embedding setting, otherwise this provider's configured fallback."""
+        if role == ModelRole.EMBEDDING:
+            # Workspaces without a stored choice have always used this deployment setting.
+            # Changing the default for new indexing would mix vector spaces in old workspaces.
+            return self.settings.embedding_model
+        override = self.settings.provider_fallback_models.get(provider_id, {})
+        configured = self.settings.provider_default_models.get(provider_id, {})
+        return override.get(role.value) or configured.get(role.value) or self._fallback_model(role)
+
     def _fallback_model(self, role: ModelRole) -> str:
-        """Only for workspaces that never chose: the deployment's configured default."""
+        """Last resort when a provider has no configured default: the deployment's flat setting."""
         return {
             ModelRole.ANSWER: self.settings.answer_model,
             ModelRole.EXTRACTION: self.settings.extraction_model,
@@ -83,8 +94,9 @@ class IngestionPipeline:
             .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
         )
         credentials = list(result.all())
-        if chosen is not None:  # the key of the chosen model's provider goes first
-            credentials.sort(key=lambda credential: credential.provider != chosen.provider)
+        if chosen is not None:
+            credentials = [c for c in credentials if c.provider == chosen.provider]
+        needs_key_match = chosen is not None and len(credentials) > 1
         for credential in credentials:
             adapter = provider_registry.get(credential.provider)
             if adapter is None or capability not in adapter.capabilities:
@@ -93,9 +105,24 @@ class IngestionPipeline:
                 api_key = await resolve_credential_secret(session, credential)
             except CredentialUnavailableError:
                 continue
-            uses_choice = chosen is not None and chosen.provider == credential.provider
-            model = chosen.model if uses_choice and chosen else self._fallback_model(role)
+            if chosen is not None:
+                if needs_key_match:
+                    try:
+                        offered = await adapter.list_model_infos(api_key)
+                    except ProviderError:
+                        continue
+                    if not any(
+                        info.id == chosen.model
+                        and (info.shutdown_date is None or info.shutdown_date > date.today())
+                        for info in offered
+                    ):
+                        continue
+                model = chosen.model
+            else:
+                model = self._default_model(credential.provider, role)
             return ResolvedProvider(adapter, api_key, model)
+        if chosen is not None:
+            raise IngestionError("선택한 모델을 제공하는 API key가 없습니다.")
         raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
 
     async def transcribe(

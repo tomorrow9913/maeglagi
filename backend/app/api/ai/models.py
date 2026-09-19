@@ -24,6 +24,7 @@ from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
+from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
 from app.modules.workspaces.infrastructure.models import Workspace
 
 router = APIRouter()
@@ -137,11 +138,20 @@ async def update_workspace_models(
     requested = body.selections.get(ModelRole.EMBEDDING.value)
     if requested is not None and ModelRole.EMBEDDING in locked:
         current = selection_of(workspace.model_settings, ModelRole.EMBEDDING)
-        # A workspace that never chose but already embedded used the deployment default; recording
-        # that model is allowed, anything else would mix incompatible vectors.
-        unchanged = requested == current or (
-            current is None and requested.model == settings.embedding_model
-        )
+        unchanged = requested == current
+        if current is None:
+            # Legacy indexed chunks have no stored selection. Resolve the same key and flat
+            # embedding model used by ingestion before accepting a selection for those vectors.
+            try:
+                legacy = await IngestionPipeline(settings).provider_with_model(
+                    session,
+                    workspace_id=workspace.id,
+                    owner_id=user.id,
+                    role=ModelRole.EMBEDDING,
+                )
+                unchanged = requested == ModelOption(provider=legacy.adapter.id, model=legacy.model)
+            except IngestionError:
+                unchanged = False
         if not unchanged:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
