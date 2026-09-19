@@ -29,6 +29,12 @@ def normalize_name(name: str, kind: str) -> str:
     return text
 
 
+def normalize_identifier(value: str) -> str:
+    """Emails compare case-insensitively and without a mailto: prefix; others just by text."""
+    text = unicodedata.normalize("NFKC", value).strip().casefold()
+    return text.removeprefix("mailto:").strip()
+
+
 def pick_canonical(names: list[str], kind: str) -> str:
     """Most complete spelling (longest normalized form); ties go to the cleanest raw text."""
     return max(dict.fromkeys(names), key=lambda n: (len(normalize_name(n, kind)), -len(n)))
@@ -48,7 +54,14 @@ class _Group:
         self.kind = kind
         self.names: list[str] = []
         self.keys: set[str] = set()
+        self.identifiers: set[str] = set()
         self.timestamp: datetime | None = None
+
+    def absorb(self, other: "_Group") -> None:
+        self.names += other.names
+        self.keys |= other.keys
+        self.identifiers |= other.identifiers
+        self.timestamp = self.timestamp or other.timestamp
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -60,6 +73,11 @@ def _parse_time(value: str | None) -> datetime | None:
         return None
 
 
+def _stable_key(group_kind: str, canonical: str, identifiers: set[str]) -> str:
+    # Identified entities are keyed by identifier, so homonyms never share a node id.
+    return f"id:{min(identifiers)}" if identifiers else normalize_name(canonical, group_kind)
+
+
 def resolve_extraction(
     result: ExtractionResult,
     *,
@@ -68,50 +86,75 @@ def resolve_extraction(
     chunk_id: UUID | None = None,
     timestamp: datetime | None = None,
 ) -> ResolvedGraph:
-    """Merge same-kind entities that share a normalized name or alias, then wire relations.
+    """Merge mentions of the same entity; never merge on name alone when identifiers disagree.
 
-    Events (Meeting/Decision/Task/...) are graph entities too, so both lists are resolved together.
+    - A shared identifier (email etc.) always means the same entity, whatever the names.
+    - Same kind and shared normalized name/alias merge, unless both sides carry identifiers
+      that do not overlap (homonyms).
+    - A mention without identifiers that fits several distinct same-name entities is ambiguous,
+      so it stays separate and is reported instead of being guessed.
+    Events (Meeting/Decision/Task/...) are graph entities too and are resolved together.
     """
     warnings: list[str] = []
-    mentions: list[tuple[str, str, list[str], datetime | None]] = [
-        (item.name, item.kind.value, item.aliases, None) for item in result.entities
-    ] + [(item.name, item.kind.value, [], _parse_time(item.occurred_at)) for item in result.events]
+    mentions: list[tuple[str, str, list[str], set[str], datetime | None]] = [
+        (
+            item.name,
+            item.kind.value,
+            item.aliases,
+            {normalize_identifier(v) for v in item.identifiers} - {""},
+            None,
+        )
+        for item in result.entities
+    ] + [
+        (item.name, item.kind.value, [], set(), _parse_time(item.occurred_at))
+        for item in result.events
+    ]
 
     groups: list[_Group] = []
-    key_to_group: dict[tuple[str, str], _Group] = {}
-    for name, kind, aliases, occurred_at in mentions:
-        keys = {normalize_name(value, kind) for value in [name, *aliases]}
-        keys.discard("")
+    for name, kind, aliases, identifiers, occurred_at in mentions:
+        keys = {normalize_name(value, kind) for value in [name, *aliases]} - {""}
         if not keys:
             warnings.append(f"이름이 비어 있는 개체를 버렸습니다: {name!r}")
             continue
-        matched = {
-            id(key_to_group[(kind, key)]): key_to_group[(kind, key)]
-            for key in keys
-            if (kind, key) in key_to_group
-        }
+        same_kind = [group for group in groups if group.kind == kind]
+        by_identifier = [group for group in same_kind if group.identifiers & identifiers]
+        by_name = [
+            group
+            for group in same_kind
+            if group.keys & keys
+            and group not in by_identifier
+            and (not identifiers or not group.identifiers)  # both identified => homonym
+        ]
+        if by_identifier:
+            matched = by_identifier + [group for group in by_name if not group.identifiers]
+        elif not identifiers and sum(1 for group in by_name if group.identifiers) > 1:
+            warnings.append(
+                f"이름이 같은 개체가 여러 명이라 하나로 합치지 않았습니다: {name} "
+                "(이메일 등 식별 정보가 필요합니다)"
+            )
+            matched = []
+        else:
+            matched = by_name
         if matched:
-            group, *others = matched.values()
-            for other in others:  # this mention bridges two groups: fold them together
-                group.names += other.names
-                group.keys |= other.keys
-                group.timestamp = group.timestamp or other.timestamp
+            group, *others = matched
+            for other in others:
+                group.absorb(other)
                 groups.remove(other)
         else:
             group = _Group(kind)
             groups.append(group)
         group.names += [name, *aliases]
         group.keys |= keys
+        group.identifiers |= identifiers
         group.timestamp = group.timestamp or occurred_at
-        for key in group.keys:
-            key_to_group[(kind, key)] = group
 
     entities: list[GraphEntity] = []
-    lookup: dict[str, UUID] = {}
+    lookup: dict[str, set[UUID]] = {}
     for group in groups:
         canonical = pick_canonical(group.names, group.kind)
-        key = normalize_name(canonical, group.kind)
-        identifier = entity_id(workspace_id, group.kind, key)
+        identifier = entity_id(
+            workspace_id, group.kind, _stable_key(group.kind, canonical, group.identifiers)
+        )
         entities.append(
             GraphEntity(
                 id=identifier,
@@ -120,6 +163,7 @@ def resolve_extraction(
                 name=canonical,
                 aliases=[name for name in dict.fromkeys(group.names) if name != canonical],
                 keys=sorted(group.keys),
+                identifiers=sorted(group.identifiers),
                 evidence=GraphEvidence(
                     source_id=source_id,
                     chunk_id=chunk_id,
@@ -128,15 +172,17 @@ def resolve_extraction(
             )
         )
         for group_key in group.keys:
-            lookup[f"{group.kind}:{group_key}"] = identifier
+            lookup.setdefault(f"{group.kind}:{group_key}", set()).add(identifier)
 
     def endpoint(name: str) -> UUID | None:
         # Relation stage refers to entities by name only, so match across kinds.
+        candidates: set[UUID] = set()
         for kind in EntityKind:
-            found = lookup.get(f"{kind.value}:{normalize_name(name, kind.value)}")
-            if found:
-                return found
-        return None
+            candidates |= lookup.get(f"{kind.value}:{normalize_name(name, kind.value)}", set())
+        if len(candidates) > 1:
+            warnings.append(f"이름이 같은 개체가 여러 개라 관계 끝점을 정할 수 없습니다: {name}")
+            return None
+        return next(iter(candidates), None)
 
     relations: dict[UUID, GraphRelation] = {}
     for relation in result.relations:

@@ -18,8 +18,20 @@ class Seed:
     responses: dict[str, Any] = field(default_factory=dict)
 
 
-def entity(name: str, kind: str, refs: list[str], aliases: list[str] | None = None) -> dict:
-    return {"name": name, "kind": kind, "aliases": aliases or [], "source_refs": refs}
+def entity(
+    name: str,
+    kind: str,
+    refs: list[str],
+    aliases: list[str] | None = None,
+    identifiers: list[str] | None = None,
+) -> dict:
+    return {
+        "name": name,
+        "kind": kind,
+        "aliases": aliases or [],
+        "identifiers": identifiers or [],
+        "source_refs": refs,
+    }
 
 
 def event(

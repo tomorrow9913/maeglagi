@@ -19,6 +19,8 @@ class GraphEntity(BaseModel):
     # Other spellings of the same entity; `keys` are their normalized forms used for merging.
     aliases: list[str] = Field(default_factory=list)
     keys: list[str] = Field(default_factory=list)
+    # Normalized identifying details (email etc.). Names alone never merge people who differ here.
+    identifiers: list[str] = Field(default_factory=list)
 
 
 class GraphRelation(BaseModel):

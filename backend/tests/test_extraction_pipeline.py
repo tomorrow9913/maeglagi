@@ -24,12 +24,14 @@ RESPONSES: dict[str, dict[str, Any]] = {
                 "name": "김민수",
                 "kind": "Person",
                 "aliases": ["민수"],
+                "identifiers": [],
                 "source_refs": ["민수가 말했다"],
             },
             {
                 "name": "맥락이",
                 "kind": "Project",
                 "aliases": [],
+                "identifiers": [],
                 "source_refs": ["맥락이 프로젝트"],
             },
         ]
