@@ -16,6 +16,24 @@ def test_request_id_is_preserved_in_response() -> None:
     assert response.headers["X-Request-ID"] == request_id
 
 
+def test_cors_preflight_preserves_request_id() -> None:
+    request_id = "0123456789ab4def8123456789abcdef"
+    origin = "https://maeglagi-frontend.vercel.app"
+    test_app = create_app(Settings(_env_file=None, cors_origins=[origin]))
+    response = TestClient(test_app).options(
+        "/api/v1/health",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "X-Request-ID": request_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+    assert response.headers["X-Request-ID"] == request_id
+
+
 def test_rate_limit_middleware_rejects_excess_requests() -> None:
     limited_app = FastAPI()
     limited_app.add_middleware(RateLimitMiddleware, limit="1/minute", storage_uri="memory://")

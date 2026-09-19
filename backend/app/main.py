@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,15 +16,18 @@ class CORSFastAPI(FastAPI):
         super().__init__(**kwargs)
         self.cors_origins = cors_origins
 
-    def build_middleware_stack(self) -> CORSMiddleware:
-        # ServerErrorMiddleware produces unhandled 500s, so CORS must wrap it.
-        return CORSMiddleware(
-            super().build_middleware_stack(),
-            allow_origins=self.cors_origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-            expose_headers=["X-Request-ID"],
+    def build_middleware_stack(self) -> CorrelationIdMiddleware:
+        # CORS covers unhandled 500s; correlation also covers CORS preflights.
+        return CorrelationIdMiddleware(
+            CORSMiddleware(
+                super().build_middleware_stack(),
+                allow_origins=self.cors_origins,
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+                expose_headers=["X-Request-ID"],
+            ),
+            header_name="X-Request-ID",
         )
 
 
