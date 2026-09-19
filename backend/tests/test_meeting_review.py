@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from kombu.exceptions import OperationalError
 
 from app.api.workspaces import review as review_module
+from app.api.workspaces.associations import AssociationsPatch, patch_associations
 from app.api.workspaces.directory import (
     PersonInput,
     ProjectInput,
@@ -37,11 +38,14 @@ OTHER = uuid4()
 
 
 class FakeResult:
-    def __init__(self, value: Source) -> None:
+    def __init__(self, value: Any) -> None:
         self.value = value
 
     def first(self) -> Source:
         return self.value
+
+    def all(self) -> list[Any]:
+        return [self.value] if self.value is not None else []
 
 
 class FakeSession:
@@ -75,7 +79,8 @@ class FakeSession:
         return None
 
     async def exec(self, statement: Any) -> FakeResult:
-        return FakeResult(self.source)
+        entities = [item.get("entity") for item in getattr(statement, "column_descriptions", [])]
+        return FakeResult(self.source if Source in entities else None)
 
     def add(self, item: Any) -> None:
         if isinstance(item, WorkspacePerson):
@@ -119,6 +124,90 @@ async def directory(session: FakeSession) -> tuple[WorkspacePerson, WorkspacePro
         session,  # type: ignore[arg-type]
     )
     return person, project
+
+
+async def test_meeting_can_confirm_without_a_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = FakeSession()
+    session.source.review_utterances = [utterance()]
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        "app.api.workspaces.review.process_source.apply_async", lambda **kw: calls.append(kw)
+    )
+    response = await confirm_review(
+        WORKSPACE,
+        session.source.id,
+        ConfirmRequest(revision=0),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert response.status == "queued"
+    assert session.source.confirmed_snapshot["projects"] == []
+    assert len(calls) == 1
+
+
+async def test_review_project_change_invalidates_stale_association_client() -> None:
+    session = FakeSession()
+    project = WorkspaceProject(workspace_id=WORKSPACE, owner_id=OWNER, name="Project")
+    session.projects[project.id] = project
+    await save_review(
+        WORKSPACE,
+        session.source.id,
+        ReviewPatch(revision=0, projectIds=[project.id], utterances=[utterance()]),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert session.source.association_revision == 1
+    with pytest.raises(HTTPException) as exc:
+        await patch_associations(
+            WORKSPACE,
+            session.source.id,
+            AssociationsPatch(revision=0, projectIds=[], people=[]),
+            AuthUser(id=OWNER),
+            session,  # type: ignore[arg-type]
+        )
+    assert exc.value.status_code == 409
+
+
+async def test_association_change_invalidates_stale_review_client() -> None:
+    session = FakeSession()
+    project = WorkspaceProject(workspace_id=WORKSPACE, owner_id=OWNER, name="Project")
+    session.projects[project.id] = project
+    await patch_associations(
+        WORKSPACE,
+        session.source.id,
+        AssociationsPatch(revision=0, projectIds=[project.id], people=[]),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert session.source.review_revision == 1
+    with pytest.raises(HTTPException) as exc:
+        await save_review(
+            WORKSPACE,
+            session.source.id,
+            ReviewPatch(revision=0, projectIds=[], utterances=[utterance()]),
+            AuthUser(id=OWNER),
+            session,  # type: ignore[arg-type]
+        )
+    assert exc.value.status_code == 409
+
+
+async def test_confirmed_metadata_change_preserves_review_revision_and_checkpoint() -> None:
+    session = FakeSession()
+    session.source.review_state = "confirmed"
+    session.source.review_revision = 3
+    session.source.confirmed_snapshot = {"projects": [], "people": []}
+    session.source.analysis_checkpoint = {"phase": "done"}
+    await patch_associations(
+        WORKSPACE,
+        session.source.id,
+        AssociationsPatch(revision=0, projectIds=[], people=[]),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert session.source.association_revision == 1
+    assert session.source.review_revision == 3
+    assert session.source.confirmed_snapshot == {"projects": [], "people": []}
+    assert session.source.analysis_checkpoint == {"phase": "done"}
 
 
 async def test_directory_owner_person_must_belong_to_workspace() -> None:
@@ -193,6 +282,7 @@ async def test_confirm_uses_edited_text_snapshot_and_is_idempotent(
         lambda **kwargs: calls.append(kwargs["task_id"]),
     )
 
+    prior_association_revision = session.source.association_revision
     first = await confirm_review(
         WORKSPACE,
         session.source.id,
@@ -209,6 +299,16 @@ async def test_confirm_uses_edited_text_snapshot_and_is_idempotent(
     )
 
     assert first.status == second.status == "queued"
+    assert session.source.association_revision == prior_association_revision + 1
+    with pytest.raises(HTTPException) as stale:
+        await patch_associations(
+            WORKSPACE,
+            session.source.id,
+            AssociationsPatch(revision=prior_association_revision, projectIds=[], people=[]),
+            user,
+            session,  # type: ignore[arg-type]
+        )
+    assert stale.value.status_code == 409
     assert calls == [str(session.source.id)]
     assert session.source.transcript_text == "김민수: 사람이 고친 문장"
     assert session.source.review_utterances[0]["speakerName"] == "김민수"

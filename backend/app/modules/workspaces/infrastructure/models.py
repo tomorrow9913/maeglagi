@@ -48,6 +48,8 @@ class WorkspacePerson(SQLModel, table=True):
     )
     owner_id: UUID
     name: str = Field(max_length=120)
+    email: str | None = Field(default=None, max_length=320)
+    email_normalized: str | None = Field(default=None, max_length=320)
     role: str | None = Field(default=None, max_length=120)
     aliases: list[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
     archived_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
@@ -70,6 +72,7 @@ class WorkspaceProject(SQLModel, table=True):
         sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     )
     owner_id: UUID
+    revision: int = Field(default=0)
     name: str = Field(max_length=120)
     goal: str | None = Field(default=None, sa_column=Column(Text))
     description: str | None = Field(default=None, sa_column=Column(Text))
@@ -132,6 +135,7 @@ class Source(SQLModel, table=True):
     project_id: UUID | None = Field(
         default=None, sa_column=Column(ForeignKey("workspace_projects.id", ondelete="SET NULL"))
     )
+    association_revision: int = Field(default=0)
     confirmed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     confirmed_snapshot: dict[str, Any] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)
@@ -159,7 +163,7 @@ class ProviderCredential(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("workspace_id", "provider", "label", name="uq_provider_credential_label"),
         CheckConstraint(
-            "vault_secret_id is not null or encrypted_secret is not null",
+            "provider = 'ollama' or vault_secret_id is not null or encrypted_secret is not null",
             name="ck_provider_credentials_has_secret",
         ),
         Index("provider_credentials_workspace_id_idx", "workspace_id"),
@@ -192,3 +196,63 @@ class ProviderCredential(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+class ProjectMember(SQLModel, table=True):
+    __tablename__ = "project_members"
+    __table_args__ = (
+        UniqueConstraint("project_id", "person_id", name="uq_project_members_pair"),
+        Index("project_members_workspace_idx", "workspace_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    project_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspace_projects.id", ondelete="CASCADE"), nullable=False)
+    )
+    person_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspace_people.id", ondelete="CASCADE"), nullable=False)
+    )
+
+
+class SourceProject(SQLModel, table=True):
+    __tablename__ = "source_projects"
+    __table_args__ = (
+        UniqueConstraint("source_id", "project_id", name="uq_source_projects_pair"),
+        Index("source_projects_workspace_idx", "workspace_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    source_id: UUID = Field(
+        sa_column=Column(ForeignKey("sources.id", ondelete="CASCADE"), nullable=False)
+    )
+    project_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspace_projects.id", ondelete="CASCADE"), nullable=False)
+    )
+    position: int = Field(default=0)
+
+
+class SourcePerson(SQLModel, table=True):
+    __tablename__ = "source_people"
+    __table_args__ = (
+        UniqueConstraint("source_id", "person_id", "role", name="uq_source_people_triple"),
+        CheckConstraint("role IN ('participant', 'author')", name="ck_source_people_role"),
+        Index("source_people_workspace_idx", "workspace_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    source_id: UUID = Field(
+        sa_column=Column(ForeignKey("sources.id", ondelete="CASCADE"), nullable=False)
+    )
+    person_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspace_people.id", ondelete="CASCADE"), nullable=False)
+    )
+    role: str = Field(max_length=20)

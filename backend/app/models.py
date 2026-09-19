@@ -8,8 +8,11 @@ from app.modules.context_engine.infrastructure.models import (
     ContextStoreRecord,
 )
 from app.modules.workspaces.infrastructure.models import (
+    ProjectMember,
     ProviderCredential,
     Source,
+    SourcePerson,
+    SourceProject,
     Workspace,
     WorkspacePerson,
     WorkspaceProject,
@@ -20,8 +23,11 @@ __all__ = [
     "ContextRecord",
     "ContextStoreRecord",
     "ProviderCredential",
+    "ProjectMember",
     "SQLModel",
     "Source",
+    "SourcePerson",
+    "SourceProject",
     "Workspace",
     "WorkspacePerson",
     "WorkspaceProject",

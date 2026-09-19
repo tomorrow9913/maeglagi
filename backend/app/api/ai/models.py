@@ -49,7 +49,8 @@ class KeyModelsRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     provider: str
-    api_key: str = Field(min_length=1, validation_alias="apiKey")
+    # Ollama uses the administrator configured server address and no user key.
+    api_key: str = Field(default="", validation_alias="apiKey")
 
 
 class UpdateModelsRequest(BaseModel):

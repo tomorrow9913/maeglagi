@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +9,7 @@ class Settings(BaseSettings):
         env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = "Maeglagi API"
@@ -19,7 +20,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://maeglagi:maeglagi@localhost:5432/maeglagi"
     supabase_url: str = ""
     supabase_publishable_key: SecretStr = SecretStr("")
-    supabase_service_role_key: SecretStr = SecretStr("")
+    supabase_service_role_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"),
+    )
     supabase_storage_bucket: str = "sources"
     neo4j_uri: str = ""
     neo4j_username: str = ""
@@ -27,6 +31,9 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 50 * 1024 * 1024
     cors_origins: list[str] = ["http://localhost:3000"]
     llm_provider: str = "mock"
+    # Server-side Ollama address, shared by API and worker. Empty means disabled.
+    ollama_base_url: str = ""
+    demo_workspace_id: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     transcription_model: str = "whisper-1"

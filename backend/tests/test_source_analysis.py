@@ -118,6 +118,38 @@ async def test_one_extraction_feeds_the_timeline_the_store_and_the_graph() -> No
     assert warnings == []
 
 
+async def test_frozen_directory_hint_keeps_roster_separate_from_speakers() -> None:
+    adapter = FakeAdapter(architecture_meeting().responses)
+    snapshot = {
+        "project": {"name": "Alpha", "goal": "Old"},
+        "projects": [
+            {"name": "Alpha", "goal": "Ship"},
+            {"name": "Beta", "goal": "Review"},
+        ],
+        "people": [{"name": "Speaker", "email": "speaker@example.com", "role": "Lead"}],
+        "roster": [{"name": "Member", "email": "member@example.com", "role": "Reviewer"}],
+    }
+    await analyze_source(
+        adapter=adapter,  # type: ignore[arg-type]
+        api_key="key",
+        model="test-model",
+        context_store=context_store(adapter, FakeRepository()),
+        graph_store=None,
+        workspace_id=WORKSPACE,
+        owner_id=OWNER,
+        source_id=SOURCE,
+        title="Meeting",
+        subject="Workspace",
+        text=architecture_meeting().text,
+        directory_snapshot=snapshot,
+    )
+    prompt = json.loads(adapter.requests[0].messages[1].content)["directory_hint"]
+    assert [item["name"] for item in prompt["projects"]] == ["Alpha", "Beta"]
+    assert prompt["people"][0]["email"] == "speaker@example.com"
+    assert prompt["roster"][0]["email"] == "member@example.com"
+    assert "not source evidence" in prompt["note"]
+
+
 async def test_invalid_chat_extraction_never_writes_store_or_graph() -> None:
     repository, graph = FakeRepository(), FakeStore()
     adapter = ChatAdapter(overrides={"classification": ["{}", "{}"]})

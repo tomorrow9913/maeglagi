@@ -103,6 +103,32 @@ Vault 도입 전에 암호화해 저장한 credential을 읽는 호환 경로에
 provider 호출은 공통 adapter 계약으로 정규화하되 provider 고유 옵션과 응답 메타데이터는
 확장 필드에 보존합니다. 새 provider는 registry에 adapter를 등록해야만 API 목록에 노출됩니다.
 
+### Self-hosted Ollama
+
+Ollama는 API와 Celery worker의 서버 환경에 `OLLAMA_BASE_URL`을 설정한 경우에만
+provider 목록에 나타납니다. 예를 들어 Ollama가 같은 Docker 네트워크의 서비스라면
+`http://ollama:11434`처럼 **백엔드 컨테이너에서 접근 가능한 주소**를 두 서비스에
+동일하게 설정합니다. 브라우저의 `localhost`나 사용자가 입력한 URL로 연결하지 않습니다.
+Ollama가 백엔드와 같은 호스트에서 직접 실행되는 경우에만 백엔드에서 접근 가능한
+`http://localhost:11434`를 사용합니다. 연결에는 사용자 API key가 필요하지 않으며
+Ollama는 Supabase Vault에 비밀을 저장하지 않습니다.
+
+로컬 전용 배포에서는 Ollama 서비스에 `OLLAMA_NO_CLOUD=1`을 설정하고 재시작하세요.
+Ollama의 로컬 서버도 로그인하면 cloud 모델을 프록시할 수 있어, 애플리케이션은
+`:cloud` 모델을 목록과 호출에서 거절합니다. 설치된 모델 중 `/api/show`가 대화 기능을
+보고한 모델을 답변과 추출에 표시합니다. 임베딩은 `/api/embed`에 1536차원을 요청한
+작은 probe가 정확히 1536개 값을 반환한 모델만 표시합니다. 모든 Ollama 임베딩 모델이
+이 저장소의 `Vector(1536)` 스키마와 호환되는 것은 아닙니다. 차원이 다르면 색인과
+검색은 오류를 반환하며 벡터를 채우거나 다른 provider로 전환하지 않습니다. 기존
+워크스페이스에서 선택된 임베딩 모델은 계속 고정됩니다.
+
+Ollama 연결은 LLM 호출만 로컬로 옮깁니다. 인증, PostgreSQL, 원본 파일 Storage는
+여전히 Supabase를 사용하며 녹음 음성 인식에는 별도 provider가 필요합니다.
+Ollama API 규약: [소개](https://docs.ollama.com/api/introduction),
+[chat](https://docs.ollama.com/api/chat), [embed](https://docs.ollama.com/api/embed),
+[tags](https://docs.ollama.com/api/tags),
+[cloud 비활성화](https://docs.ollama.com/faq#how-can-i-disable-ollama-cloud-features).
+
 ## 설계 원칙
 
 - 원문, 관계형 메타데이터, 임베딩, 그래프를 각각 Object Storage, PostgreSQL, Vector Store, Graph DB에 저장합니다.

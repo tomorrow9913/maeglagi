@@ -54,6 +54,7 @@ def test_catalog_uses_the_same_shape_as_the_workspace_catalog(client: TestClient
         "displayName",
         "capabilities",
         "configured",
+        "authMode",
         "models",
         "defaultModels",
     }
@@ -150,6 +151,7 @@ def test_workspace_catalog_includes_defaults_and_excludes_retired_models(
                 "displayName": "OpenAI",
                 "capabilities": ["chat", "models"],
                 "configured": True,
+                "authMode": "apiKey",
                 "models": ["gpt-live"],
                 "defaultModels": {"answer": "gpt-live"},
             }

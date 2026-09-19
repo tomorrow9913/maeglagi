@@ -8,7 +8,8 @@ from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 _NODES = """
 MATCH (e:Entity {workspace_id: $workspace_id})
 RETURN e.id AS id, e.kind AS kind, e.name AS name,
-       coalesce(e.source_ids, []) AS source_ids, e.superseded_by AS superseded_by
+       coalesce(e.source_ids, []) AS source_ids, e.superseded_by AS superseded_by,
+       coalesce(e.identifiers, []) AS identifiers
 ORDER BY e.name
 """
 

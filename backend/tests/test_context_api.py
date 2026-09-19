@@ -6,9 +6,12 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.demo import published_workspace
+from app.api.workspaces.context import _superseded_by
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
 from app.core.database import get_session
+from app.demo_seed import build_plan, fixture_id, load_fixture
 from app.main import app
 from app.modules.context_engine.infrastructure.models import ContextRecord, ContextStoreRecord
 from app.modules.workspaces.infrastructure.models import Source, Workspace
@@ -148,6 +151,51 @@ def test_a_replaced_decision_points_at_the_decision_that_replaced_it(client: Tes
     assert items["캐시를 두지 않는다"]["supersededBy"] == str(REDIS.id)
     assert items["Redis 도입"]["supersededBy"] is None
     assert items["응답 지연"]["supersededBy"] is None  # only explicit replacement counts
+
+
+def test_public_demo_timeline_preserves_fixture_supersession_across_kinds(
+    client: TestClient,
+) -> None:
+    fixture, digest = load_fixture()
+    fixture_items = {item["id"]: item for item in fixture["contextItems"]}
+    assert fixture_items["ctx-3"]["kind"] == "issue"
+    assert fixture_items["ctx-3"]["supersededBy"] == "ctx-4"
+    assert fixture_items["ctx-4"]["kind"] == "decision"
+    plan = build_plan(USER, WORKSPACE, fixture, digest)
+    sources = {source.id: source for source in plan.sources}
+
+    class SeedSession:
+        async def exec(self, _statement: Any) -> FakeResult:
+            return FakeResult([(item, sources[item.source_id]) for item in plan.contexts])
+
+        async def get(self, model: Any, identifier: UUID) -> Workspace | None:
+            return plan.workspace if model is Workspace and identifier == WORKSPACE else None
+
+    async def session() -> Any:
+        yield SeedSession()
+
+    app.dependency_overrides[get_session] = session
+    app.dependency_overrides[published_workspace] = lambda: plan.workspace
+    response = client.get("/api/v1/demo/context")
+
+    assert response.status_code == 200
+    actual = {item["id"]: item for item in response.json()}
+    assert len(actual) == len(fixture["contextItems"])
+    for item in fixture["contextItems"]:
+        item_id = str(fixture_id(WORKSPACE, "context", item["id"]))
+        successor = item.get("supersededBy")
+        expected = str(fixture_id(WORKSPACE, "context", successor)) if successor else None
+        assert actual[item_id]["supersededBy"] == expected
+
+
+def test_supersession_never_crosses_owner_or_workspace() -> None:
+    old = record("issue", "같은 키", 1)
+    other_owner = record("decision", "다른 소유자", 2, supersedes="같은키")
+    other_owner.owner_id = uuid4()
+    other_workspace = record("decision", "다른 작업공간", 3, supersedes="같은키")
+    other_workspace.workspace_id = uuid4()
+
+    assert _superseded_by([old, other_owner, other_workspace]) == {}
 
 
 def test_filters_use_the_repeated_parameters_the_frontend_sends(client: TestClient) -> None:

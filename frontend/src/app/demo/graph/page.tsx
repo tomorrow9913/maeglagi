@@ -1,6 +1,8 @@
-import GraphPage from "@/app/workspaces/[workspaceId]/graph/page";
-import { DEMO_WORKSPACE_ID } from "@/lib/api";
+"use client";
+
+import { GraphView } from "@/app/workspaces/[workspaceId]/graph/view";
+import { useDemoWorkspaceId } from "@/lib/api/context";
 
 export default function DemoGraphPage() {
-  return <GraphPage params={Promise.resolve({ workspaceId: DEMO_WORKSPACE_ID })} />;
+  return <GraphView workspaceId={useDemoWorkspaceId()} />;
 }

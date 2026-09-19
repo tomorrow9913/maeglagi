@@ -42,13 +42,13 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, message, detail);
 }
 
-async function request(path: string, init?: RequestInit): Promise<Response> {
+async function request(path: string, init?: RequestInit, authenticated = true): Promise<Response> {
   let response: Response;
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
-      headers: { ...(await authHeaders()), ...init?.headers },
+      headers: { ...(authenticated ? await authHeaders() : {}), ...init?.headers },
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -67,6 +67,21 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+}
+
+/** Authenticated binary download (for reviewed source exports). */
+export async function apiBlob(path: string, init?: RequestInit): Promise<Blob> {
+  return (await request(path, init)).blob();
+}
+
+/** Public demo reads never attach a workspace session token. */
+export async function apiPublicFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await request(path, init, false);
+  return (await response.json()) as T;
+}
+
+export async function apiPublicBlob(path: string, init?: RequestInit): Promise<Blob> {
+  return (await request(path, init, false)).blob();
 }
 
 /** 업로드 호출에 공통으로 붙는 옵션 */

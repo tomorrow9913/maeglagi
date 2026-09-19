@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
-from app.api import ai, ask, auth, jobs, system, workspaces
+from app.api import ai, ask, auth, demo, jobs, system, workspaces
 
 api_router = APIRouter()
+api_router.include_router(demo.router)
 api_router.include_router(system.router, tags=["system"])
 api_router.include_router(auth.router, tags=["auth"])
 api_router.include_router(workspaces.router, tags=["workspaces"])
