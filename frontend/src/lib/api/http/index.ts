@@ -95,8 +95,17 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
-  getKnowledgeGraph: (workspaceId, signal) =>
-    apiFetch<KnowledgeGraph>(`/workspaces/${workspaceId}/graph`, { signal }),
+  getKnowledgeGraph: (workspaceId, query, signal) => {
+    const params = new URLSearchParams();
+    if (query?.at) params.set("at", query.at);
+    const search = params.toString();
+    return apiFetch<KnowledgeGraph>(
+      `/workspaces/${workspaceId}/graph${search ? `?${search}` : ""}`,
+      {
+        signal,
+      },
+    );
+  },
 
   ask(workspaceId, question, signal) {
     return apiStream(`/workspaces/${workspaceId}/ask`, {

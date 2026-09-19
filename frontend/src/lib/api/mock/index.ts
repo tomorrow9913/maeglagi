@@ -330,12 +330,27 @@ export const mockApi: MaeglagiApi = {
     return items.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   },
 
-  async getKnowledgeGraph(workspaceId, signal) {
+  async getKnowledgeGraph(workspaceId, query, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId)) {
       return { nodes: [], edges: [] };
     }
-    return structuredClone(knowledgeGraph);
+
+    // 실 API와 같은 규칙: 그 시점에 유효했던 관계만 남기고, 시작이나 종료를 모르면 열린 관계로 봅니다.
+    // 노드는 시점으로 거르지 않으므로 연결 수만 다시 셉니다.
+    const graph = structuredClone(knowledgeGraph);
+    const at = (query?.at ?? "9999-12-31").slice(0, 10);
+    graph.edges = graph.edges.filter(
+      (edge) =>
+        (!edge.validFrom || edge.validFrom.slice(0, 10) <= at) &&
+        (!edge.validTo || edge.validTo.slice(0, 10) >= at),
+    );
+    for (const node of graph.nodes) {
+      node.degree = graph.edges.filter(
+        (edge) => edge.source === node.id || edge.target === node.id,
+      ).length;
+    }
+    return graph;
   },
 
   async *ask(_workspaceId, question, signal): AsyncGenerator<AnswerEvent, void, undefined> {

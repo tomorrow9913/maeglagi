@@ -7,6 +7,7 @@ import type {
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
+  KnowledgeGraphQuery,
   ProcessingJob,
   LlmProvider,
   Source,
@@ -72,7 +73,12 @@ export interface MaeglagiApi {
     query?: ContextTimelineQuery,
     signal?: AbortSignal,
   ): Promise<ContextItem[]>;
-  getKnowledgeGraph(workspaceId: string, signal?: AbortSignal): Promise<KnowledgeGraph>;
+  /** 워크스페이스의 지식 그래프. `at`을 주면 그 시점에 유효했던 관계만 돌려줍니다. */
+  getKnowledgeGraph(
+    workspaceId: string,
+    query?: KnowledgeGraphQuery,
+    signal?: AbortSignal,
+  ): Promise<KnowledgeGraph>;
 
   /**
    * 질문에 대한 답을 스트리밍합니다.
