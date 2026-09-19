@@ -178,7 +178,7 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     </fieldset>
     <div className="space-y-2 rounded-lg border p-3">
       <div className="flex items-center justify-between"><p className="text-sm font-medium">회의 프로젝트</p><Link href={workspacePath(workspaceId, "directory")} className="text-xs underline">프로젝트·참여자 관리</Link></div>
-      <div className="flex flex-wrap gap-3">{projects.filter((item) => !item.archivedAt).map((project) => <label key={project.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={projectIds.includes(project.id)} disabled={active || saving} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}</label>)}</div>
+      <div className="flex flex-wrap gap-3">{projects.filter((item) => !item.archivedAt || projectIds.includes(item.id)).map((project) => <label key={project.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={projectIds.includes(project.id)} disabled={active || saving || (Boolean(project.archivedAt) && !projectIds.includes(project.id))} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}{project.archivedAt ? " (보관됨)" : ""}</label>)}</div>
       <p className="text-xs text-muted-foreground">회의와 관련된 프로젝트를 모두 고르면 참여자 목록을 중복 없이 불러옵니다. 최종 검토에서 변경할 수 있습니다.</p>
     </div>
     <div className="space-y-2">

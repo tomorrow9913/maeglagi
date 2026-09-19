@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Loader2, Mic } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { useAsync } from "@/hooks/use-async";
 import { useApi, useDemoMode } from "@/lib/api/context";
-import type { Source, WorkspacePerson, WorkspaceProject } from "@/lib/api";
+import type { Source, SourceAssociation, WorkspacePerson, WorkspaceProject } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,6 +42,30 @@ function speakerColor(name: string): string {
   return speakerTextColors[index % speakerTextColors.length];
 }
 
+const PLAYBACK_REFRESH_LEAD_MS = 30_000;
+
+type PlaybackUrl = { url: string; expiresAt: string };
+type AssociationRole = SourceAssociation["role"];
+type PersonRoles = Record<string, AssociationRole[]>;
+
+function rolesByPerson(associations: SourceAssociation[]): PersonRoles {
+  const roles: PersonRoles = {};
+  for (const { personId, role } of associations) {
+    if (!roles[personId]) roles[personId] = [];
+    if (!roles[personId].includes(role)) roles[personId].push(role);
+  }
+  return roles;
+}
+
+function associationPeople(roles: PersonRoles): SourceAssociation[] {
+  return Object.entries(roles).flatMap(([personId, selected]) => selected.map((role) => ({ personId, role })));
+}
+
+function playbackNeedsRefresh(playback: PlaybackUrl, now = Date.now()): boolean {
+  const expiresAt = Date.parse(playback.expiresAt);
+  return !Number.isFinite(expiresAt) || expiresAt - now <= PLAYBACK_REFRESH_LEAD_MS;
+}
+
 export function SourceViewer({
   workspaceId,
   sourceId,
@@ -55,9 +79,16 @@ export function SourceViewer({
 }) {
   const highlightRef = useRef<HTMLLIElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [audioUrl, setAudioUrl] = useState<string>();
-  const [pendingSeek, setPendingSeek] = useState<number>();
+  const [playback, setPlayback] = useState<PlaybackUrl>();
+  const playbackRef = useRef<PlaybackUrl | undefined>(undefined);
+  const requestRef = useRef<Promise<void> | null>(null);
+  const sourceIdRef = useRef(sourceId);
+  const requestGenerationRef = useRef(0);
+  const retrySeekRef = useRef(0);
+  const queuedSeekRef = useRef<{ seconds: number; resume: boolean } | undefined>(undefined);
+  const [pendingSeek, setPendingSeek] = useState<{ seconds: number; resume: boolean }>();
   const [audioBusy, setAudioBusy] = useState(false);
+  const [audioError, setAudioError] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const api = useApi();
   const isDemo = useDemoMode();
@@ -65,11 +96,20 @@ export function SourceViewer({
   const [people, setPeople] = useState<WorkspacePerson[]>([]);
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
   const [projectIds, setProjectIds] = useState<string[]>([]);
-  const [personRoles, setPersonRoles] = useState<Record<string, "participant" | "author">>({});
+  const [personRoles, setPersonRoles] = useState<PersonRoles>({});
   const [associationBusy, setAssociationBusy] = useState(false);
   const [associationError, setAssociationError] = useState<string>();
+  const associationGenerationRef = useRef(0);
 
   useEffect(() => {
+    associationGenerationRef.current += 1;
+    setSource(undefined);
+    setPeople([]);
+    setProjects([]);
+    setProjectIds([]);
+    setPersonRoles({});
+    setAssociationBusy(false);
+    setAssociationError(undefined);
     if (!sourceId) return;
     let active = true;
     Promise.all([api.listSources(workspaceId), api.listPeople(workspaceId), api.listProjects(workspaceId)])
@@ -80,7 +120,7 @@ export function SourceViewer({
         setPeople(nextPeople);
         setProjects(nextProjects);
         setProjectIds(nextSource?.projectIds ?? (nextSource?.projectId ? [nextSource.projectId] : []));
-        setPersonRoles(Object.fromEntries((nextSource?.associations ?? []).map((item) => [item.personId, item.role])));
+        setPersonRoles(rolesByPerson(nextSource?.associations ?? []));
         setAssociationError(undefined);
       })
       .catch((cause) => { if (active) setAssociationError(cause instanceof Error ? cause.message : "연결 정보를 불러오지 못했습니다."); });
@@ -88,20 +128,23 @@ export function SourceViewer({
   }, [api, sourceId, workspaceId]);
 
   const saveAssociations = async () => {
-    if (!sourceId || !source) return;
+    const currentSource = source;
+    if (!sourceId || !currentSource || currentSource.id !== sourceId || associationBusy) return;
+    const generation = associationGenerationRef.current;
     setAssociationBusy(true);
     setAssociationError(undefined);
     try {
       const saved = await api.updateSourceAssociations(workspaceId, sourceId, {
-        revision: source.associationRevision ?? 0,
+        revision: currentSource.associationRevision ?? 0,
         projectIds,
-        people: Object.entries(personRoles).map(([personId, role]) => ({ personId, role })),
+        people: associationPeople(personRoles),
       });
-      setSource((current) => current ? { ...current, associationRevision: saved.revision, projectIds: saved.projectIds, projectId: saved.projectIds[0] ?? null, associations: saved.people } : current);
+      if (generation !== associationGenerationRef.current || sourceIdRef.current !== sourceId) return;
+      setSource((current) => current?.id === sourceId ? { ...current, associationRevision: saved.revision, projectIds: saved.projectIds, projectId: saved.projectIds[0] ?? null, associations: saved.people } : current);
       toast.success("소스 연결을 저장했습니다.");
     } catch (cause) {
-      setAssociationError(cause instanceof Error ? cause.message : "연결을 저장하지 못했습니다.");
-    } finally { setAssociationBusy(false); }
+      if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(cause instanceof Error ? cause.message : "연결을 저장하지 못했습니다.");
+    } finally { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationBusy(false); }
   };
 
   const { data, error, isLoading, reload } = useAsync(
@@ -120,23 +163,82 @@ export function SourceViewer({
   }, [data, highlightChunkId]);
 
   const Icon = data?.kind === "meeting" ? Mic : FileText;
-  useEffect(() => { setAudioUrl(undefined); setPendingSeek(undefined); }, [sourceId]);
+  sourceIdRef.current = sourceId;
   useEffect(() => {
-    if (pendingSeek === undefined || !audioUrl || !audioRef.current) return;
+    requestGenerationRef.current += 1;
+    playbackRef.current = undefined;
+    requestRef.current = null;
+    retrySeekRef.current = 0;
+    queuedSeekRef.current = undefined;
+    setPlayback(undefined);
+    setPendingSeek(undefined);
+    setAudioBusy(false);
+    setAudioError(false);
+  }, [sourceId]);
+  useEffect(() => {
+    if (!pendingSeek || !playback || !audioRef.current) return;
     const element = audioRef.current;
-    const seek = () => { element.currentTime = pendingSeek; void element.play().catch(() => {}); setPendingSeek(undefined); };
+    const seek = () => {
+      element.currentTime = pendingSeek.seconds;
+      if (pendingSeek.resume) void element.play().catch(() => {});
+      setPendingSeek(undefined);
+    };
     if (element.readyState >= 1) seek();
     else element.addEventListener("loadedmetadata", seek, { once: true });
     return () => element.removeEventListener("loadedmetadata", seek);
-  }, [audioUrl, pendingSeek]);
-  const loadAudio = async (seconds?: number) => {
-    if (!sourceId || audioBusy) return;
-    if (audioUrl) { if (seconds !== undefined) setPendingSeek(seconds); return; }
+  }, [playback, pendingSeek]);
+  const loadAudio = useCallback(async (seconds?: number) => {
+    if (!sourceId) return;
+    if (requestRef.current) {
+      if (seconds !== undefined) queuedSeekRef.current = { seconds, resume: true };
+      return requestRef.current;
+    }
+    const current = playbackRef.current;
+    if (current && !playbackNeedsRefresh(current)) {
+      if (seconds !== undefined) setPendingSeek({ seconds, resume: true });
+      return;
+    }
+    const element = audioRef.current;
+    const seek = seconds ?? (current ? element?.currentTime ?? retrySeekRef.current : retrySeekRef.current);
+    const resume = seconds !== undefined || (current ? Boolean(element && !element.paused) : retrySeekRef.current > 0);
+    queuedSeekRef.current = current || retrySeekRef.current > 0 || seconds !== undefined
+      ? { seconds: seek, resume }
+      : undefined;
+    const generation = requestGenerationRef.current;
     setAudioBusy(true);
-    try { const result = await api.getSourcePlaybackUrl(sourceId); setAudioUrl(result.url); if (seconds !== undefined) setPendingSeek(seconds); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "녹음 파일을 열지 못했습니다."); }
-    finally { setAudioBusy(false); }
-  };
+    setAudioError(false);
+    const request = api.getSourcePlaybackUrl(sourceId)
+      .then((result) => {
+        if (generation !== requestGenerationRef.current || sourceIdRef.current !== sourceId) return;
+        setPendingSeek(queuedSeekRef.current);
+        queuedSeekRef.current = undefined;
+        playbackRef.current = result;
+        setPlayback(result);
+        retrySeekRef.current = 0;
+      })
+      .catch((error) => {
+        if (generation === requestGenerationRef.current && sourceIdRef.current === sourceId) {
+          queuedSeekRef.current = undefined;
+          toast.error(error instanceof Error ? error.message : "녹음 파일을 열지 못했습니다.");
+        }
+      })
+      .finally(() => {
+        if (requestRef.current === request) {
+          requestRef.current = null;
+          setAudioBusy(false);
+        }
+      });
+    requestRef.current = request;
+    return request;
+  }, [api, sourceId]);
+  useEffect(() => {
+    if (!playback) return;
+    const refreshIn = Date.parse(playback.expiresAt) - Date.now() - PLAYBACK_REFRESH_LEAD_MS;
+    // A very short-lived or malformed URL is refreshed on the next interaction.
+    if (!Number.isFinite(refreshIn) || refreshIn <= 0) return;
+    const timer = window.setTimeout(() => { void loadAudio(); }, refreshIn);
+    return () => window.clearTimeout(timer);
+  }, [loadAudio, playback]);
   const exportMarkdown = async () => {
     if (!sourceId || exportBusy) return;
     setExportBusy(true);
@@ -167,14 +269,24 @@ export function SourceViewer({
         </SheetHeader>
 
         <div className="overflow-y-auto px-4 pb-6">
-          {source && <section className="mb-4 space-y-2 rounded-lg border p-3 text-sm">
+          {sourceId && source?.id === sourceId && <section className="mb-4 space-y-2 rounded-lg border p-3 text-sm">
             <h3 className="font-medium">프로젝트·사람 연결</h3>
-            <div className="flex flex-wrap gap-2">{projects.filter((project) => !project.archivedAt || projectIds.includes(project.id)).map((project) => <label key={project.id} className="flex items-center gap-1"><input type="checkbox" disabled={isDemo || associationBusy || Boolean(project.archivedAt)} checked={projectIds.includes(project.id)} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}{project.archivedAt ? " (보관됨)" : ""}</label>)}</div>
-            <div className="space-y-1">{people.filter((person) => !person.archivedAt || personRoles[person.id]).map((person) => <div key={person.id} className="flex flex-wrap items-center gap-2"><label className="flex items-center gap-1"><input type="checkbox" disabled={isDemo || associationBusy || Boolean(person.archivedAt)} checked={Boolean(personRoles[person.id])} onChange={(event) => setPersonRoles((current) => { const next = { ...current }; if (event.target.checked) next[person.id] = source.kind === "meeting" ? "participant" : "author"; else delete next[person.id]; return next; })} />{person.name}</label>{personRoles[person.id] && <select aria-label={`${person.name} 연결 역할`} disabled={isDemo || associationBusy || Boolean(person.archivedAt)} className="rounded border bg-background px-1" value={personRoles[person.id]} onChange={(event) => setPersonRoles((current) => ({ ...current, [person.id]: event.target.value as "participant" | "author" }))}><option value="participant">참여자</option><option value="author">작성자</option></select>}</div>)}</div>
-            {associationError && <div role="alert" className="flex items-center gap-2 text-xs text-destructive"><span>{associationError}</span><Button size="sm" variant="ghost" onClick={() => { void api.listSources(workspaceId).then((sources) => { const latest = sources.find((item) => item.id === sourceId); setSource(latest); setProjectIds(latest?.projectIds ?? (latest?.projectId ? [latest.projectId] : [])); setPersonRoles(Object.fromEntries((latest?.associations ?? []).map((item) => [item.personId, item.role]))); setAssociationError(undefined); }).catch((cause) => setAssociationError(cause instanceof Error ? cause.message : "다시 불러오지 못했습니다.")); }}>최신 정보 불러오기</Button></div>}
-            {!isDemo && <Button size="sm" variant="outline" disabled={associationBusy} onClick={() => void saveAssociations()}>{associationBusy ? "저장 중…" : "연결 저장"}</Button>}
+            <div className="flex flex-wrap gap-2">{projects.filter((project) => !project.archivedAt || projectIds.includes(project.id)).map((project) => <label key={project.id} className="flex items-center gap-1"><input type="checkbox" disabled={isDemo || associationBusy || (Boolean(project.archivedAt) && !projectIds.includes(project.id))} checked={projectIds.includes(project.id)} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}{project.archivedAt ? " (보관됨)" : ""}</label>)}</div>
+            <div className="space-y-1">{people.filter((person) => !person.archivedAt || personRoles[person.id]?.length).map((person) => <div key={person.id} className="flex flex-wrap items-center gap-2"><span>{person.name}{person.archivedAt ? " (보관됨)" : ""}</span>{(["participant", "author"] as const).map((role) => <label key={role} className="flex items-center gap-1"><input type="checkbox" aria-label={`${person.name} ${role === "participant" ? "참여자" : "작성자"}`} disabled={isDemo || associationBusy || (Boolean(person.archivedAt) && !personRoles[person.id]?.includes(role))} checked={personRoles[person.id]?.includes(role) ?? false} onChange={(event) => setPersonRoles((current) => { const selected = current[person.id] ?? []; const next = event.target.checked ? [...selected, role] : selected.filter((item) => item !== role); if (!next.length) { const remaining = { ...current }; delete remaining[person.id]; return remaining; } return { ...current, [person.id]: next }; })} />{role === "participant" ? "참여자" : "작성자"}</label>)}</div>)}</div>
+            {associationError && <div role="alert" className="flex items-center gap-2 text-xs text-destructive"><span>{associationError}</span><Button size="sm" variant="ghost" onClick={() => { const generation = associationGenerationRef.current; void api.listSources(workspaceId).then((sources) => { if (generation !== associationGenerationRef.current || sourceIdRef.current !== sourceId) return; const latest = sources.find((item) => item.id === sourceId); setSource(latest); setProjectIds(latest?.projectIds ?? (latest?.projectId ? [latest.projectId] : [])); setPersonRoles(rolesByPerson(latest?.associations ?? [])); setAssociationError(undefined); }).catch((cause) => { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(cause instanceof Error ? cause.message : "다시 불러오지 못했습니다."); }); }}>최신 정보 불러오기</Button></div>}
+            {!isDemo && <Button size="sm" variant="outline" disabled={associationBusy || source?.id !== sourceId} onClick={() => void saveAssociations()}>{associationBusy ? "저장 중…" : "연결 저장"}</Button>}
           </section>}
-          {data?.kind === "meeting" && <div className="mb-3 flex flex-wrap items-center gap-2">{data.hasRecording && <Button size="sm" variant="outline" disabled={audioBusy} onClick={() => void loadAudio()}>{audioBusy ? "녹음 여는 중…" : "녹음 듣기"}</Button>}<Button size="sm" variant="outline" disabled={exportBusy} onClick={() => void exportMarkdown()}>{exportBusy ? "내려받는 중…" : "Markdown 내보내기"}</Button>{audioUrl && <audio ref={audioRef} controls preload="metadata" src={audioUrl} className="w-full" />}</div>}
+          {data?.kind === "meeting" && <div className="mb-3 flex flex-wrap items-center gap-2">{data.hasRecording && <Button size="sm" variant="outline" disabled={audioBusy} onClick={() => void loadAudio()}>{audioBusy ? "녹음 여는 중…" : audioError ? "녹음 다시 시도" : "녹음 듣기"}</Button>}<Button size="sm" variant="outline" disabled={exportBusy} onClick={() => void exportMarkdown()}>{exportBusy ? "내려받는 중…" : "Markdown 내보내기"}</Button>{playback && <audio ref={audioRef} controls preload="metadata" src={playback.url} className="w-full" onTimeUpdate={(event) => { retrySeekRef.current = event.currentTarget.currentTime; }} onError={(event) => {
+            if (event.currentTarget.currentSrc && event.currentTarget.currentSrc !== playbackRef.current?.url) return;
+            retrySeekRef.current = event.currentTarget.currentTime || retrySeekRef.current;
+            requestGenerationRef.current += 1;
+            playbackRef.current = undefined;
+            queuedSeekRef.current = undefined;
+            setPendingSeek(undefined);
+            setPlayback(undefined);
+            setAudioBusy(false);
+            setAudioError(true);
+          }} />}</div>}
           {isLoading ? (
             <p className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden />
