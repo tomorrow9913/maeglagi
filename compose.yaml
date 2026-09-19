@@ -9,7 +9,9 @@ x-backend-env: &backend-env
   SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set SUPABASE_PUBLISHABLE_KEY in .env.docker}
   SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY in .env.docker}
   SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-sources}
-  CELERY_BROKER_URL: ${CELERY_BROKER_URL:?Set a Redis broker URL in .env.docker}
+  PROCESSING_EXECUTOR: ${PROCESSING_EXECUTOR:-celery}
+  PG_EXECUTOR_ENABLED: ${PG_EXECUTOR_ENABLED:-true}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-memory://}
   CELERY_TASK_ALWAYS_EAGER: 'false'
   NEO4J_URI: ${NEO4J_URI:-}
   NEO4J_USERNAME: ${NEO4J_USERNAME:-}
@@ -56,6 +58,15 @@ services:
   worker:
     <<: *backend
     command: ["celery", "-A", "app.core.celery:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    stop_grace_period: 120s
+
+  pg-worker:
+    <<: *backend
+    profiles: [pg-worker]
+    environment:
+      <<: *backend-env
+      PROCESSING_EXECUTOR: postgres
+    command: ["python", "-m", "app.modules.ingestion.infrastructure.pg_worker"]
     stop_grace_period: 120s
 
   redis:

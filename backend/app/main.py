@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.middleware import register_middlewares
+from app.modules.ingestion.infrastructure.pg_executor import PostgresExecutor
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 
 
@@ -38,9 +39,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     settings: Settings = application.state.settings
     store = Neo4jGraphStore.from_settings(settings) if settings.neo4j_enabled else None
     application.state.graph_store = store
+    executor = (
+        PostgresExecutor(settings)
+        if settings.processing_executor == "postgres" and settings.pg_executor_enabled
+        else None
+    )
+    if executor is not None:
+        executor.start()
     try:
         yield
     finally:
+        if executor is not None:
+            await executor.stop()
         application.state.graph_store = None
         if store is not None:
             await store.close()

@@ -59,6 +59,8 @@ from app.modules.ingestion.application.upload_validation import (
     validate_document,
     validate_recording,
 )
+from app.modules.ingestion.infrastructure.pg_executor import enqueue_source as enqueue_pg_source
+from app.modules.ingestion.infrastructure.pg_executor import wake_executors
 from app.modules.ingestion.infrastructure.tasks import process_source
 from app.modules.workspaces.domain.source_state import (
     ProcessingStage,
@@ -123,6 +125,16 @@ async def _enqueue_source(source: Source, session: AsyncSession) -> None:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Processing queue unavailable",
         ) from exc
+
+
+async def _persist_and_enqueue_source(source: Source, session: AsyncSession) -> None:
+    if get_settings().processing_executor == "postgres":
+        await enqueue_pg_source(session, source)
+        await session.commit()
+        wake_executors()
+    else:
+        await session.commit()
+        await _enqueue_source(source, session)
 
 
 @workspaces.get("", response_model=list[WorkspaceResponse])
@@ -269,8 +281,7 @@ async def upload_document(
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
     source.status = SourceStatus.QUEUED
     source.processing_stage = ProcessingStage.UPLOADED
-    await session.commit()
-    await _enqueue_source(source, session)
+    await _persist_and_enqueue_source(source, session)
     return _job_response(source)
 
 
@@ -319,8 +330,7 @@ async def upload_recording(
     source.progress = 0
     await session.flush()
     await replace_projects(session, source, ids)
-    await session.commit()
-    await _enqueue_source(source, session)
+    await _persist_and_enqueue_source(source, session)
     return _job_response(source)
 
 
