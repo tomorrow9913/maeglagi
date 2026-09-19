@@ -53,23 +53,25 @@ app/
 - `RATE_LIMIT_STORAGE_URI` 기본값은 `memory://`입니다. 여러 Render instance를 사용할 때는
   Redis URI로 교체해 인스턴스 간 카운터를 공유합니다.
 
-초기에는 모듈러 모놀리스로 배포합니다. 큐 부하가 커질 때 `context_engine` application service를 worker로 옮겨도 domain contract는 유지됩니다.
+백엔드 코드는 모듈러 모놀리스로 유지하고 API와 Celery worker를 별도 프로세스로 배포합니다.
+문서·회의 처리 작업은 Celery worker가 맡습니다.
 
 ## Source of Truth
 
 | 데이터 | 저장소 | 원칙 |
 |---|---|---|
 | 원본 문서와 오디오 | Supabase Object Storage | private `sources` bucket의 불변 원본 |
-| User, Workspace, Source, Context, Job metadata | Supabase PostgreSQL | 트랜잭션 기준 원장 |
+| User, Workspace, Source, Context, Job metadata와 Source 처리 상태 | Supabase PostgreSQL | 트랜잭션 기준 원장 |
 | chunk와 embedding | Supabase PostgreSQL + pgvector | 의미 검색 |
 | Entity와 Relation | Neo4j | 원문 없이 source/chunk reference만 유지 |
-| 단기 job 상태/queue | PostgreSQL (PoC) | 분리 필요 시 Redis로 교체 |
+| 작업 큐 | Valkey (Render Key Value) | Celery broker |
 
 PoC에서는 Object Storage와 Vector DB를 Supabase에 통합하고 Graph DB는 `.env`의
 `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`로 연결합니다. 별도 MinIO나
-Vector DB 컨테이너는 운영하지 않으며 Render에는 FastAPI만 배포합니다.
+Vector DB 컨테이너는 운영하지 않습니다. `render.yaml`은 FastAPI API, Celery worker,
+Valkey 기반 Key Value 서비스를 배포하고 API와 worker에 `CELERY_BROKER_URL`을 연결합니다.
 `/api/v1/health`는 프로세스 liveness, `/api/v1/ready`는 Object Storage,
-PostgreSQL, pgvector, graph projection의 준비 상태를 확인합니다.
+PostgreSQL, pgvector 확장, Neo4j 연결 상태를 확인합니다.
 
 ## 회의 수집 경로
 
@@ -92,7 +94,10 @@ browser transcript ────────────┘
 
 ## API versioning
 
-모든 public endpoint는 `/api/v1` 아래에 둡니다. `contracts/openapi.yaml`이 프론트와 백엔드의 합의 지점이며, 구현이 늘어나면 FastAPI가 생성한 schema와 CI에서 diff를 검사합니다.
+모든 public endpoint는 `/api/v1` 아래에 둡니다. API 계약의 기준은 FastAPI 라우터와
+Pydantic 모델이며, 개발 환경의 `/openapi.json`은 여기에서 자동 생성됩니다. 운영
+환경에서는 OpenAPI와 API 문서 경로를 비활성화합니다. 저장소의
+`contracts/openapi.yaml`은 현재 API의 기준이 아닌 수동 명세입니다.
 
 ## 보안 기준
 

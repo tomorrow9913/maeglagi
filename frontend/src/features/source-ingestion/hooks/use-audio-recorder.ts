@@ -28,9 +28,11 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string>();
 
+  const startedAtRef = useRef(0);
+  const activeRef = useRef(false);
+  const mountedRef = useRef(true);
   const recorderRef = useRef<MediaRecorder>(null);
   const streamRef = useRef<MediaStream>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval>>(null);
 
   // 콜백이 바뀌어도 진행 중인 녹음이 끊기지 않게 참조로만 들고 있습니다.
@@ -45,9 +47,19 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
   }, []);
 
   // 녹음 중에 페이지를 벗어나면 마이크가 켜진 채로 남지 않게 합니다.
-  useEffect(() => releaseMic, [releaseMic]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeRef.current = false;
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      releaseMic();
+    };
+  }, [releaseMic]);
 
   const start = useCallback(async () => {
+    if (activeRef.current) return;
     if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setStatus("unsupported");
       setErrorMessage("이 브라우저는 녹음을 지원하지 않습니다.");
@@ -60,6 +72,7 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
       return;
     }
 
+    activeRef.current = true;
     setStatus("requesting");
     setErrorMessage(undefined);
 
@@ -67,6 +80,8 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
+      activeRef.current = false;
+      if (!mountedRef.current) return;
       const name = error instanceof DOMException ? error.name : "";
 
       if (name === "NotAllowedError" || name === "SecurityError") {
@@ -84,30 +99,63 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
       return;
     }
 
-    const recorder = new MediaRecorder(stream, { mimeType: pickMimeType() });
-    chunksRef.current = [];
+    if (!mountedRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    streamRef.current = stream;
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: pickMimeType() });
+    } catch {
+      releaseMic();
+      activeRef.current = false;
+      setStatus("error");
+      setErrorMessage("녹음을 시작하지 못했습니다.");
+      return;
+    }
+    const chunks: Blob[] = [];
 
     recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data);
+      if (event.data.size > 0) chunks.push(event.data);
     });
 
     recorder.addEventListener("stop", () => {
-      const audio = new Blob(chunksRef.current, { type: recorder.mimeType });
-      chunksRef.current = [];
+      if (recorderRef.current !== recorder) return;
+      const audio = new Blob(chunks, { type: recorder.mimeType });
       releaseMic();
 
-      setElapsedSeconds((seconds) => {
-        // 정지 시점의 경과 시간을 그대로 넘기고 표시는 0으로 되돌립니다.
-        completeRef.current(audio, seconds);
-        return 0;
-      });
+      const shouldComplete = activeRef.current && mountedRef.current;
+      activeRef.current = false;
+      recorderRef.current = null;
+      if (!shouldComplete) return;
+      const seconds = Math.max(0, (Date.now() - startedAtRef.current) / 1000);
+      setElapsedSeconds(0);
       setStatus("idle");
+      completeRef.current(audio, seconds);
     });
 
     recorderRef.current = recorder;
     streamRef.current = stream;
 
-    recorder.start();
+    recorder.addEventListener("error", () => {
+      if (recorderRef.current !== recorder || !mountedRef.current) return;
+      recorderRef.current = null;
+      activeRef.current = false;
+      releaseMic();
+      setStatus("error");
+      setErrorMessage("녹음 중 오류가 발생했습니다. 다시 시도해 주세요.");
+    });
+    try {
+      recorder.start();
+    } catch {
+      activeRef.current = false;
+      releaseMic();
+      setStatus("error");
+      setErrorMessage("녹음을 시작하지 못했습니다.");
+      return;
+    }
+    startedAtRef.current = Date.now();
     setElapsedSeconds(0);
     setStatus("recording");
     timerRef.current = setInterval(() => setElapsedSeconds((value) => value + 1), 1000);

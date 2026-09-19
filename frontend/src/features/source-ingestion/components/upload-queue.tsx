@@ -61,6 +61,7 @@ export function UploadQueue({
                 size="icon"
                 className="size-6 shrink-0"
                 aria-label={`${item.fileName} 목록에서 지우기`}
+                disabled={item.status === "uploading"}
                 onClick={() => onDismiss(item.id)}
               >
                 <X className="size-3.5" aria-hidden />

@@ -11,6 +11,7 @@ import type {
   ModelSelections,
   ProcessingJob,
   Source,
+  SourceContent,
   Workspace,
   WorkspaceModels,
   WorkspaceSecrets,
@@ -58,12 +59,26 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * 화면에서 확인할 수 있을 만큼만 상태를 들고 있습니다.
  */
 const state = {
-  workspaces: [...seedWorkspaces],
-  sources: [...seedSources],
+  workspaces: seedWorkspaces.map((workspace) => ({ ...workspace })),
+  sources: seedSources.map((source) => ({ ...source })),
+  transcripts: new Map<string, SourceContent>(),
   jobs: new Map<string, ProcessingJob & { startedAt: number }>(),
   /** 키 원문은 저장하지 않고, 서버가 내려줄 힌트만 흉내 냅니다. */
-  secrets: new Map<string, WorkspaceSecrets>([
-    ["demo", { provider: "anthropic", keyHint: "4f2a", updatedAt: "2026-09-08T09:00:00Z" }],
+  secrets: new Map<string, WorkspaceSecrets[]>([
+    [
+      "demo",
+      [
+        {
+          id: "demo-credential",
+          provider: "anthropic",
+          label: "기본",
+          keyHint: "4f2a",
+          status: "active",
+          isDefault: true,
+          updatedAt: "2026-09-08T09:00:00Z",
+        },
+      ],
+    ],
   ]),
   /** 워크스페이스별로 저장된 모델 선택 */
   models: new Map<string, ModelSelections>([
@@ -79,11 +94,20 @@ function modelsFor(
   selections: ModelSelections = {},
   locked: ModelRole[] = [],
 ): WorkspaceModels {
-  const catalog = modelCatalog[provider] ?? {};
+  return modelsForProviders([provider], selections, locked);
+}
+
+function modelsForProviders(
+  providers: LlmProvider[],
+  selections: ModelSelections = {},
+  locked: ModelRole[] = [],
+): WorkspaceModels {
   return {
     roles: MODEL_ROLES.map((role) => ({
       role,
-      options: (catalog[role] ?? []).map((model) => ({ provider, model })),
+      options: providers.flatMap((provider) =>
+        (modelCatalog[provider]?.[role] ?? []).map((model) => ({ provider, model })),
+      ),
       selected: selections[role] ?? null,
       locked: locked.includes(role),
     })),
@@ -135,13 +159,27 @@ function checkApiKey(provider: LlmProvider, apiKey: string): ApiKeyValidation {
   return { valid: true, message: "정상적으로 확인했습니다." };
 }
 
-function storeKey(workspaceId: string, provider: LlmProvider, apiKey: string): WorkspaceSecrets {
+function storeKey(
+  workspaceId: string,
+  provider: LlmProvider,
+  apiKey: string,
+  label = "기본",
+): WorkspaceSecrets {
+  const credentials = state.secrets.get(workspaceId) ?? [];
+  const existing = credentials.find((item) => item.provider === provider && item.label === label);
+  for (const item of credentials) item.isDefault = false;
   const secrets: WorkspaceSecrets = {
+    id: existing?.id ?? nextId("credential"),
     provider,
+    label,
     keyHint: apiKey.trim().slice(-4),
+    status: "active",
+    isDefault: true,
     updatedAt: new Date().toISOString(),
   };
-  state.secrets.set(workspaceId, secrets);
+  if (existing) credentials.splice(credentials.indexOf(existing), 1, secrets);
+  else credentials.push(secrets);
+  state.secrets.set(workspaceId, credentials);
   return secrets;
 }
 
@@ -194,6 +232,7 @@ function registerUpload(workspaceId: string, source: Source): ProcessingJob {
     id: nextId("job"),
     sourceId: source.id,
     sourceKind: source.kind,
+    transcriptSource: source.transcriptSource,
     status: "queued",
     progress: 0,
     stage: "uploaded",
@@ -255,19 +294,22 @@ export const mockApi: MaeglagiApi = {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
 
-    const configuredProvider = state.secrets.get(workspaceId)?.provider;
+    const configuredProviders = state.secrets.get(workspaceId) ?? [];
     return BOOTSTRAP_AI_PROVIDERS.map<AiProvider>((provider) => ({
       ...provider,
       capabilities: [...provider.capabilities],
-      configured: provider.id === configuredProvider,
-      models:
-        provider.id === configuredProvider
-          ? provider.id === "anthropic"
-            ? ["claude-sonnet-4-20250514"]
-            : provider.id === "nvidia"
-              ? ["meta/llama-3.1-70b-instruct"]
-              : ["gpt-4.1-mini"]
-          : [],
+      configured: configuredProviders.some(
+        (item) => item.provider === provider.id && item.status === "active",
+      ),
+      models: configuredProviders.some(
+        (item) => item.provider === provider.id && item.status === "active",
+      )
+        ? provider.id === "anthropic"
+          ? ["claude-sonnet-4-20250514"]
+          : provider.id === "nvidia"
+            ? ["meta/llama-3.1-70b-instruct"]
+            : ["gpt-4.1-mini"]
+        : [],
     }));
   },
 
@@ -284,32 +326,49 @@ export const mockApi: MaeglagiApi = {
     return modelsFor(input.provider);
   },
 
-  async getWorkspaceModels(workspaceId, signal) {
+  async getWorkspaceModels(workspaceId, provider, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const secrets = state.secrets.get(workspaceId);
-    if (!state.workspaces.some((item) => item.id === workspaceId) || !secrets) {
+    const credentials = state.secrets.get(workspaceId) ?? [];
+    if (!state.workspaces.some((item) => item.id === workspaceId)) {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
-    return modelsFor(secrets.provider, state.models.get(workspaceId), lockedRoles(workspaceId));
+    const activeProviders = [
+      ...new Set(
+        credentials.filter((item) => item.status === "active").map((item) => item.provider),
+      ),
+    ];
+    const visibleProviders = provider
+      ? activeProviders.filter((item) => item === provider)
+      : activeProviders;
+    return modelsForProviders(
+      visibleProviders,
+      state.models.get(workspaceId),
+      lockedRoles(workspaceId),
+    );
   },
 
   async updateWorkspaceModels(workspaceId, selections, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const secrets = state.secrets.get(workspaceId);
-    if (!state.workspaces.some((item) => item.id === workspaceId) || !secrets) {
+    const credentials = state.secrets.get(workspaceId) ?? [];
+    if (!state.workspaces.some((item) => item.id === workspaceId) || credentials.length === 0) {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
 
-    const current = modelsFor(
-      secrets.provider,
-      state.models.get(workspaceId),
-      lockedRoles(workspaceId),
-    );
+    const currentSelections = state.models.get(workspaceId) ?? {};
     const next: ModelSelections = { ...state.models.get(workspaceId) };
     for (const role of MODEL_ROLES) {
       const wanted = selections[role];
       if (!wanted) continue;
-      const entry = current.roles.find((item) => item.role === role)!;
+      const entry = modelsFor(
+        wanted.provider,
+        currentSelections,
+        lockedRoles(workspaceId),
+      ).roles.find((item) => item.role === role)!;
+      if (
+        !credentials.some((item) => item.provider === wanted.provider && item.status === "active")
+      ) {
+        throw new ApiError(422, "사용 가능한 API key가 없습니다.");
+      }
       if (!entry.options.some((o) => o.provider === wanted.provider && o.model === wanted.model)) {
         throw new ApiError(422, `${wanted.model}은(는) 이 키로 쓸 수 있는 모델이 아닙니다.`);
       }
@@ -321,12 +380,27 @@ export const mockApi: MaeglagiApi = {
       next[role] = wanted;
     }
     state.models.set(workspaceId, next);
-    return modelsFor(secrets.provider, next, lockedRoles(workspaceId));
+    return modelsForProviders(
+      [
+        ...new Set(
+          credentials.filter((item) => item.status === "active").map((item) => item.provider),
+        ),
+      ],
+      next,
+      lockedRoles(workspaceId),
+    );
   },
 
   async getWorkspaceSecrets(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    return state.secrets.get(workspaceId) ?? null;
+    return state.secrets.get(workspaceId)?.find((item) => item.isDefault) ?? null;
+  },
+
+  async listProviderCredentials(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    if (!state.workspaces.some((item) => item.id === workspaceId))
+      throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
+    return (state.secrets.get(workspaceId) ?? []).map((item) => ({ ...item }));
   },
 
   async updateApiKey(workspaceId, input, signal) {
@@ -338,7 +412,8 @@ export const mockApi: MaeglagiApi = {
     const check = checkApiKey(input.provider, input.apiKey);
     if (!check.valid) throw new ApiError(422, check.message);
 
-    return storeKey(workspaceId, input.provider, input.apiKey);
+    const saved = storeKey(workspaceId, input.provider, input.apiKey, input.label);
+    return saved;
   },
 
   async listSources(workspaceId, signal) {
@@ -350,7 +425,8 @@ export const mockApi: MaeglagiApi = {
 
   async getSourceContent(sourceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const content = sourceContents.find((item) => item.sourceId === sourceId);
+    const content =
+      state.transcripts.get(sourceId) ?? sourceContents.find((item) => item.sourceId === sourceId);
     if (!content) throw new ApiError(404, "원문을 찾을 수 없습니다.");
     return structuredClone(content);
   },
@@ -397,6 +473,15 @@ export const mockApi: MaeglagiApi = {
       createdAt: new Date().toISOString(),
       durationSeconds: input.durationSeconds,
       transcriptSource: "browser",
+    });
+    state.transcripts.set(job.sourceId, {
+      sourceId: job.sourceId,
+      title: input.title?.trim() || "회의 대본",
+      kind: "meeting",
+      chunks: input.text
+        .trim()
+        .split(/\n\n+/)
+        .map((text, index) => ({ id: `${job.sourceId}-chunk-${index}`, text })),
     });
     job.transcriptSource = "browser";
     return job;

@@ -58,7 +58,11 @@ export interface MaeglagiApi {
     signal?: AbortSignal,
   ): Promise<WorkspaceModels>;
   /** workspace가 쓸 수 있는 모델과 저장된 선택. 용도는 항상 answer, extraction, embedding, transcription 순입니다. */
-  getWorkspaceModels(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceModels>;
+  getWorkspaceModels(
+    workspaceId: string,
+    provider?: LlmProvider,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceModels>;
   /**
    * 용도별 모델을 저장합니다. 목록에 없는 모델은 422, 잠긴 용도(색인된 뒤의 임베딩)를
    * 바꾸려 하면 409로 실패합니다.
@@ -70,10 +74,12 @@ export interface MaeglagiApi {
   ): Promise<WorkspaceModels>;
   /** 저장된 키의 provider와 마지막 4자. 키를 등록하지 않았으면 null입니다. */
   getWorkspaceSecrets(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets | null>;
-  /** 키 교체. 기존 키는 덮어씌워지고 복구할 수 없습니다. */
+  /** 등록된 provider와 label별 키 목록입니다. */
+  listProviderCredentials(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets[]>;
+  /** 같은 provider와 label은 교체하고 해당 키를 기본 키로 지정합니다. */
   updateApiKey(
     workspaceId: string,
-    input: { provider: LlmProvider; apiKey: string },
+    input: { provider: LlmProvider; apiKey: string; label: string },
     signal?: AbortSignal,
   ): Promise<WorkspaceSecrets>;
 

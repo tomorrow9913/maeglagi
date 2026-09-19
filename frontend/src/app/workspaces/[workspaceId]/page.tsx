@@ -8,5 +8,5 @@ export default async function WorkspaceIndexPage({
   params: Promise<{ workspaceId: string }>;
 }) {
   const { workspaceId } = await params;
-  redirect(workspacePath(workspaceId, "timeline"));
+  redirect(workspacePath(workspaceId, "ask"));
 }
