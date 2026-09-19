@@ -184,9 +184,7 @@ async def upload_recording(
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
-    source, _ = await _upload_source(
-        workspace_id, audio, "meeting", user, session, credentials
-    )
+    source, _ = await _upload_source(workspace_id, audio, "meeting", user, session, credentials)
     source.transcript_source = "server"
     source.status = "queued"
     source.processing_stage = "uploaded"
