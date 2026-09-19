@@ -123,6 +123,9 @@ async def create_workspace(
         ),
     )
     session.add(workspace)
+    # Persist the referenced row before inserting its credential, while keeping
+    # both writes in the same transaction.
+    await session.flush()
     credential = ProviderCredential(
         workspace_id=workspace.id,
         owner_id=user.id,

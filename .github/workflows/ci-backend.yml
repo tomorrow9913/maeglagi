@@ -45,4 +45,7 @@ jobs:
       # Settings의 모든 필드에 기본값이 있어 비밀값 없이 실행됩니다.
       # 외부 서비스에 붙는 테스트를 추가하면 여기에 env를 함께 넣어야 합니다.
       - name: Test
+        # 테스트가 공유하는 앱의 메모리 rate limiter가 전체 suite 요청을 막지 않도록 합니다.
+        env:
+          RATE_LIMIT: 100000/minute
         run: uv run pytest -q

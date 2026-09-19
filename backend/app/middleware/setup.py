@@ -1,7 +1,5 @@
 import sentry_sdk
-from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
@@ -21,15 +19,6 @@ def register_middlewares(application: FastAPI, settings: Settings) -> None:
         limit=settings.rate_limit,
         storage_uri=settings.rate_limit_storage_uri,
     )
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID"],
-    )
-    application.add_middleware(CorrelationIdMiddleware, header_name="X-Request-ID")
 
 
 def _initialize_sentry(settings: Settings) -> None:
