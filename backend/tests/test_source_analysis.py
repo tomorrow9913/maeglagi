@@ -614,7 +614,9 @@ async def test_partial_graph_write_replays_checkpoint_without_reextracting_or_re
     record.review_state = "confirmed"
     adapter = FakeAdapter(architecture_meeting().responses)
     service = SourceAnalysisService(
-        WithKey(adapter), settings, repository_factory=lambda _: repository  # type: ignore[arg-type]
+        WithKey(adapter),
+        settings,
+        repository_factory=lambda _: repository,  # type: ignore[arg-type]
     )
 
     with pytest.raises(RuntimeError, match="Neo4j stopped"):
@@ -631,9 +633,7 @@ async def test_partial_graph_write_replays_checkpoint_without_reextracting_or_re
     assert [row.id for row in repository.timeline[record.id]] == timeline_ids
     assert record.analysis_checkpoint["phase"] == "done"
     entity_writes = [
-        params["rows"]
-        for query, params in graph.calls
-        if "MERGE (e:Entity {id: row.id})" in query
+        params["rows"] for query, params in graph.calls if "MERGE (e:Entity {id: row.id})" in query
     ]
     assert entity_writes == [initial_entities, initial_entities]
 

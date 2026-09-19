@@ -207,6 +207,7 @@ class SourceAnalysisService:
             Neo4jGraphStore.from_settings(self.settings) if self.settings.neo4j_enabled else None
         )
         try:
+
             async def save_extraction(result: ExtractionResult, graph: ResolvedGraph) -> None:
                 source.analysis_checkpoint = {
                     "fingerprint": fingerprint,
@@ -246,8 +247,7 @@ class SourceAnalysisService:
                 resolved_graph=ResolvedGraph.model_validate(checkpoint["graph"])
                 if checkpoint is not None
                 else None,
-                context_applied=checkpoint is not None
-                and checkpoint["phase"] == "context_applied",
+                context_applied=checkpoint is not None and checkpoint["phase"] == "context_applied",
                 context_warnings=checkpoint.get("context_warnings")
                 if checkpoint is not None
                 else None,
