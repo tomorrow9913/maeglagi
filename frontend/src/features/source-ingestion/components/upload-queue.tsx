@@ -4,17 +4,17 @@ import { AlertCircle, CheckCircle2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import type { ProcessingJob } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 import type { UploadItem } from "../hooks/use-source-upload";
+import type { LiveJob } from "../hooks/use-job-events";
 import { formatBytes, formatDuration } from "../lib/format";
 import { ProcessingTracker } from "./processing-tracker";
 
 /**
  * 업로드 중인 파일들의 상태를 한 줄씩 보여줍니다.
  *
- * 전송 중에는 전송 진행률을, 전송이 끝난 뒤에는 폴링으로 받은 처리 단계를
+ * 전송 중에는 전송 진행률을, 전송이 끝난 뒤에는 이벤트로 받은 처리 단계를
  * 이어서 표시합니다.
  */
 export function UploadQueue({
@@ -25,8 +25,8 @@ export function UploadQueue({
   className,
 }: {
   items: UploadItem[];
-  /** jobId → 폴링으로 갱신되는 최신 처리 상태 */
-  jobs: Record<string, ProcessingJob>;
+  /** jobId → 이벤트로 갱신되는 최신 처리 상태 */
+  jobs: Record<string, LiveJob>;
   onDismiss: (id: string) => void;
   onReview?: (sourceId: string) => void;
   className?: string;
@@ -36,7 +36,7 @@ export function UploadQueue({
   return (
     <ul className={cn("space-y-2", className)} aria-label="업로드 진행 상황">
       {items.map((item) => {
-        // 폴링 결과가 아직 없으면 업로드 응답으로 받은 초기 job을 씁니다.
+        // 이벤트가 아직 없으면 업로드 응답으로 받은 초기 job을 씁니다.
         const job = item.job ? (jobs[item.job.id] ?? item.job) : undefined;
         const hasFailed = item.status === "failed" || job?.status === "failed";
         const hasSucceeded = job?.status === "succeeded";
@@ -74,6 +74,8 @@ export function UploadQueue({
               <Progress value={item.progress * 100} className="mt-2 h-1" />
             ) : item.status === "failed" ? (
               <p className="mt-1.5 text-xs text-destructive">{item.errorMessage}</p>
+            ) : job?.eventError ? (
+              <p role="alert" className="mt-2 text-xs text-destructive">{job.eventError}</p>
             ) : job ? (
               <><ProcessingTracker job={job} className="mt-2" />{(job.status === "awaiting_review" || (job.status === "failed" && job.sourceKind === "meeting")) && onReview && <Button size="sm" className="mt-2" onClick={() => onReview(job.sourceId)}>{job.status === "failed" ? "대본·재시도 열기" : "대본 검토"}</Button>}</>
             ) : null}

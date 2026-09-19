@@ -4,42 +4,30 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, FileText, FileUp, Mic, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useAsync } from "@/hooks/use-async";
-import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
+import { useDemoMode, useWorkspacePath } from "@/lib/api/context";
+import { useLiveSources } from "../hooks/use-live-sources";
 import { SourceViewer } from "./source-viewer";
 import { SourceUploadDialog } from "./source-upload-dialog";
 import { MeetingReviewDialog } from "./meeting-review-dialog";
 
 export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
-  const api = useApi();
   const isDemo = useDemoMode();
   const workspacePath = useWorkspacePath();
-  const { data, error, isLoading, reload } = useAsync(
-    (signal) => api.listSources(workspaceId, signal),
-    [workspaceId],
-  );
+  const { sources: data, progress, error, isLoading, reload } = useLiveSources(workspaceId);
   const [viewer, setViewer] = useState<string>();
   const [reviewSourceId, setReviewSourceId] = useState<string>();
   const [mode, setMode] = useState<"document" | "meeting" | null>(null);
+  const [recordingBusy, setRecordingBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  useEffect(() => {
-    window.addEventListener("maeglagi:sources-changed", reload);
-    return () => window.removeEventListener("maeglagi:sources-changed", reload);
-  }, [reload]);
-  useEffect(() => {
-    if (!data?.some((source) => source.status === "processing" || source.status === "queued" || source.status === "enqueue_pending")) return;
-    const timer = window.setInterval(reload, 3000);
-    return () => window.clearInterval(timer);
-  }, [data, reload]);
   useEffect(() => {
     const openUpload = (event: Event) => {
       const detail = (event as CustomEvent<{ workspaceId: string; mode: "document" | "meeting" }>)
         .detail;
-      if (detail?.workspaceId === workspaceId) setMode(detail.mode);
+      if (detail?.workspaceId === workspaceId) setMode(recordingBusy && detail.mode === "document" ? "meeting" : detail.mode);
     };
     window.addEventListener("maeglagi:open-source-upload", openUpload);
     return () => window.removeEventListener("maeglagi:open-source-upload", openUpload);
-  }, [workspaceId]);
+  }, [workspaceId, recordingBusy]);
   return (
     <section
       className="mt-5 rounded-lg border p-3 md:rounded-none md:border-0 md:border-t md:px-0 md:pt-4"
@@ -73,6 +61,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             type="button"
             size="sm"
             variant="outline"
+            disabled={recordingBusy}
             className="gap-1 px-2 text-xs"
             onClick={() => setMode("document")}
           >
@@ -118,7 +107,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
                         ? "처리 실패"
                         : source.status === "awaiting_review"
                           ? "대본 검토 필요 · 열기"
-                        : "처리 중"}
+                        : `처리 중${progress[source.id] !== undefined ? ` · ${Math.round(progress[source.id] * 100)}%` : ""}`}
                   </span>
                 </span>
               </button>
@@ -127,7 +116,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
         </ul>
       </div>
       <SourceViewer workspaceId={workspaceId} sourceId={viewer} onClose={() => setViewer(undefined)} />
-      {!isDemo && <SourceUploadDialog workspaceId={workspaceId} mode={mode} onClose={() => setMode(null)} />}
+      {!isDemo && <SourceUploadDialog workspaceId={workspaceId} mode={mode} onClose={() => setMode(null)} onRecordingBusyChange={setRecordingBusy} />}
       {!isDemo && <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onConfirmed={() => { reload(); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} />}
     </section>
   );
