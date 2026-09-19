@@ -18,6 +18,7 @@ import {
 import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { KnowledgeGraph, WorkspacePerson, WorkspaceProject } from "@/lib/api";
 import { buildPersonContext, type PersonActivity } from "@/features/directory/lib/person-context";
+import { listProjectPeople } from "@/features/directory/lib/project-people";
 
 type PersonForm = { name: string; email: string; aliases: string; role: string };
 type ProjectForm = {
@@ -510,6 +511,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
               <ul className="divide-y rounded-xl border">
                 {projects.map((project) => {
                   const isOpen = expanded.includes(project.id);
+                  const projectPeople = listProjectPeople(project, people);
                   return (
                     <li key={project.id}>
                       <div className="flex items-center gap-2 p-2">
@@ -558,20 +560,21 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                           </p>
                           <div>
                             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-                              참여자
+                              담당 및 참여자
                             </h3>
                             <div className="flex flex-wrap gap-2">
-                              {(project.participantIds ?? []).length ? (
-                                (project.participantIds ?? []).map((id) => {
-                                  const participant = people.find((item) => item.id === id);
-                                  return participant ? (
+                              {projectPeople.length ? (
+                                projectPeople.map(({ id, person: projectPerson, isOwner }) => {
+                                  return projectPerson ? (
                                     <button
                                       key={id}
                                       type="button"
-                                      onClick={() => openPerson(participant)}
+                                      onClick={() => openPerson(projectPerson)}
                                       className="rounded-md border px-2 py-1 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                                     >
-                                      {participant.name}
+                                      {projectPerson.name}
+                                      {isOwner ? " · 담당" : ""}
+                                      {projectPerson.archivedAt ? " · 보관됨" : ""}
                                     </button>
                                   ) : (
                                     <span
