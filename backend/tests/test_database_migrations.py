@@ -9,6 +9,7 @@ def test_all_sqlmodel_tables_are_registered_for_alembic() -> None:
         "provider_credentials",
         "chunks",
         "contexts",
+        "context_stores",
     }
 
 

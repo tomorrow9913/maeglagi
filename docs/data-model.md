@@ -5,7 +5,7 @@ Supabase Auth의 `auth.users`가 사용자 원장입니다. 애플리케이션 �
 
 ```text
 auth.users
-    └── workspaces
+    └── workspaces ── context_stores (프로젝트의 현재 상황, 워크스페이스당 1행)
           └── sources ── object_path ──> Supabase Storage
                 └── chunks ── embedding ──> pgvector
                       └── contexts
@@ -43,4 +43,18 @@ auth.users
   이름과 정확히 일치해야 하며 이미 다른 결정으로 대체된 결정은 다시 대체하지 않습니다.
   다시 처리해도 `superseded_by`는 지워지지 않습니다.
 - `TemporalQueries`가 결정 이력, 현재 유효한 결정, 특정 시점에 유효한 관계를 조회합니다.
+
+## Context Store
+
+Graph가 업무 세계의 **구조**라면 Context Store는 프로젝트의 **현재 상황**을 담당합니다. 워크스페이스마다
+`context_stores` 한 행이 있고, 새 소스가 분석될 때마다 갱신됩니다.
+
+- 필드: `subject`, `summary`, `current_state`, `open_issues`, `decisions`, `next_actions`,
+  `updated_at`, `source_ids`(각 항목은 자신의 `source_refs` 원문 인용을 가집니다).
+- 새 소스의 결정·이슈·할 일은 정규화한 이름을 키로 병합하고, 같은 소스를 다시 처리해도 중복되지
+  않습니다. 명시적으로 대체된 결정은 `decisions`에서 빠집니다(이력은 `contexts`와 Graph에 남습니다).
+- 모델은 `summary`와 `current_state` 서술을 쓰고, 소스가 끝났다고 **원문 그대로 인용해** 밝힌 이슈·
+  할 일만 닫을 수 있습니다. 항목을 조용히 지울 수는 없습니다.
+- 소스별 타임라인(`contexts`)은 구조화된 이벤트에서 만듭니다. 종류는 `decision`, `issue`, `task`,
+  `event`이며, 결정 행은 자신이 대체하는 결정의 키를 `metadata.supersedes`로 가집니다.
 
