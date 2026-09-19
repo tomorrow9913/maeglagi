@@ -137,6 +137,9 @@ class Source(SQLModel, table=True):
         default=None, sa_column=Column(JSONB, nullable=True)
     )
     content_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    analysis_checkpoint: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     status: SourceStatus = Field(
         default=SourceStatus.QUEUED, sa_column=Column(String(20), nullable=False)
     )

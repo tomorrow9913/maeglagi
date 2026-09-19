@@ -237,6 +237,9 @@ class FakeSession:
     async def get(self, model: Any, identifier: Any) -> Any:
         return Workspace(id=WORKSPACE, owner_id=OWNER, name="맥락이 PoC")
 
+    def add(self, obj: Any) -> None:
+        pass
+
     async def commit(self) -> None:
         self.commits += 1
 
@@ -289,7 +292,7 @@ async def test_the_service_names_the_store_after_the_workspace_and_releases_its_
 
     assert repository.record is not None
     assert repository.record.subject == "맥락이 PoC"
-    assert session.commits == 1  # commits right after the store update so the row lock is freed
+    assert session.commits == 3  # extraction, context/phase, and completed checkpoint
 
 
 # --- the Celery task calls it ---------------------------------------------------------------
@@ -579,3 +582,172 @@ async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:
 
     assert [role.value for role in ingestion.roles] == ["extraction"]
     assert {r.model for r in adapter.requests} == {"chosen-extraction-model"}
+
+
+async def test_partial_graph_write_replays_checkpoint_without_reextracting_or_reapplying_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PartialGraph(FakeStore):
+        failed = False
+
+        async def execute(self, query: str, parameters: dict[str, Any] | None = None) -> Any:
+            if "MERGE (a)-[r:" in query and not self.failed:
+                self.failed = True
+                raise RuntimeError("Neo4j stopped after entity write")
+            return await super().execute(query, parameters)
+
+        async def close(self) -> None:
+            pass
+
+    graph = PartialGraph()
+    monkeypatch.setattr(
+        "app.modules.ingestion.application.source_analysis.Neo4jGraphStore.from_settings",
+        lambda settings: graph,
+    )
+    settings = Settings(
+        _env_file=None,
+        neo4j_uri="bolt://localhost",
+        neo4j_username="neo4j",
+        neo4j_password="test",
+    )
+    record, repository, session = source(), FakeRepository(), FakeSession()
+    record.review_state = "confirmed"
+    adapter = FakeAdapter(architecture_meeting().responses)
+    service = SourceAnalysisService(
+        WithKey(adapter), settings, repository_factory=lambda _: repository  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RuntimeError, match="Neo4j stopped"):
+        await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    assert record.analysis_checkpoint["phase"] == "context_applied"
+    assert session.commits == 2
+    initial_requests = len(adapter.requests)
+    timeline_ids = [row.id for row in repository.timeline[record.id]]
+    initial_entities = graph.rows("MERGE (e:Entity {id: row.id})")
+
+    await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert len(adapter.requests) == initial_requests
+    assert [row.id for row in repository.timeline[record.id]] == timeline_ids
+    assert record.analysis_checkpoint["phase"] == "done"
+    entity_writes = [
+        params["rows"]
+        for query, params in graph.calls
+        if "MERGE (e:Entity {id: row.id})" in query
+    ]
+    assert entity_writes == [initial_entities, initial_entities]
+
+
+async def test_committed_analysis_checkpoint_skips_provider_and_graph_on_redelivery() -> None:
+    record, session = source(), FakeSession()
+    record.review_state = "confirmed"
+    first = SourceAnalysisService(
+        WithKey(FakeAdapter(architecture_meeting().responses)),  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: FakeRepository(),
+    )
+    warnings = await first.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    assert record.analysis_checkpoint["phase"] == "done"
+    commits = session.commits
+
+    resumed = SourceAnalysisService(NoChatKey(), Settings(_env_file=None))  # type: ignore[arg-type]
+    assert await resumed.run(session, source=record, text=architecture_meeting().text) == warnings  # type: ignore[arg-type]
+    assert session.commits == commits
+
+
+async def test_task_resumes_committed_analysis_without_reindexing(wired: Any) -> None:
+    record = source()
+    record.kind = "document"
+    record.content_text = "persisted document"
+    record.analysis_checkpoint = {"phase": "done"}
+    wired(record)
+
+    await tasks._process_source(record.id)
+
+    assert record.status == "succeeded"
+    assert StubIngestion.index_calls == 0
+    assert RecordingAnalysis.calls[0]["text"] == "persisted document"
+
+
+async def test_worker_loss_after_analysis_commit_resumes_without_reindexing(
+    wired: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = source()
+    record.kind = "document"
+    record.title = "plan.md"
+    wired(record, b"persisted document")
+
+    class CommitThenDie:
+        calls = 0
+
+        async def run(self, session: Any, *, source: Source, text: str) -> list[str]:
+            type(self).calls += 1
+            if type(self).calls == 1:
+                source.analysis_checkpoint = {"phase": "done"}
+                session.add(source)
+                await session.commit()
+                raise RuntimeError("worker lost after analysis commit")
+            return []
+
+    monkeypatch.setattr(tasks, "SourceAnalysisService", CommitThenDie)
+    with pytest.raises(RuntimeError, match="worker lost"):
+        await tasks._process_source(record.id)
+    assert record.analysis_checkpoint["phase"] == "done"
+    assert StubIngestion.index_calls == 1
+
+    await tasks._process_source(record.id)
+    assert record.status == "succeeded"
+    assert StubIngestion.index_calls == 1
+    assert CommitThenDie.calls == 2
+
+
+def test_infrastructure_retries_do_not_consume_application_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[bool, dict[str, Any]]] = []
+
+    async def infrastructure_failure(source_id: UUID, *, final_attempt: bool) -> Any:
+        calls.append((final_attempt, {}))
+        raise ConnectionError("advisory lock unavailable")
+
+    def retry(**kwargs: Any) -> Exception:
+        calls[-1] = (calls[-1][0], kwargs)
+        return RuntimeError("scheduled retry")
+
+    monkeypatch.setattr(tasks, "_run_source_attempt", infrastructure_failure)
+    monkeypatch.setattr(tasks.process_source, "retry", retry)
+    tasks.process_source.push_request(retries=100)
+    try:
+        with pytest.raises(RuntimeError, match="scheduled retry"):
+            tasks.process_source.run(str(SOURCE), app_attempt=1)
+    finally:
+        tasks.process_source.pop_request()
+
+    assert calls[0][0] is False
+    assert calls[0][1]["kwargs"] == {"app_attempt": 1}
+    assert calls[0][1]["countdown"] == 30
+
+
+def test_provider_failure_advances_only_application_attempt_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retries: list[dict[str, Any]] = []
+
+    async def provider_failure(source_id: UUID, *, final_attempt: bool) -> Exception:
+        assert final_attempt is False
+        return RuntimeError("provider unavailable")
+
+    def retry(**kwargs: Any) -> Exception:
+        retries.append(kwargs)
+        return RuntimeError("scheduled retry")
+
+    monkeypatch.setattr(tasks, "_run_source_attempt", provider_failure)
+    monkeypatch.setattr(tasks.process_source, "retry", retry)
+    tasks.process_source.push_request(retries=100)
+    try:
+        with pytest.raises(RuntimeError, match="scheduled retry"):
+            tasks.process_source.run(str(SOURCE), app_attempt=2)
+    finally:
+        tasks.process_source.pop_request()
+
+    assert retries[0]["kwargs"] == {"app_attempt": 3}

@@ -106,6 +106,24 @@ async def _process_source(source_id: UUID) -> None:
         source.error_message = None
         pipeline = IngestionPipeline()
 
+        if source.analysis_checkpoint is not None:
+            # Extraction was committed before either sink was written. Resume that
+            # exact result without replacing chunks or calling providers again.
+            graph_text = (
+                source.content_text if source.kind == "document" else source.transcript_text
+            ) or ""
+            source.processing_stage = ProcessingStage.GRAPHING
+            source.progress = 0.7
+            session.add(source)
+            await session.commit()
+            await SourceAnalysisService().run(session, source=source, text=graph_text)
+            source.status = SourceStatus.SUCCEEDED
+            source.processing_stage = ProcessingStage.COMPLETED
+            source.progress = 1
+            session.add(source)
+            await session.commit()
+            return
+
         if source.kind == "document":
             source.processing_stage = ProcessingStage.UPLOADED
             source.progress = 0.2
@@ -234,17 +252,26 @@ async def _run_source_attempt(source_id: UUID, *, final_attempt: bool) -> Except
     retry_backoff_max=300,
     retry_jitter=True,
 )
-def process_source(self: Task, source_id: str) -> None:
+def process_source(self: Task, source_id: str, app_attempt: int = 0) -> None:
     identifier = UUID(source_id)
-    final_attempt = self.request.retries >= self.max_retries
+    final_attempt = app_attempt >= self.max_retries
     try:
         error = asyncio.run(_run_source_attempt(identifier, final_attempt=final_attempt))
     except Exception as exc:
         # The lock/DB connection failed; leave source state untouched and keep
         # retrying infrastructure recovery. The normal three-attempt provider
         # bound below must not acknowledge a persisted `processing` source.
-        raise self.retry(exc=exc, countdown=30, max_retries=2_147_483_647) from exc
+        raise self.retry(
+            exc=exc,
+            countdown=30,
+            max_retries=2_147_483_647,
+            kwargs={"app_attempt": app_attempt},
+        ) from exc
     if error is not None:
         if final_attempt:
             raise error
-        raise self.retry(exc=error) from error
+        raise self.retry(
+            exc=error,
+            max_retries=2_147_483_647,
+            kwargs={"app_attempt": app_attempt + 1},
+        ) from error
