@@ -76,7 +76,20 @@ src/
 - `/demo` — 시드 데이터가 들어 있는 워크스페이스의 Timeline으로 바로 진입합니다. 발표 때 목록을 거치지 않으려고 둔 경로입니다.
 - 업로드한 파일과 만든 워크스페이스는 새로고침하면 초기 시드로 돌아갑니다.
 
-실 API가 붙으면 `NEXT_PUBLIC_USE_MOCKS=false`로 바꾸기만 하면 되고, 배너도 자동으로 사라집니다.
+실 API 연결에는 `NEXT_PUBLIC_USE_MOCKS=false`를 정확히 설정해야 합니다. 미설정이거나 다른 값이면 mock이 유지됩니다. 화면 상단의 데모 배너로 현재 모드를 확인할 수 있습니다.
+
+### 실 API 연결 설정
+
+로컬에서는 `frontend/.env.example`을 `frontend/.env.local`로 복사해 다음 네 변수를 설정합니다. Next.js의 작업 디렉터리는 `frontend`이므로 저장소 루트의 `.env`만으로는 프론트 설정이 적용되지 않습니다.
+
+| 변수 | 실 API에서 필요한 값 |
+| --- | --- |
+| `NEXT_PUBLIC_API_URL` | 브라우저에서 접근 가능한 FastAPI 주소와 `/api/v1` 경로. 끝에 `/`를 붙이지 않습니다. |
+| `NEXT_PUBLIC_USE_MOCKS` | 정확히 `false`. |
+| `NEXT_PUBLIC_SUPABASE_URL` | 백엔드가 사용하는 것과 같은 Supabase 프로젝트 URL. |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | 같은 프로젝트의 공개 키. |
+
+배포에서는 이 네 변수를 Vercel 프로젝트의 해당 환경(production/preview)에 설정하고 다시 빌드해야 합니다. `NEXT_PUBLIC_` 값은 빌드 시 브라우저 번들에 포함됩니다. 백엔드의 `CORS_ORIGINS`에는 실제 프론트 origin을 JSON 배열로 지정하고, 백엔드의 `SUPABASE_URL` 및 `SUPABASE_PUBLISHABLE_KEY`는 프론트와 같은 프로젝트를 가리켜야 합니다. 이메일 가입 확인에 쓰는 `/auth/callback` URL은 Supabase Auth의 redirect URL 허용 목록에 추가합니다. 백엔드 `SUPABASE_SERVICE_ROLE_KEY`와 provider 비밀 키는 프론트 환경변수에 넣지 않습니다.
 
 ## 배포 (Vercel)
 
