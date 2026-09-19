@@ -4,6 +4,7 @@ import type {
   ContextItem,
   ContextStore,
   KnowledgeGraph,
+  ModelRole,
   Source,
   SourceContent,
   SourceKind,
@@ -505,4 +506,25 @@ export const contextStore: ContextStore = {
   ],
   sourceIds: ["src-kickoff", "src-tech-review"],
   updatedAt: "2026-09-11T07:10:00Z",
+};
+
+/**
+ * provider가 키로 내려주는 모델을 용도별로 나눈 mock 목록입니다.
+ *
+ * 실제로는 서버가 공급자의 모델 목록을 받아 분류합니다. Anthropic과 NVIDIA에는
+ * 임베딩·받아쓰기 모델이 없어, 옵션이 빈 용도를 화면에서 확인할 수 있습니다.
+ */
+export const modelCatalog: Record<string, Partial<Record<ModelRole, string[]>>> = {
+  openai: {
+    answer: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
+    extraction: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
+    embedding: ["text-embedding-3-small", "text-embedding-3-large"],
+    transcription: ["gpt-4o-transcribe", "whisper-1"],
+  },
+  anthropic: {
+    answer: ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
+  },
+  nvidia: {
+    answer: ["meta/llama-3.1-70b-instruct", "meta/llama-3.1-8b-instruct"],
+  },
 };

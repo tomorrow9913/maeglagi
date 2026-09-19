@@ -9,7 +9,6 @@ import { api } from "@/lib/api";
 import type { AiProvider, LlmProvider, WorkspaceSecrets } from "@/lib/api";
 
 import { ApiKeyField } from "./api-key-field";
-import { ProviderCapabilities } from "./provider-capabilities";
 import { ProviderSelect } from "./provider-select";
 
 function formatUpdatedAt(iso: string): string {
@@ -106,10 +105,6 @@ export function ApiKeyCard({
                   onChange={setProvider}
                   providers={providers}
                   disabled={isSaving}
-                />
-                <ProviderCapabilities
-                  provider={providers.find((item) => item.id === provider)}
-                  className="pt-1"
                 />
               </div>
 
