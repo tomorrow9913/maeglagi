@@ -19,13 +19,13 @@ def upgrade() -> None:
     op.alter_column(
         "provider_credentials", "key_hint", existing_type=sa.String(8), type_=sa.String(16)
     )
-    # Pin each old workspace choice to the credential its legacy resolver preferred:
-    # an active workspace default first, then the oldest active credential. This
-    # preserves workspace preference when account-wide defaults are consolidated.
-    # The provider's model availability cannot be queried during a migration.
+    # The old resolver probed model availability across all active keys in a
+    # workspace. With several keys, neither the default nor creation order
+    # proves which one offered the selected model. Keep that choice unpinned so
+    # the runtime can keep probing. A sole active key can be pinned safely.
     op.execute("""
         DO $$
-        DECLARE w record; choice record; settings jsonb; matching_id uuid;
+        DECLARE w record; choice record; settings jsonb; matching_id uuid; matches integer;
         BEGIN
           FOR w IN SELECT id, model_settings FROM workspaces LOOP
             settings := w.model_settings;
@@ -33,14 +33,12 @@ def upgrade() -> None:
               IF jsonb_typeof(choice.value) = 'object'
                  AND choice.value ? 'provider'
                  AND NOT choice.value ? 'credentialId' THEN
-                SELECT id INTO matching_id
+                SELECT count(*), min(id::text)::uuid INTO matches, matching_id
                 FROM provider_credentials
                 WHERE workspace_id = w.id
                   AND provider = choice.value->>'provider'
-                  AND status = 'active'
-                ORDER BY is_default DESC, created_at, id
-                LIMIT 1;
-                IF matching_id IS NOT NULL THEN
+                  AND status = 'active';
+                IF matches = 1 THEN
                   settings := jsonb_set(
                     settings, ARRAY[choice.key, 'credentialId'], to_jsonb(matching_id::text)
                   );

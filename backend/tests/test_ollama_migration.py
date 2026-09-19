@@ -75,8 +75,8 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                 migrate("stamp", "202609240001")
                 owner = uuid4()
                 first_ws, second_ws, third_ws = (uuid4() for _ in range(3))
-                # Workspace one's newer default must remain its choice when
-                # workspace two's older default becomes the account default.
+                # Several legacy keys must remain unpinned: the old resolver
+                # probes which key actually offers the selected model.
                 first_old, first_default, second_default, third_old, third_new = (
                     uuid4() for _ in range(5)
                 )
@@ -125,7 +125,7 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                     owner,
                     secret_id,
                 )
-                migrate("upgrade", "head")
+                migrate("upgrade", "202609250001")
                 rows = await conn.fetch(
                     "SELECT id,label,is_default FROM provider_credentials "
                     "WHERE owner_id=$1 AND provider='ollama'",
@@ -134,16 +134,21 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                 assert len(rows) == 5
                 assert len({row["label"] for row in rows}) == 5
                 assert sum(row["is_default"] for row in rows) == 1
-                for workspace_id, expected_id in (
-                    (first_ws, first_default),
-                    (second_ws, second_default),
-                    (third_ws, third_old),
-                ):
+                for workspace_id, expected_id in ((second_ws, second_default),):
                     assert await conn.fetchval(
                         "SELECT model_settings->'answer'->>'credentialId' "
                         "FROM workspaces WHERE id=$1",
                         workspace_id,
                     ) == str(expected_id)
+                for workspace_id in (first_ws, third_ws):
+                    assert (
+                        await conn.fetchval(
+                            "SELECT model_settings->'answer'->>'credentialId' "
+                            "FROM workspaces WHERE id=$1",
+                            workspace_id,
+                        )
+                        is None
+                    )
                 assert (
                     await conn.fetchval(
                         "SELECT vault_secret_id FROM provider_credentials WHERE id=$1", keyed_id

@@ -9,7 +9,7 @@ import httpx
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlmodel import select
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.workspaces import credentials as credential_routes
@@ -21,9 +21,16 @@ from app.main import app
 from app.modules.context_engine.application.model_catalog import options_for_workspace
 from app.modules.context_engine.application.model_roles import ModelRole
 from app.modules.context_engine.application.provider import ChatResponse, ModelInfo
+from app.modules.context_engine.infrastructure.models import Chunk
 from app.modules.context_engine.infrastructure.ollama_adapter import OllamaAdapter
 from app.modules.ingestion.application.pipeline import IngestionPipeline
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    ProviderCredential,
+    Source,
+    Workspace,
+    WorkspacePerson,
+    WorkspaceProject,
+)
 
 
 @pytest.fixture
@@ -33,11 +40,30 @@ async def database(monkeypatch: pytest.MonkeyPatch):
         pytest.skip("Set PG_EXECUTOR_TEST_DATABASE_URL to a disposable local PostgreSQL database")
     if urlparse(url).hostname not in {"127.0.0.1", "localhost", "::1"}:
         pytest.fail("Ollama connection tests require loopback PostgreSQL")
-    engine = create_async_engine(url)
+    schema = f"ollama_connections_{uuid4().hex}"
+    engine = create_async_engine(
+        url, connect_args={"server_settings": {"search_path": f"{schema},public,extensions"}}
+    )
     async with engine.begin() as connection:
-        # The shared local fixture DB predates this migration. Provision just the new column.
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await connection.execute(text("CREATE SCHEMA IF NOT EXISTS extensions"))
         await connection.execute(
-            text("ALTER TABLE provider_credentials ADD COLUMN IF NOT EXISTS base_url text")
+            text("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions")
+        )
+        # Create only this fixture's dependencies in its own schema. Other tests
+        # may leave the public database at a different Alembic revision.
+        await connection.run_sync(
+            lambda sync: SQLModel.metadata.create_all(
+                sync,
+                tables=[
+                    Workspace.__table__,
+                    WorkspacePerson.__table__,
+                    WorkspaceProject.__table__,
+                    Source.__table__,
+                    ProviderCredential.__table__,
+                    Chunk.__table__,
+                ],
+            )
         )
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     owner = uuid4()
@@ -75,16 +101,8 @@ async def database(monkeypatch: pytest.MonkeyPatch):
         yield factory, owner, outsider, current_owner, vault
     finally:
         app.dependency_overrides.clear()
-        async with factory() as session:
-            await session.execute(
-                text("DELETE FROM provider_credentials WHERE owner_id IN (:a, :b)"),
-                {"a": owner, "b": outsider},
-            )
-            await session.execute(
-                text("DELETE FROM workspaces WHERE owner_id IN (:a, :b)"),
-                {"a": owner, "b": outsider},
-            )
-            await session.commit()
+        async with engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         await engine.dispose()
 
 
