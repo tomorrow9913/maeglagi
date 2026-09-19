@@ -150,6 +150,7 @@ export interface MaeglagiApi {
   sourceEvents(workspaceId: string, sourceIds: string[], signal?: AbortSignal): AsyncIterable<ProcessingJob>;
   getMeetingReview(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<MeetingReview>;
   retryMeetingTranscription(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<ProcessingJob>;
+  submitBrowserTranscript(workspaceId: string, sourceId: string, input: { revision: number; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
   saveMeetingReview(workspaceId: string, sourceId: string, input: { revision: number; projectId?: string | null; projectIds?: string[]; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
   confirmMeetingReview(workspaceId: string, sourceId: string, revision: number, signal?: AbortSignal): Promise<ProcessingJob>;
 

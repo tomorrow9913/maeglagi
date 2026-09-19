@@ -182,6 +182,7 @@ export const httpApi: MaeglagiApi = {
   },
   getMeetingReview: (workspaceId, sourceId, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { signal }),
   retryMeetingTranscription: (workspaceId, sourceId, signal) => apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/${sourceId}/review/retry-transcription`, { method: "POST", signal }),
+  submitBrowserTranscript: (workspaceId, sourceId, input, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review/browser-transcript`, { method: "POST", body: JSON.stringify(input), signal }),
   saveMeetingReview: (workspaceId, sourceId, input, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { method: "PATCH", body: JSON.stringify(input), signal }),
   confirmMeetingReview: (workspaceId, sourceId, revision, signal) => apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/${sourceId}/review/confirm`, { method: "POST", body: JSON.stringify({ revision }), signal }),
 

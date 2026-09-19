@@ -803,6 +803,31 @@ export const mockApi: MaeglagiApi = {
     const { startedAt: _startedAt, ...response } = job;
     return { ...response };
   },
+  async submitBrowserTranscript(workspaceId, sourceId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const review = state.reviews.get(sourceId);
+    const source = state.sources.find((item) => item.id === sourceId && item.workspaceId === workspaceId);
+    const job = state.jobs.get(sourceId);
+    if (!review || !source || !job || source.kind !== "meeting") throw new ApiError(404, "검토 대본을 찾을 수 없습니다.");
+    if (review.revision !== input.revision || review.reviewState !== "transcribing" || job.status !== "failed" || review.analysisMode === "agent") throw new ApiError(409, "음성 인식 상태가 변경됐습니다. 다시 불러와 주세요.");
+    if (!input.utterances.some((item) => item.text.trim())) throw new ApiError(422, "완성된 발언이 없습니다.");
+    review.utterances = structuredClone(input.utterances);
+    if (!review.rawTranscriptText) {
+      review.rawUtterances = structuredClone(input.utterances);
+      review.rawTranscriptText = input.utterances.map((item) => `${item.speakerName}: ${item.text}`).join("\n\n");
+    }
+    review.transcriptSource = "browser";
+    review.reviewState = "awaiting_review";
+    review.status = "awaiting_review";
+    review.stage = "awaiting_review";
+    review.errorMessage = null;
+    review.revision += 1;
+    source.status = "awaiting_review";
+    job.status = "awaiting_review";
+    job.stage = "awaiting_review";
+    job.transcriptSource = "browser";
+    return structuredClone(review);
+  },
   async saveMeetingReview(workspaceId, sourceId, input, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     const review = state.reviews.get(sourceId);

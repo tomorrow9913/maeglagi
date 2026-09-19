@@ -61,6 +61,7 @@ export const demoHttpApi: MaeglagiApi = {
   uploadTranscript: loginRequired,
   getMeetingReview: loginRequired,
   retryMeetingTranscription: loginRequired,
+  submitBrowserTranscript: loginRequired,
   saveMeetingReview: loginRequired,
   confirmMeetingReview: loginRequired,
   async *ask() { throw new ApiError(403, "데모에서는 AI 질문을 실행하지 않습니다. 로그인해 내 워크스페이스에서 사용하세요."); },
