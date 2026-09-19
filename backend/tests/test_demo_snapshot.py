@@ -1,9 +1,12 @@
 """Offline contract tests for the preprocessed demo snapshot."""
 
+import asyncio
 import base64
 import hashlib
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import httpx
@@ -174,6 +177,17 @@ def test_artifact_validation_rejects_tampering_and_cross_workspace_references() 
         validate_artifact(resign(changed), owner_id=owner)
 
 
+@pytest.mark.parametrize("collection", ("open_issues", "decisions", "next_actions"))
+def test_context_store_nested_source_must_exist_or_be_null(collection: str) -> None:
+    snapshot, owner = artifact()
+    changed = deepcopy(snapshot)
+    changed["payload"]["context_stores"][0][collection][0]["source_id"] = str(uuid4())
+    with pytest.raises(SnapshotError, match=f"Orphan Context Store {collection} source"):
+        restore_plan(resign(changed), owner)
+    changed["payload"]["context_stores"][0][collection][0]["source_id"] = None
+    assert restore_plan(resign(changed), owner)["sources"] == 1
+
+
 def test_storage_create_uses_non_upsert_post() -> None:
     class Client:
         def __init__(self):
@@ -216,6 +230,82 @@ def test_context_metadata_column_roundtrips() -> None:
     context = _model_row(ContextRecord, snapshot["payload"]["contexts"][0])
     assert context.metadata_ == {"key": "demo"}
     assert _row(context)["metadata"] == {"key": "demo"}
+
+
+@pytest.mark.asyncio
+async def test_absent_target_reservation_flushes_before_yield_and_rolls_back(monkeypatch) -> None:
+    snapshot, _ = artifact()
+    workspace = snapshot["payload"]["workspace"]
+    events = []
+    bind = object()
+    fail_flush = False
+
+    class ReservationSession:
+        def __init__(self, *, bind: object):
+            assert bind is outer_bind
+
+        async def __aenter__(self):
+            events.append("enter")
+            return self
+
+        async def __aexit__(self, *_):
+            events.append("exit")
+
+        async def execute(self, statement):
+            assert str(statement) == "SET LOCAL lock_timeout = '5000ms'"
+            events.append("lock_timeout")
+
+        def add(self, row):
+            assert isinstance(row, Workspace)
+            events.append("add")
+
+        async def flush(self):
+            events.append("flush")
+            if fail_flush:
+                raise RuntimeError("flush failed")
+
+        async def rollback(self):
+            events.append("rollback")
+
+    outer_bind = bind
+    monkeypatch.setattr(snapshot_module, "AsyncSession", ReservationSession)
+    async with snapshot_module._reserve_absent_target(SimpleNamespace(bind=bind), workspace):
+        events.append("yield")
+    assert events == ["enter", "lock_timeout", "add", "flush", "yield", "rollback", "exit"]
+
+    events.clear()
+    fail_flush = True
+    with pytest.raises(RuntimeError, match="flush failed"):
+        async with snapshot_module._reserve_absent_target(SimpleNamespace(bind=bind), workspace):
+            events.append("yield")
+    assert events == ["enter", "lock_timeout", "add", "flush", "exit"]
+
+
+@pytest.mark.asyncio
+async def test_committed_target_verification_timeout_is_unknown(monkeypatch) -> None:
+    cancelled = asyncio.Event()
+
+    class SlowVerifier:
+        def __init__(self, *, bind: object):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def get(self, model, target):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(snapshot_module, "AsyncSession", SlowVerifier)
+    monkeypatch.setattr(snapshot_module, "COMMIT_SETTLE_SECONDS", 0.01)
+    result = await snapshot_module._verify_committed_target(SimpleNamespace(bind=object()), uuid4())
+    assert result is None and cancelled.is_set()
 
 
 class FakeResult:
@@ -381,7 +471,7 @@ async def test_commit_error_verified_committed_preserves_external_state(monkeypa
     monkeypatch.setattr(snapshot_module, "_verify_committed_target", committed)
     result = await restore_snapshot(db, graph, storage, snapshot, owner)
     assert result["commit_verified_after_error"] is True
-    assert not db.rolled_back and len(storage.objects) == 1
+    assert db.rolled_back and len(storage.objects) == 1
     assert "graph_cleanup" not in events and "object_cleanup" not in events
 
 
@@ -400,4 +490,160 @@ async def test_commit_error_unverified_preserves_external_state(monkeypatch) -> 
         await restore_snapshot(db, graph, storage, snapshot, owner)
     assert db.rolled_back and len(storage.objects) == 1
     assert events[-1] == "rollback"
+    assert "graph_cleanup" not in events and "object_cleanup" not in events
+
+
+@pytest.mark.asyncio
+async def test_verified_absent_commit_cleans_under_reservation_and_allows_retry(
+    monkeypatch,
+) -> None:
+    snapshot, owner = artifact()
+    events = []
+    db = FakeDb(fail_commit=True, events=events)
+    graph, storage = FakeGraph(events), FakeStorage(events)
+    reservation_held = False
+
+    async def absent(*_):
+        return False
+
+    @asynccontextmanager
+    async def reserve(*_):
+        nonlocal reservation_held
+        reservation_held = True
+        events.append("reservation_acquired")
+        try:
+            yield
+        finally:
+            reservation_held = False
+            events.append("reservation_released")
+
+    original_cleanup = snapshot_module._cleanup_created_state
+
+    def guarded_cleanup(*args):
+        assert reservation_held
+        return original_cleanup(*args)
+
+    monkeypatch.setattr(snapshot_module, "_verify_committed_target", absent)
+    monkeypatch.setattr(snapshot_module, "_reserve_absent_target", reserve)
+    monkeypatch.setattr(snapshot_module, "_cleanup_created_state", guarded_cleanup)
+    with pytest.raises(RuntimeError, match="ambiguous commit"):
+        await restore_snapshot(db, graph, storage, snapshot, owner)
+    assert db.rolled_back and not storage.objects
+    assert events[-4:] == [
+        "reservation_acquired",
+        "graph_cleanup",
+        "object_cleanup",
+        "reservation_released",
+    ]
+    retry = await restore_snapshot(FakeDb(), graph, storage, snapshot, owner)
+    assert retry["execute"] and len(storage.objects) == 1
+
+
+@pytest.mark.asyncio
+async def test_absent_query_without_reservation_preserves_external_state(monkeypatch) -> None:
+    snapshot, owner = artifact()
+    events = []
+    db = FakeDb(fail_commit=True, events=events)
+    graph, storage = FakeGraph(events), FakeStorage(events)
+
+    async def absent(*_):
+        return False
+
+    @asynccontextmanager
+    async def unavailable(*_):
+        raise TimeoutError("reservation lock timeout")
+        yield
+
+    monkeypatch.setattr(snapshot_module, "_verify_committed_target", absent)
+    monkeypatch.setattr(snapshot_module, "_reserve_absent_target", unavailable)
+    with pytest.raises(SnapshotError, match="commit outcome uncertain"):
+        await restore_snapshot(db, graph, storage, snapshot, owner)
+    assert len(storage.objects) == 1
+    assert "graph_cleanup" not in events and "object_cleanup" not in events
+
+
+@pytest.mark.asyncio
+async def test_reservation_conflict_rechecks_committed_target(monkeypatch) -> None:
+    snapshot, owner = artifact()
+    events = []
+    db = FakeDb(fail_commit=True, events=events)
+    graph, storage = FakeGraph(events), FakeStorage(events)
+    checks = iter((False, True))
+
+    async def verify(*_):
+        return next(checks)
+
+    @asynccontextmanager
+    async def conflicting_reservation(*_):
+        raise RuntimeError("unique conflict")
+        yield
+
+    monkeypatch.setattr(snapshot_module, "_verify_committed_target", verify)
+    monkeypatch.setattr(snapshot_module, "_reserve_absent_target", conflicting_reservation)
+    result = await restore_snapshot(db, graph, storage, snapshot, owner)
+    assert result["commit_verified_after_error"] is True
+    assert len(storage.objects) == 1
+    assert "graph_cleanup" not in events and "object_cleanup" not in events
+
+
+@pytest.mark.asyncio
+async def test_late_verified_commit_reports_deadline_exceeded(monkeypatch) -> None:
+    snapshot, owner = artifact()
+    db, graph, storage = FakeDb(fail_commit=True), FakeGraph(), FakeStorage()
+    clock = iter((0.0, 0.01, 61.0))
+
+    async def committed(*_):
+        return True
+
+    monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(snapshot_module, "_verify_committed_target", committed)
+    result = await restore_snapshot(db, graph, storage, snapshot, owner)
+    assert result["commit_verified_after_error"] is True
+    assert result["deadline_exceeded"] is True
+    assert result["elapsed_seconds"] == 61.0
+    assert len(storage.objects) == 1
+
+
+@pytest.mark.asyncio
+async def test_commit_stall_uses_remaining_deadline_and_preserves_uncertain_state(
+    monkeypatch,
+) -> None:
+    snapshot, owner = artifact()
+    events = []
+    db = FakeDb(events=events)
+    graph, storage = FakeGraph(events), FakeStorage(events)
+    commit_cancelled = asyncio.Event()
+
+    async def stalled_commit():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            commit_cancelled.set()
+            raise
+
+    async def unknown(*_):
+        return None
+
+    db.commit = stalled_commit
+    monkeypatch.setattr(snapshot_module, "MAX_RESTORE_SECONDS", 0.1)
+    monkeypatch.setattr(snapshot_module, "_verify_committed_target", unknown)
+    with pytest.raises(SnapshotError, match="commit outcome uncertain"):
+        await restore_snapshot(db, graph, storage, snapshot, owner)
+    assert commit_cancelled.is_set() and db.rolled_back
+    assert len(storage.objects) == 1
+    assert "graph_cleanup" not in events and "object_cleanup" not in events
+
+
+@pytest.mark.asyncio
+async def test_late_successful_commit_reports_deadline_and_preserves_data(monkeypatch) -> None:
+    snapshot, owner = artifact()
+    events = []
+    db = FakeDb(events=events)
+    graph, storage = FakeGraph(events), FakeStorage(events)
+    clock = iter((0.0, 0.01, 61.0))
+    monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    with pytest.raises(SnapshotError, match="after SQL commit; data preserved"):
+        await restore_snapshot(db, graph, storage, snapshot, owner)
+    assert db.committed and not db.rolled_back
+    assert len(storage.objects) == 1
     assert "graph_cleanup" not in events and "object_cleanup" not in events

@@ -12,6 +12,8 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,7 +22,7 @@ from uuid import UUID, uuid5
 
 import httpx
 from neo4j import GraphDatabase
-from sqlalchemy import DateTime, inspect, select
+from sqlalchemy import DateTime, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.modules.context_engine.domain.ontology import RelationKind
@@ -34,6 +36,7 @@ from app.modules.workspaces.infrastructure.models import Source, Workspace
 TABLES = (Source, Chunk, ContextRecord, ContextStoreRecord)
 MAX_ARTIFACT_BYTES = 25_000_000
 MAX_RESTORE_SECONDS = 60
+COMMIT_SETTLE_SECONDS = 5
 VERSION = 1
 
 
@@ -214,6 +217,16 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
             )
     store = stores[0]
     _require(set(store.get("source_ids", [])) == source_ids, "Context Store sources mismatch")
+    for collection in ("open_issues", "decisions", "next_actions"):
+        items = store.get(collection)
+        _require(isinstance(items, list), f"Invalid Context Store {collection}")
+        for item in items:
+            _require(isinstance(item, dict), f"Invalid Context Store {collection} item")
+            source_id = item.get("source_id")
+            _require(
+                source_id is None or _uuid(source_id, f"{collection} source ID") in source_ids,
+                f"Orphan Context Store {collection} source",
+            )
     objects = payload["objects"]
     _require(
         {item.get("source_id") for item in objects} == source_ids and len(objects) == len(sources),
@@ -397,11 +410,49 @@ def _model_row(model: Any, row: dict[str, Any]) -> Any:
 
 async def _verify_committed_target(db: AsyncSession, target: UUID) -> bool | None:
     """Use an independent connection; the failed session's identity map proves nothing."""
-    try:
+    async def query() -> bool:
         async with AsyncSession(bind=db.bind) as verifier:
             return await verifier.get(Workspace, target) is not None
+
+    try:
+        return await asyncio.wait_for(query(), timeout=COMMIT_SETTLE_SECONDS)
     except Exception:
         return None
+
+
+@asynccontextmanager
+async def _reserve_absent_target(
+    db: AsyncSession, workspace: dict[str, Any]
+) -> AsyncIterator[None]:
+    """Prove the old insert ended absent and block another restore during cleanup."""
+    async with AsyncSession(bind=db.bind) as reservation:
+        await reservation.execute(text("SET LOCAL lock_timeout = '5000ms'"))
+        reservation.add(_model_row(Workspace, workspace))
+        await asyncio.wait_for(reservation.flush(), timeout=COMMIT_SETTLE_SECONDS)
+        try:
+            yield
+        finally:
+            await reservation.rollback()
+
+
+def _cleanup_created_state(
+    graph: Any, storage: Storage, target: UUID, graph_created: bool, paths: list[str]
+) -> list[str]:
+    errors = []
+    if graph_created:
+        try:
+            graph.run(
+                "MATCH (e:Entity {workspace_id: $workspace}) DETACH DELETE e",
+                workspace=str(target),
+            ).consume()
+        except Exception:
+            errors.append("graph")
+    for path in paths:
+        try:
+            storage.delete(path)
+        except Exception:
+            errors.append("object")
+    return errors
 
 
 async def restore_snapshot(
@@ -419,6 +470,7 @@ async def restore_snapshot(
     graph_created = False
     commit_attempted = False
     committed = False
+    rollback_attempted = False
     workspace = dict(payload["workspace"])
     workspace.update(
         id=str(target), name=f"{workspace['name'][:109]} (restored)", owner_id=str(owner_id)
@@ -517,49 +569,77 @@ async def restore_snapshot(
                         ]
                 db.add(_model_row(model, row))
             await db.flush()
-        _require(
-            time.monotonic() - started < MAX_RESTORE_SECONDS, "Restore exceeded one-minute limit"
-        )
+        remaining = MAX_RESTORE_SECONDS - (time.monotonic() - started)
+        _require(remaining > 0, "Restore exceeded one-minute limit")
         commit_attempted = True
-        await db.commit()
+        await asyncio.wait_for(db.commit(), timeout=remaining)
         committed = True
     except Exception as original:
         if commit_attempted:
+            rollback_attempted = True
+            try:
+                await asyncio.wait_for(db.rollback(), timeout=COMMIT_SETTLE_SECONDS)
+            except Exception as exc:
+                raise SnapshotError(
+                    "SQL commit outcome uncertain; graph and objects preserved for inspection"
+                ) from exc
             verified = await _verify_committed_target(db, target)
             if verified is True:
                 committed = True
+                elapsed = time.monotonic() - started
                 return {
                     **plan,
                     "execute": True,
                     "commit_verified_after_error": True,
-                    "elapsed_seconds": round(time.monotonic() - started, 2),
+                    "deadline_exceeded": elapsed >= MAX_RESTORE_SECONDS,
+                    "elapsed_seconds": round(elapsed, 2),
                 }
-            raise SnapshotError(
-                "SQL commit outcome uncertain; graph and objects preserved for inspection"
-            ) from original
-        cleanup_errors = []
-        if graph_created:
+            if verified is None:
+                raise SnapshotError(
+                    "SQL commit outcome uncertain; graph and objects preserved for inspection"
+                ) from original
+            reserved = False
             try:
-                graph.run(
-                    "MATCH (e:Entity {workspace_id: $workspace}) DETACH DELETE e",
-                    workspace=str(target),
-                ).consume()
-            except Exception:
-                cleanup_errors.append("graph")
-        for path in paths:
-            try:
-                storage.delete(path)
-            except Exception:
-                cleanup_errors.append("object")
-        if cleanup_errors:
-            raise SnapshotError(
-                f"Restore failed; residual cleanup failed for {', '.join(cleanup_errors)}"
-            ) from original
+                async with _reserve_absent_target(db, workspace):
+                    reserved = True
+                    cleanup_errors = _cleanup_created_state(
+                        graph, storage, target, graph_created, paths
+                    )
+                    if cleanup_errors:
+                        raise SnapshotError(
+                            "Restore failed; residual cleanup failed for "
+                            f"{', '.join(cleanup_errors)}"
+                        ) from original
+            except Exception as exc:
+                if reserved:
+                    raise
+                if await _verify_committed_target(db, target) is True:
+                    committed = True
+                    elapsed = time.monotonic() - started
+                    return {
+                        **plan,
+                        "execute": True,
+                        "commit_verified_after_error": True,
+                        "deadline_exceeded": elapsed >= MAX_RESTORE_SECONDS,
+                        "elapsed_seconds": round(elapsed, 2),
+                    }
+                raise SnapshotError(
+                    "SQL commit outcome uncertain; graph and objects preserved for inspection"
+                ) from exc
+        else:
+            cleanup_errors = _cleanup_created_state(graph, storage, target, graph_created, paths)
+            if cleanup_errors:
+                raise SnapshotError(
+                    f"Restore failed; residual cleanup failed for {', '.join(cleanup_errors)}"
+                ) from original
         raise
     finally:
-        if not committed:
+        if not committed and not rollback_attempted:
             await db.rollback()
-    return {**plan, "execute": True, "elapsed_seconds": round(time.monotonic() - started, 2)}
+    elapsed = time.monotonic() - started
+    if elapsed >= MAX_RESTORE_SECONDS:
+        raise SnapshotError("Restore exceeded one-minute limit after SQL commit; data preserved")
+    return {**plan, "execute": True, "elapsed_seconds": round(elapsed, 2)}
 
 
 def _env(name: str) -> str:
