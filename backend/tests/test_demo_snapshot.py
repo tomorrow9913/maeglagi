@@ -188,6 +188,24 @@ def test_context_store_nested_source_must_exist_or_be_null(collection: str) -> N
     assert restore_plan(resign(changed), owner)["sources"] == 1
 
 
+def test_context_chunk_must_belong_to_its_source() -> None:
+    snapshot, owner = artifact()
+    changed = deepcopy(snapshot)
+    other_source = deepcopy(changed["payload"]["sources"][0])
+    other_source["id"] = str(uuid4())
+    other_source["object_path"] = (
+        f"{owner}/{changed['payload']['workspace']['id']}/{other_source['id']}/other.md"
+    )
+    changed["payload"]["sources"].append(other_source)
+    other_object = deepcopy(changed["payload"]["objects"][0])
+    other_object["source_id"] = other_source["id"]
+    changed["payload"]["objects"].append(other_object)
+    changed["payload"]["context_stores"][0]["source_ids"].append(other_source["id"])
+    changed["payload"]["contexts"][0]["source_id"] = other_source["id"]
+    with pytest.raises(SnapshotError, match="Context chunk belongs to another source"):
+        restore_plan(resign(changed), owner)
+
+
 def test_storage_create_uses_non_upsert_post() -> None:
     class Client:
         def __init__(self):
@@ -412,6 +430,31 @@ class FakeStorage:
 
     def read(self, path):
         return self.objects[path]
+
+
+@pytest.mark.asyncio
+async def test_lost_upload_response_cleans_only_this_attempt_and_retry_succeeds() -> None:
+    snapshot, owner = artifact()
+    graph, storage = FakeGraph(), FakeStorage()
+    target = restore_plan(snapshot, owner)["target_workspace_id"]
+    old_path = f"{owner}/{target}/previous-attempt/demo.md"
+    storage.objects[old_path] = b"pre-existing"
+    original_write = storage.write
+
+    def lost_response(path, data, content_type):
+        original_write(path, data, content_type)
+        raise httpx.ReadError("upload response lost")
+
+    storage.write = lost_response
+    with pytest.raises(httpx.ReadError, match="response lost"):
+        await restore_snapshot(FakeDb(), graph, storage, snapshot, owner)
+    assert storage.objects == {old_path: b"pre-existing"}
+
+    storage.write = original_write
+    retry = await restore_snapshot(FakeDb(), graph, storage, snapshot, owner)
+    assert retry["execute"]
+    assert storage.objects[old_path] == b"pre-existing"
+    assert len(storage.objects) == 2
 
 
 class FakeScalars:

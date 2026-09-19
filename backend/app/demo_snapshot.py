@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 import httpx
 from neo4j import GraphDatabase
@@ -166,6 +166,7 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
         "Incomplete processed demo state",
     )
     source_ids, chunk_ids = _ids(sources, "source ID"), _ids(chunks, "chunk ID")
+    chunk_sources = {chunk["id"]: chunk.get("source_id") for chunk in chunks}
     _ids(contexts, "context ID")
     _ids(stores, "context store ID")
     for key, rows in (
@@ -212,8 +213,13 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
             _uuid(context.get("source_id"), "context source ID") in source_ids, "Orphan context"
         )
         if context.get("chunk_id") is not None:
+            chunk_id = _uuid(context["chunk_id"], "context chunk ID")
             _require(
-                _uuid(context["chunk_id"], "context chunk ID") in chunk_ids, "Orphan context chunk"
+                chunk_id in chunk_ids, "Orphan context chunk"
+            )
+            _require(
+                chunk_sources[chunk_id] == context["source_id"],
+                "Context chunk belongs to another source",
             )
     store = stores[0]
     _require(set(store.get("source_ids", [])) == source_ids, "Context Store sources mismatch")
@@ -467,7 +473,9 @@ async def restore_snapshot(
         "Target workspace already exists; refusing restore",
     )
     started = time.monotonic()
+    upload_attempt = uuid4()
     paths: list[str] = []
+    source_paths: dict[str, str] = {}
     graph_created = False
     commit_attempted = False
     committed = False
@@ -490,9 +498,15 @@ async def restore_snapshot(
         for source in payload["sources"]:
             obj = next(item for item in payload["objects"] if item["source_id"] == source["id"])
             filename = Path(source["object_path"]).name
-            path = f"{owner_id}/{target}/{_remap(source['id'], target)}/{filename}"
-            storage.write(path, base64.b64decode(obj["data"]), source["content_type"])
+            # A fresh namespace makes an uncertain transport result ours to reconcile.
+            path = f"{owner_id}/{target}/{_remap(source['id'], target)}/{upload_attempt}/{filename}"
+            try:
+                storage.write(path, base64.b64decode(obj["data"]), source["content_type"])
+            except httpx.TransportError:
+                paths.append(path)  # The server may have stored it before the response was lost.
+                raise
             paths.append(path)
+            source_paths[source["id"]] = path
         with graph.begin_transaction() as tx:
             for node in payload["graph"]["nodes"]:
                 props = dict(node)
@@ -554,9 +568,7 @@ async def restore_snapshot(
                     owner_id=str(owner_id),
                 )
                 if key == "sources":
-                    row["object_path"] = (
-                        f"{owner_id}/{target}/{row['id']}/{Path(original['object_path']).name}"
-                    )
+                    row["object_path"] = source_paths[original["id"]]
                 if key in {"chunks", "contexts"}:
                     row["source_id"] = _remap(original["source_id"], target)
                 if key == "contexts":
