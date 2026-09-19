@@ -15,7 +15,10 @@ from app.api.jobs.schemas import JobResponse
 from app.api.workspaces.associations import project_ids, replace_projects
 from app.api.workspaces.directory import active_person, active_project, owned_workspace
 from app.auth import CurrentUser
+from app.core.config import get_settings
 from app.core.database import get_session
+from app.modules.ingestion.infrastructure.pg_executor import enqueue_source as enqueue_pg_source
+from app.modules.ingestion.infrastructure.pg_executor import wake_executors
 from app.modules.ingestion.infrastructure.tasks import process_source
 from app.modules.workspaces.domain.source_state import (
     ProcessingStage,
@@ -429,6 +432,12 @@ async def confirm_review(
     source.processing_stage = ProcessingStage.CONFIRMED
     source.error_message = None
     session.add(source)
+    if get_settings().processing_executor == "postgres":
+        source.status = SourceStatus.QUEUED
+        await enqueue_pg_source(session, source, supersede_existing=True)
+        await session.commit()
+        wake_executors()
+        return job_payload(source)
     # Keep the source row locked through broker publication. Another confirmation
     # waits, then sees queued or failed; the worker cannot race an uncommitted gate.
     await session.flush()
@@ -469,6 +478,12 @@ async def retry_transcription(
     source.processing_stage = ProcessingStage.TRANSCRIBING
     source.error_message = None
     session.add(source)
+    if get_settings().processing_executor == "postgres":
+        source.status = SourceStatus.QUEUED
+        await enqueue_pg_source(session, source, supersede_existing=True)
+        await session.commit()
+        wake_executors()
+        return job_payload(source)
     await session.flush()
     try:
         process_source.apply_async(args=[str(source.id)], task_id=str(source.id))

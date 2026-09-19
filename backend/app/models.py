@@ -7,6 +7,7 @@ from app.modules.context_engine.infrastructure.models import (
     ContextRecord,
     ContextStoreRecord,
 )
+from app.modules.ingestion.infrastructure.pg_jobs import ProcessingJob
 from app.modules.workspaces.infrastructure.models import (
     ProjectMember,
     ProviderCredential,
@@ -24,6 +25,7 @@ __all__ = [
     "ContextStoreRecord",
     "ProviderCredential",
     "ProjectMember",
+    "ProcessingJob",
     "SQLModel",
     "Source",
     "SourcePerson",

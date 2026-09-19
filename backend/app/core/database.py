@@ -20,7 +20,12 @@ def _database_url() -> str:
     return normalize_database_url(get_settings().database_url)
 
 
-engine: AsyncEngine = create_async_engine(_database_url(), pool_pre_ping=True, hide_parameters=True)
+_pool_limits = (
+    {"pool_size": 4, "max_overflow": 1} if get_settings().processing_executor == "postgres" else {}
+)
+engine: AsyncEngine = create_async_engine(
+    _database_url(), pool_pre_ping=True, hide_parameters=True, **_pool_limits
+)
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
