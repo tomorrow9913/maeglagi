@@ -141,6 +141,10 @@ export const httpApi: MaeglagiApi = {
     }),
 
   getJob: (jobId, signal) => apiFetch<ProcessingJob>(`/jobs/${jobId}`, { signal }),
+  sourceEvents(workspaceId, sourceIds, signal) {
+    const ids = sourceIds.slice(0, 100).join(",");
+    return apiStream(`/workspaces/${workspaceId}/source-events?source_ids=${encodeURIComponent(ids)}`, { signal }) as AsyncIterable<ProcessingJob>;
+  },
   getMeetingReview: (workspaceId, sourceId, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { signal }),
   retryMeetingTranscription: (workspaceId, sourceId, signal) => apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/${sourceId}/review/retry-transcription`, { method: "POST", signal }),
   saveMeetingReview: (workspaceId, sourceId, input, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { method: "PATCH", body: JSON.stringify(input), signal }),

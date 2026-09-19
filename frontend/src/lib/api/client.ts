@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "./config";
 import { isSupabaseConfigured } from "../supabase/config";
 import { createClient } from "../supabase/client";
+import { parseSseFrames } from "./sse";
 
 async function authHeaders(): Promise<Record<string, string>> {
   if (!isSupabaseConfigured) return {};
@@ -158,6 +159,8 @@ export async function* apiStream(
   if (!response.body) throw new ApiError(0, "스트리밍 응답을 읽지 못했습니다.");
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  init.signal?.addEventListener("abort", cancel, { once: true });
   let buffer = "";
 
   try {
@@ -165,20 +168,15 @@ export async function* apiStream(
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += value;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-
-        const payload = trimmed.slice(5).trim();
-        if (payload === "[DONE]") return;
-        yield JSON.parse(payload);
-      }
+      const parsed = parseSseFrames(buffer + value);
+      buffer = parsed.remainder;
+      for (const payload of parsed.payloads) yield JSON.parse(payload);
+      if (parsed.done) return;
     }
+    for (const payload of parseSseFrames(`${buffer}\n\n`).payloads) yield JSON.parse(payload);
   } finally {
+    init.signal?.removeEventListener("abort", cancel);
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

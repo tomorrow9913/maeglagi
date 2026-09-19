@@ -26,9 +26,11 @@ function detailOf(source: Source): string {
 /** 워크스페이스에 올라온 소스 목록입니다. 항목을 누르면 원문이 열립니다. */
 export function SourceList({
   sources,
+  progress,
   onOpen,
 }: {
   sources: Source[];
+  progress?: Record<string, number>;
   onOpen: (sourceId: string) => void;
 }) {
   return (
@@ -52,7 +54,7 @@ export function SourceList({
                 </p>
               </div>
               <StatusBadge tone={statusTone[source.status]}>
-                {processingStatusLabel[source.status]}
+                {processingStatusLabel[source.status]}{progress?.[source.id] !== undefined && (source.status === "processing" || source.status === "queued" || source.status === "enqueue_pending") ? ` · ${Math.round(progress[source.id] * 100)}%` : ""}
               </StatusBadge>
               {source.status === "succeeded" || source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed") ? (
                 <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />

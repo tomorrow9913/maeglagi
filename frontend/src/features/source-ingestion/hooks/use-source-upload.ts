@@ -32,7 +32,7 @@ function recordingName(): string {
 /**
  * 소스 업로드 큐를 관리합니다.
  *
- * 문서와 회의 녹음이 같은 큐를 쓰므로 진행률 표시와 처리 단계 폴링을
+ * 문서와 회의 녹음이 같은 큐를 쓰므로 진행률 표시와 처리 단계 이벤트를
  * 한 곳에서 이어받습니다. 전송이 끝나면 서버가 준 job이 항목에 붙습니다.
  */
 export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
