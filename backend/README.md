@@ -33,3 +33,11 @@ API는 원본을 Supabase Storage에 저장하고 즉시 `202`와 job을 반환�
 민감한 키나 파일 대신 `source_id`만 전달합니다. worker는 문서를 MarkItDown으로 파싱하거나
 회의를 STT 처리한 뒤 Source의 단계와 진행률을 갱신합니다. 작업은 late acknowledgement,
 worker-loss 재전달, 최대 3회 exponential backoff 재시도를 사용합니다.
+
+## Model catalog and price ordering
+
+모델 후보는 사용자의 키로 각 provider의 모델 목록 API에서 조회합니다. 가격순 정렬은
+LiteLLM의 공개 가격 맵을 6시간 캐시해 입력·출력 토큰 단가 합계로 비교합니다. 가격은
+참고용이며 실제 청구액과 다를 수 있습니다. 가격이 없거나 가격 맵 조회에 실패해도
+모델을 숨기지 않고, 가격을 모르는 모델은 확인된 모델 뒤에 보여줍니다. API 키는 가격
+맵 제공처로 전송하지 않습니다.

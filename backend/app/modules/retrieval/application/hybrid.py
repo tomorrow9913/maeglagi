@@ -21,7 +21,8 @@ from app.modules.workspaces.infrastructure.models import Source
 
 logger = logging.getLogger(__name__)
 
-SearchFn = Callable[[str, list[UUID] | None, int], Awaitable[list[tuple[Chunk, float]]]]
+EmbedFn = Callable[[str], Awaitable[list[float]]]
+SearchFn = Callable[[list[float], list[UUID] | None, int], Awaitable[list[tuple[Chunk, float]]]]
 LoadSources = Callable[[list[UUID]], Awaitable[dict[UUID, Source]]]
 
 EXCERPT_CHARS = 300
@@ -70,6 +71,7 @@ class HybridRetriever:
     def __init__(
         self,
         *,
+        embed: EmbedFn,
         search: SearchFn,
         load_sources: LoadSources,
         graph: GraphNeighborhood | None = None,
@@ -77,6 +79,7 @@ class HybridRetriever:
         graph_limit: int = 4,
         max_evidence: int = 8,
     ) -> None:
+        self.embed = embed
         self.search = search
         self.load_sources = load_sources
         self.graph = graph
@@ -87,13 +90,15 @@ class HybridRetriever:
     async def retrieve(
         self, workspace_id: UUID, question: str, *, now: datetime | None = None
     ) -> RetrievalResult:
-        hits = await self.search(question, None, self.vector_limit)
+        # One embedding serves both the plain search and the graph-scoped one.
+        embedding = await self.embed(question)
+        hits = await self.search(embedding, None, self.vector_limit)
         facts: list[GraphFact] = []
         entity_names: list[str] = []
 
         graph_sources = await self._graph_sources(workspace_id, question, now, facts, entity_names)
         if graph_sources:
-            hits += await self.search(question, graph_sources, self.graph_limit)
+            hits += await self.search(embedding, graph_sources, self.graph_limit)
 
         chunks: dict[UUID, Chunk] = {}
         for chunk, _ in hits:  # vector hits first, graph-scoped ones after; first sighting wins

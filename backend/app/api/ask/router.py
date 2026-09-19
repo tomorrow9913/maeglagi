@@ -14,6 +14,7 @@ from app.auth import CurrentUser
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.modules.context_engine.application.context_store import state_from_record
+from app.modules.context_engine.application.model_roles import ModelRole
 from app.modules.context_engine.domain.context_store import ContextStoreState
 from app.modules.context_engine.infrastructure.models import Chunk, ContextStoreRecord
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
@@ -101,20 +102,25 @@ async def ask(
 
     ingestion = IngestionPipeline(settings)
     try:
-        adapter, api_key = await ingestion.workspace_provider(
-            session, workspace_id=workspace_id, owner_id=user.id, capability="chat"
+        provider = await ingestion.provider_with_model(
+            session, workspace_id=workspace_id, owner_id=user.id, role=ModelRole.ANSWER
         )
     except IngestionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
+    async def embed(question: str) -> list[float]:
+        return await ingestion.embed_query(
+            session, workspace_id=workspace_id, owner_id=user.id, query=question
+        )
+
     async def search(
-        query: str, source_ids: list[UUID] | None, limit: int
+        embedding: list[float], source_ids: list[UUID] | None, limit: int
     ) -> list[tuple[Chunk, float]]:
-        return await ingestion.search(
+        return await ingestion.search_by_embedding(
             session,
             workspace_id=workspace_id,
             owner_id=user.id,
-            query=query,
+            embedding=embedding,
             limit=limit,
             source_ids=source_ids,
         )
@@ -125,6 +131,7 @@ async def ask(
     graph_store = Neo4jGraphStore.from_settings(settings) if settings.neo4j_enabled else None
     try:
         retriever = HybridRetriever(
+            embed=embed,
             search=search,
             load_sources=load_sources,
             graph=GraphNeighborhood(graph_store) if graph_store else None,
@@ -138,9 +145,9 @@ async def ask(
 
     store = await _load_store(session, workspace_id, user.id)
     events = answer_events(
-        adapter=adapter,
-        api_key=api_key,
-        model=settings.answer_model,
+        adapter=provider.adapter,
+        api_key=provider.api_key,
+        model=provider.model,
         question=body.question,
         retrieval=retrieval,
         store=store,

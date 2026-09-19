@@ -1,0 +1,238 @@
+from typing import Any
+from uuid import uuid4
+
+import pytest
+
+from app.core.config import Settings
+from app.modules.context_engine.application.model_roles import (
+    ModelOption,
+    ModelRole,
+    invalid_selections,
+    options_by_role,
+    recommendation_rank,
+    roles_for_model,
+    selection_of,
+)
+from app.modules.ingestion.application import pipeline as pipeline_module
+from app.modules.ingestion.application.pipeline import (
+    IngestionError,
+    IngestionPipeline,
+    embedding_dimensions_argument,
+)
+from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
+
+OPENAI_CAPS = ("chat", "embedding", "structuredOutput", "transcription", "models")
+CHAT_ONLY = ("chat", "models")
+
+
+class Adapter:
+    def __init__(self, provider_id: str, capabilities: tuple[str, ...]) -> None:
+        self.id = provider_id
+        self.display_name = provider_id
+        self.capabilities = capabilities
+
+
+OPENAI = Adapter("openai", OPENAI_CAPS)
+ANTHROPIC = Adapter("anthropic", CHAT_ONLY)
+
+
+def roles(model: str, caps: tuple[str, ...] = OPENAI_CAPS) -> set[str]:
+    return {role.value for role in roles_for_model(model, caps)}
+
+
+# --- sorting what a key offers into jobs ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("gpt-4o-mini", {"answer", "extraction"}),
+        ("text-embedding-3-small", {"embedding"}),
+        ("text-embedding-ada-002", {"embedding"}),
+        ("whisper-1", {"transcription"}),
+        ("gpt-4o-transcribe", {"transcription"}),
+        ("dall-e-3", set()),
+        ("tts-1", set()),
+        ("omni-moderation-latest", set()),
+        ("gpt-4o-realtime-preview", set()),
+        ("gpt-4o-audio-preview", set()),
+    ],
+)
+def test_models_are_sorted_into_the_jobs_they_can_do(model: str, expected: set[str]) -> None:
+    assert roles(model) == expected
+
+
+def test_a_chat_model_extracts_only_where_the_provider_supports_structured_output() -> None:
+    assert roles("claude-sonnet", CHAT_ONLY) == {"answer"}
+
+
+def test_a_job_the_providers_api_cannot_do_has_no_models_whatever_they_are_called() -> None:
+    assert roles("text-embedding-3-small", CHAT_ONLY) == set()
+    assert roles("whisper-1", CHAT_ONLY) == set()
+
+
+def test_lighter_models_are_preselected_before_heavier_ones_of_the_same_family() -> None:
+    assert sorted(["gpt-4o", "gpt-4o-mini"], key=recommendation_rank)[0] == "gpt-4o-mini"
+    embeddings = ["text-embedding-3-large", "text-embedding-3-small"]
+    assert sorted(embeddings, key=recommendation_rank)[0] == "text-embedding-3-small"
+
+
+def test_a_stable_alias_comes_before_a_dated_snapshot_of_the_same_model() -> None:
+    ranked = sorted(["gpt-4o-mini-2024-07-18", "gpt-4o-mini"], key=recommendation_rank)
+
+    assert ranked == ["gpt-4o-mini", "gpt-4o-mini-2024-07-18"]
+
+
+def test_options_are_grouped_by_job_and_a_job_nobody_offers_stays_empty() -> None:
+    options = options_by_role(
+        [(OPENAI, ["gpt-4o-mini", "text-embedding-3-small", "whisper-1", "dall-e-3"])]
+    )
+
+    assert [o.model for o in options[ModelRole.ANSWER]] == ["gpt-4o-mini"]
+    assert [o.model for o in options[ModelRole.EMBEDDING]] == ["text-embedding-3-small"]
+    assert [o.model for o in options[ModelRole.TRANSCRIPTION]] == ["whisper-1"]
+
+    chat_only = options_by_role([(ANTHROPIC, ["claude-sonnet", "claude-haiku"])])
+    assert len(chat_only[ModelRole.ANSWER]) == 2
+    assert chat_only[ModelRole.EMBEDDING] == [] and chat_only[ModelRole.TRANSCRIPTION] == []
+    assert chat_only[ModelRole.EXTRACTION] == []
+
+
+def test_two_keys_offer_a_job_in_key_priority_order_without_duplicates() -> None:
+    options = options_by_role(
+        [(ANTHROPIC, ["claude-sonnet"]), (OPENAI, ["gpt-4o-mini", "gpt-4o-mini"])]
+    )
+
+    assert [(o.provider, o.model) for o in options[ModelRole.ANSWER]] == [
+        ("anthropic", "claude-sonnet"),
+        ("openai", "gpt-4o-mini"),
+    ]
+
+
+def test_a_choice_must_be_a_model_the_key_offers_for_that_job() -> None:
+    options = options_by_role([(OPENAI, ["gpt-4o-mini", "text-embedding-3-small"])])
+    good = ModelOption(provider="openai", model="text-embedding-3-small")
+
+    assert invalid_selections({"embedding": good}, options) == []
+    wrong_job = invalid_selections({"answer": good}, options)
+    assert len(wrong_job) == 1 and "answer" in wrong_job[0]
+    assert len(invalid_selections({"nonsense": good}, options)) == 1
+
+
+def test_a_stored_choice_that_is_garbage_counts_as_no_choice() -> None:
+    assert selection_of({"answer": "gpt"}, ModelRole.ANSWER) is None
+    assert selection_of({"answer": {"provider": "openai"}}, ModelRole.ANSWER) is None
+    assert selection_of(None, ModelRole.ANSWER) is None
+    assert selection_of({"answer": {"provider": "openai", "model": "m"}}, ModelRole.ANSWER) == (
+        ModelOption(provider="openai", model="m")
+    )
+
+
+def test_only_the_text_embedding_3_family_is_asked_for_a_dimension() -> None:
+    assert embedding_dimensions_argument("text-embedding-3-large", 1536) == 1536
+    assert embedding_dimensions_argument("text-embedding-ada-002", 1536) is None
+
+
+# --- the pipeline uses what the workspace chose ----------------------------------------------
+
+WORKSPACE = uuid4()
+OWNER = uuid4()
+
+
+class Result:
+    def __init__(self, rows: list[Any]) -> None:
+        self.rows = rows
+
+    def all(self) -> list[Any]:
+        return self.rows
+
+
+class Session:
+    def __init__(self, model_settings: dict[str, Any], providers: list[str]) -> None:
+        self.workspace = Workspace(
+            id=WORKSPACE, owner_id=OWNER, name="w", model_settings=model_settings
+        )
+        self.credentials = [
+            ProviderCredential(
+                workspace_id=WORKSPACE,
+                owner_id=OWNER,
+                provider=p,
+                key_hint="1234",
+                is_default=i == 0,
+            )
+            for i, p in enumerate(providers)
+        ]
+
+    async def get(self, model: Any, identifier: Any) -> Workspace:
+        return self.workspace
+
+    async def exec(self, statement: Any) -> Result:
+        return Result(self.credentials)
+
+
+@pytest.fixture
+def providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapters = {"openai": OPENAI, "anthropic": ANTHROPIC}
+
+    async def secret(session: Any, credential: Any) -> str:
+        return f"key-of-{credential.provider}"
+
+    monkeypatch.setattr(pipeline_module.provider_registry, "get", adapters.get)
+    monkeypatch.setattr(pipeline_module, "resolve_credential_secret", secret)
+
+
+def pipeline() -> IngestionPipeline:
+    return IngestionPipeline(Settings(_env_file=None, embedding_model="deployment-default"))
+
+
+async def resolve(settings: dict[str, Any], keys: list[str], role: ModelRole) -> Any:
+    return await pipeline().provider_with_model(
+        Session(settings, keys),  # type: ignore[arg-type]
+        workspace_id=WORKSPACE,
+        owner_id=OWNER,
+        role=role,
+    )
+
+
+async def test_the_workspaces_choice_decides_the_model(providers: None) -> None:
+    chosen = {"embedding": {"provider": "openai", "model": "text-embedding-3-large"}}
+
+    resolved = await resolve(chosen, ["openai"], ModelRole.EMBEDDING)
+
+    assert (resolved.adapter.id, resolved.model, resolved.api_key) == (
+        "openai",
+        "text-embedding-3-large",
+        "key-of-openai",
+    )
+
+
+async def test_a_workspace_that_never_chose_gets_the_deployment_default(providers: None) -> None:
+    resolved = await resolve({}, ["openai"], ModelRole.EMBEDDING)
+
+    assert resolved.model == "deployment-default"
+
+
+async def test_the_key_of_the_chosen_models_provider_is_used_even_if_it_is_not_the_default(
+    providers: None,
+) -> None:
+    chosen = {"answer": {"provider": "openai", "model": "gpt-4o"}}
+
+    resolved = await resolve(chosen, ["anthropic", "openai"], ModelRole.ANSWER)
+
+    assert (resolved.adapter.id, resolved.model) == ("openai", "gpt-4o")
+
+
+async def test_a_job_the_only_key_cannot_do_is_an_error_not_a_guess(providers: None) -> None:
+    with pytest.raises(IngestionError, match="embedding"):
+        await resolve({}, ["anthropic"], ModelRole.EMBEDDING)
+
+
+async def test_a_choice_whose_key_is_gone_falls_back_instead_of_calling_the_wrong_provider(
+    providers: None,
+) -> None:
+    chosen = {"answer": {"provider": "openai", "model": "gpt-4o"}}
+
+    resolved = await resolve(chosen, ["anthropic"], ModelRole.ANSWER)
+
+    assert resolved.adapter.id == "anthropic"
+    assert resolved.model != "gpt-4o"  # never sends an OpenAI model name to Anthropic

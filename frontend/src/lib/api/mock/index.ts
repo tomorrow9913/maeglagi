@@ -7,9 +7,12 @@ import type {
   ApiKeyValidation,
   ContextItem,
   LlmProvider,
+  ModelRole,
+  ModelSelections,
   ProcessingJob,
   Source,
   Workspace,
+  WorkspaceModels,
   WorkspaceSecrets,
 } from "../types";
 import { BOOTSTRAP_AI_PROVIDERS } from "../providers";
@@ -19,6 +22,7 @@ import {
   contextStore,
   fallbackAnswer,
   knowledgeGraph,
+  modelCatalog,
   stageSequence,
   sourceContents,
   sources as seedSources,
@@ -61,7 +65,42 @@ const state = {
   secrets: new Map<string, WorkspaceSecrets>([
     ["demo", { provider: "anthropic", keyHint: "4f2a", updatedAt: "2026-09-08T09:00:00Z" }],
   ]),
+  /** 워크스페이스별로 저장된 모델 선택 */
+  models: new Map<string, ModelSelections>([
+    ["demo", { answer: { provider: "anthropic", model: "claude-sonnet-4-20250514" } }],
+  ]),
 };
+
+const MODEL_ROLES: ModelRole[] = ["answer", "extraction", "embedding", "transcription"];
+
+/** 키 하나로 쓸 수 있는 모델을 용도별로 묶습니다. 선택이 있으면 함께 담습니다. */
+function modelsFor(
+  provider: LlmProvider,
+  selections: ModelSelections = {},
+  locked: ModelRole[] = [],
+): WorkspaceModels {
+  const catalog = modelCatalog[provider] ?? {};
+  return {
+    roles: MODEL_ROLES.map((role) => ({
+      role,
+      options: (catalog[role] ?? []).map((model) => ({ provider, model })),
+      selected: selections[role] ?? null,
+      locked: locked.includes(role),
+    })),
+  };
+}
+
+/**
+ * 임베딩 모델은 워크스페이스를 만들 때 정하고 바꿀 수 없습니다(백엔드와 같은 규칙).
+ * 선택이 이미 있거나 소스가 색인된 뒤에는 잠기고, LLM 모델은 언제든 바꿀 수 있습니다.
+ */
+function lockedRoles(workspaceId: string): ModelRole[] {
+  const chosen = state.models.get(workspaceId)?.embedding !== undefined;
+  const indexed = state.sources.some(
+    (source) => source.workspaceId === workspaceId && source.status === "succeeded",
+  );
+  return chosen || indexed ? ["embedding"] : [];
+}
 
 /** provider별 키 접두사. 실제 서비스의 키 형식과 맞춥니다. */
 const keyPrefix: Record<string, string> = {
@@ -198,6 +237,7 @@ export const mockApi: MaeglagiApi = {
 
     // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
     storeKey(workspace.id, input.llmProvider, input.llmApiKey);
+    if (input.models) state.models.set(workspace.id, { ...input.models });
     return { ...workspace };
   },
 
@@ -235,6 +275,53 @@ export const mockApi: MaeglagiApi = {
     // 실제 provider 호출을 흉내 내느라 조금 더 걸립니다.
     await delay(MOCK_LATENCY_MS * 2, signal);
     return checkApiKey(input.provider, input.apiKey);
+  },
+
+  async listKeyModels(input, signal) {
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    const check = checkApiKey(input.provider, input.apiKey);
+    if (!check.valid) throw new ApiError(422, check.message);
+    return modelsFor(input.provider);
+  },
+
+  async getWorkspaceModels(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const secrets = state.secrets.get(workspaceId);
+    if (!state.workspaces.some((item) => item.id === workspaceId) || !secrets) {
+      throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
+    }
+    return modelsFor(secrets.provider, state.models.get(workspaceId), lockedRoles(workspaceId));
+  },
+
+  async updateWorkspaceModels(workspaceId, selections, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const secrets = state.secrets.get(workspaceId);
+    if (!state.workspaces.some((item) => item.id === workspaceId) || !secrets) {
+      throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
+    }
+
+    const current = modelsFor(
+      secrets.provider,
+      state.models.get(workspaceId),
+      lockedRoles(workspaceId),
+    );
+    const next: ModelSelections = { ...state.models.get(workspaceId) };
+    for (const role of MODEL_ROLES) {
+      const wanted = selections[role];
+      if (!wanted) continue;
+      const entry = current.roles.find((item) => item.role === role)!;
+      if (!entry.options.some((o) => o.provider === wanted.provider && o.model === wanted.model)) {
+        throw new ApiError(422, `${wanted.model}은(는) 이 키로 쓸 수 있는 모델이 아닙니다.`);
+      }
+      const unchanged =
+        entry.selected?.provider === wanted.provider && entry.selected.model === wanted.model;
+      if (entry.locked && !unchanged) {
+        throw new ApiError(409, "임베딩 모델은 워크스페이스를 만들 때 정해지며 바꿀 수 없습니다.");
+      }
+      next[role] = wanted;
+    }
+    state.models.set(workspaceId, next);
+    return modelsFor(secrets.provider, next, lockedRoles(workspaceId));
   },
 
   async getWorkspaceSecrets(workspaceId, signal) {

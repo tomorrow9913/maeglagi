@@ -5,6 +5,7 @@ import { use, useEffect, useState } from "react";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { ApiKeyCard } from "@/features/workspace/components/api-key-card";
+import { WorkspaceModelsCard } from "@/features/workspace/components/workspace-models-card";
 import { useAsync } from "@/hooks/use-async";
 import { api } from "@/lib/api";
 import type { AiProvider, WorkspaceSecrets } from "@/lib/api";
@@ -40,12 +41,21 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
           description="관리자에게 provider registry 설정을 확인해 달라고 요청해 주세요."
         />
       ) : (
-        <ApiKeyCard
-          workspaceId={workspaceId}
-          secrets={secrets}
-          providers={providers}
-          onUpdated={setSecrets}
-        />
+        <div className="space-y-4">
+          <ApiKeyCard
+            workspaceId={workspaceId}
+            secrets={secrets}
+            providers={providers}
+            onUpdated={setSecrets}
+          />
+          {/* 키가 있어야 쓸 수 있는 모델을 알 수 있습니다. 키를 바꾸면 목록이 달라져 다시 마운트합니다. */}
+          {secrets ? (
+            <WorkspaceModelsCard
+              key={`${secrets.provider}-${secrets.updatedAt}`}
+              workspaceId={workspaceId}
+            />
+          ) : null}
+        </div>
       )}
     </>
   );

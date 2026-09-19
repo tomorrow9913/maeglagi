@@ -67,8 +67,91 @@ paths:
                 $ref: "#/components/schemas/AnswerEvent"
         "404": { description: Workspace not found }
         "422": { description: Blank question, or the workspace has no key that can chat or embed }
+  /api/v1/llm-keys/models:
+    post:
+      operationId: listKeyModels
+      summary: Models a key can use, sorted into jobs, before a workspace exists
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, apiKey]
+              properties:
+                provider: { type: string }
+                apiKey: { type: string }
+      responses:
+        "200":
+          description: One entry per job, always in the order answer, extraction, embedding, transcription
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspaceModels" }
+        "422": { description: The key is not valid }
+  /api/v1/workspaces/{workspaceId}/ai/models:
+    parameters:
+      - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getWorkspaceModels
+      summary: Models the workspace's keys offer per job, and which one is chosen
+      responses:
+        "200":
+          description: The models
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspaceModels" }
+        "404": { description: Workspace not found }
+    put:
+      operationId: updateWorkspaceModels
+      summary: Choose the model used for each job
+      description: Jobs left out keep their current choice. LLM jobs (answer, extraction, transcription) change freely. The embedding model is fixed when the workspace is created, so changing it is a 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selections]
+              properties:
+                selections:
+                  type: object
+                  additionalProperties: { $ref: "#/components/schemas/ModelOption" }
+      responses:
+        "200":
+          description: The models after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkspaceModels" }
+        "404": { description: Workspace not found }
+        "409": { description: The embedding model is fixed at workspace creation and cannot be changed }
+        "422": { description: A job is unknown or the model is not offered for it }
 components:
   schemas:
+    ModelOption:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+    RoleModels:
+      type: object
+      required: [role, options, selected, locked]
+      properties:
+        role: { type: string, enum: [answer, extraction, embedding, transcription] }
+        options:
+          type: array
+          description: Ordered lighter models first, stable aliases before dated snapshots. Not a quality ranking.
+          items: { $ref: "#/components/schemas/ModelOption" }
+        selected:
+          oneOf: [{ $ref: "#/components/schemas/ModelOption" }, { type: "null" }]
+        locked: { type: boolean }
+    WorkspaceModels:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/RoleModels" }
     AnswerEvent:
       oneOf:
         - type: object

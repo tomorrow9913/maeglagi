@@ -16,7 +16,7 @@ export type ApiKeyFieldProps = {
   value: string;
   onChange: (value: string) => void;
   /** 검증 결과가 바뀔 때마다 알려줍니다. 유효하지 않으면 undefined입니다. */
-  onValidated?: (result: ApiKeyValidation | undefined) => void;
+  onValidated?: (result: ApiKeyValidation | undefined, validatedKey?: string) => void;
   disabled?: boolean;
 };
 
@@ -41,9 +41,12 @@ export function ApiKeyField({
   const validatedRef = useRef(onValidated);
   validatedRef.current = onValidated;
 
-  const publish = useCallback((next: ApiKeyValidation | undefined) => {
+  // 통과한 결과에는 검증한 키도 함께 알려줍니다. 호출부가 "지금 이 키는 확인됐다"를
+  // 기준으로 모델 목록을 받아오게 하려는 것입니다(타이핑 중인 키로는 요청하지 않습니다).
+  const publish = useCallback((next: ApiKeyValidation | undefined, key?: string) => {
     setResult(next);
-    validatedRef.current?.(next?.valid ? next : undefined);
+    if (next?.valid) validatedRef.current?.(next, key);
+    else validatedRef.current?.(undefined, undefined);
   }, []);
 
   // 입력이 멈춘 뒤에만 검증해 타이핑 중 불필요한 호출을 막습니다.
@@ -59,7 +62,7 @@ export function ApiKeyField({
       setIsChecking(true);
       try {
         const validation = await api.validateApiKey({ provider, apiKey: key }, controller.signal);
-        if (!controller.signal.aborted) publish(validation);
+        if (!controller.signal.aborted) publish(validation, key);
       } catch (error) {
         if (controller.signal.aborted) return;
         publish({
