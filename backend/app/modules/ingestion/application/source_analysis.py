@@ -41,7 +41,7 @@ def _decision_fingerprint(decisions: list[str]) -> str:
 
 async def analyze_source(
     *,
-    adapter: ProviderAdapter,
+    adapter: ProviderAdapter | None,
     api_key: str,
     model: str,
     context_store: ContextStoreService,
@@ -69,6 +69,8 @@ async def analyze_source(
     # stage may pick a `supersedes` from.
     decision_fingerprint = None
     if result is None:
+        if adapter is None:
+            raise ValueError("An adapter is required when extraction was not supplied")
         known = await context_store.current_decisions(workspace_id)
         decision_fingerprint = _decision_fingerprint(known)
         pipeline = ExtractionPipeline(adapter, api_key, model=model)

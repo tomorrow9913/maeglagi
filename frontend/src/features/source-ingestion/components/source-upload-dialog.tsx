@@ -29,7 +29,9 @@ export function SourceUploadDialog({ workspaceId, mode, onClose, onRecordingBusy
   useEffect(() => { onRecordingBusyChange?.(recordingBusy); }, [recordingBusy, onRecordingBusyChange]);
 
   const settled = useCallback((job: ProcessingJob) => {
-    if (job.status === "awaiting_review") {
+    if (job.status === "awaiting_agent") {
+      toast.info("소스가 저장됐습니다. 에이전트 분석을 기다립니다.");
+    } else if (job.status === "awaiting_review") {
       toast.info("대본 검토가 준비됐습니다.", { action: { label: "검토 열기", onClick: () => setReviewSourceId(job.sourceId) } });
     } else if (job.status === "failed") {
       toast.error(job.sourceKind === "meeting" ? "회의 처리에 실패했습니다. 저장된 녹음이나 대본을 확인해 주세요." : "소스 분석에 실패했습니다. 소스에서 상태를 확인해 주세요.",
@@ -45,7 +47,7 @@ export function SourceUploadDialog({ workspaceId, mode, onClose, onRecordingBusy
           onEscapeKeyDown={(event) => { if (uploading) event.preventDefault(); }}>
           <DialogHeader>
             <DialogTitle>문서·녹음 파일 업로드</DialogTitle>
-            <DialogDescription>이 워크스페이스에 소스를 추가하고 Ask에서 이어서 질문하세요.</DialogDescription>
+            <DialogDescription>이 화면의 업로드는 서비스 AI 연결로 자동 처리합니다. 에이전트로 처리하려면 계정 MCP 연결을 사용하세요.</DialogDescription>
           </DialogHeader>
           <SourceFileUpload workspaceId={workspaceId} onDocuments={uploadDocuments} onAudio={uploadRecording} />
           <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} />

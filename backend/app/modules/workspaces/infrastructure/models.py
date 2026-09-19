@@ -95,8 +95,9 @@ class WorkspaceProject(SQLModel, table=True):
 class Source(SQLModel, table=True):
     __tablename__ = "sources"
     __table_args__ = (
+        CheckConstraint("analysis_mode in ('server', 'agent')", name="ck_sources_analysis_mode"),
         CheckConstraint(
-            "transcript_source is null or transcript_source in ('server', 'browser')",
+            "transcript_source is null or transcript_source in ('server', 'browser', 'agent')",
             name="ck_sources_transcript_source",
         ),
         CheckConstraint(
@@ -118,6 +119,7 @@ class Source(SQLModel, table=True):
     object_path: str = Field(sa_column=Column(Text, nullable=False, unique=True))
     content_type: str = Field(max_length=120)
     size_bytes: int = Field(sa_column=Column(BigInteger, nullable=False))
+    analysis_mode: str = Field(default="server", max_length=16)
     transcript_source: str | None = Field(default=None, max_length=20)
     duration_seconds: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     transcript_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))

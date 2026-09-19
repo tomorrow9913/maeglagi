@@ -173,3 +173,46 @@ test("source rows and progress stay visible while a settled refresh is in flight
   render("workspace-2");
   assert.equal(requests.length, 3, "an invalid source triggers only one list reconciliation");
 });
+
+test("sidebar watches agent statuses over SSE without repeated list requests", async () => {
+  const slots = [];
+  const effects = [];
+  let cursor = 0;
+  let onJob;
+  let watchedIds;
+  let streamEnabled;
+  const requests = [];
+  const react = {
+    useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = initial; return [slots[index], (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }]; },
+    useRef(initial) { const index = cursor++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index]; },
+    useCallback(fn, deps) { const index = cursor++; const previous = slots[index]; if (!previous || deps.some((dep, i) => dep !== previous.deps[i])) slots[index] = { fn, deps }; return slots[index].fn; },
+    useEffect(fn, deps) { const index = cursor++; const previous = slots[index]; if (!previous || deps.some((dep, i) => dep !== previous.deps[i])) { previous?.cleanup?.(); effects.push(() => { slots[index] = { deps, cleanup: fn() }; }); } },
+  };
+  const api = { listSources(_workspace, _signal) { return new Promise((resolve) => requests.push(resolve)); } };
+  const { useLiveSources } = load("../src/features/source-ingestion/hooks/use-live-sources.ts", {
+    react,
+    "@/lib/api/context": { useApi: () => api, useDemoMode: () => false },
+    "./use-workspace-source-events": { useWorkspaceSourceEvents: (_workspace, ids, callback, enabled) => { watchedIds = ids; onJob = callback; streamEnabled = enabled; } },
+  }, { window: { addEventListener() {}, removeEventListener() {} } });
+  function render(watchAll = true) { cursor = 0; const value = useLiveSources("workspace-1", watchAll); while (effects.length) effects.shift()(); return value; } // eslint-disable-line react-hooks/rules-of-hooks
+  render();
+  requests.shift()([{ id: "agent-1", status: "awaiting_agent", title: "Agent meeting" }]);
+  await Promise.resolve();
+  assert.deepEqual([...watchedIds], []);
+  assert.equal(render().sources[0].status, "awaiting_agent");
+  assert.deepEqual([...watchedIds], ["agent-1"]);
+  assert.equal(streamEnabled, true);
+  onJob({ id: "job-1", sourceId: "agent-1", status: "awaiting_agent", progress: 0.5 });
+  render();
+  assert.equal(requests.length, 0, "initial SSE snapshot must not trigger a list reload");
+  onJob({ id: "job-1", sourceId: "agent-1", status: "succeeded", progress: 1 });
+  assert.equal(render().sources[0].status, "succeeded");
+  assert.equal(requests.length, 1, "an agent completion reconciles metadata once");
+  onJob({ id: "job-1", sourceId: "agent-1", status: "succeeded", progress: 1 });
+  render();
+  assert.equal(requests.length, 1);
+  assert.deepEqual([...watchedIds], ["agent-1"], "terminal sources remain subscribed for later agent updates");
+  requests.shift()([{ id: "agent-1", status: "succeeded", title: "Agent meeting" }]);
+  await Promise.resolve();
+  assert.equal(render().sources[0].status, "succeeded");
+});

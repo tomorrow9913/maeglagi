@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ProcessingJob } from "@/lib/api";
 import { useWorkspaceSourceEvents } from "./use-workspace-source-events";
 
-const isTerminal = (job: ProcessingJob) => job.status === "succeeded" || job.status === "failed" || job.status === "awaiting_review";
+const isTerminal = (job: ProcessingJob) => job.status === "succeeded" || job.status === "failed" || job.status === "awaiting_review" || job.status === "awaiting_agent";
 export type LiveJob = ProcessingJob & { eventError?: string };
 
 /** Tracks uploaded jobs through the shared source stream and keeps their last state across reconnects. */

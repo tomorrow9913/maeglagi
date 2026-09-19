@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
+from app.mcp.server import create_mcp_server
+from app.mcp.transport import ExactMCPRoute
 from app.middleware import register_middlewares
 from app.modules.ingestion.infrastructure.pg_executor import PostgresExecutor
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
@@ -37,6 +39,9 @@ class CORSFastAPI(FastAPI):
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # Keep the async driver within this app's event loop and close it on shutdown.
     settings: Settings = application.state.settings
+    # The SDK session manager is single-use. A fresh server and ASGI app are
+    # required whenever the same FastAPI app enters another lifespan.
+    mcp_server, mcp_app = create_mcp_server(settings)
     store = Neo4jGraphStore.from_settings(settings) if settings.neo4j_enabled else None
     application.state.graph_store = store
     executor = (
@@ -44,11 +49,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         if settings.processing_executor == "postgres" and settings.pg_executor_enabled
         else None
     )
-    if executor is not None:
-        executor.start()
     try:
-        yield
+        if executor is not None:
+            executor.start()
+        application.state.mcp_server = mcp_server
+        application.state.mcp_route.app = mcp_app
+        async with mcp_server.session_manager.run():
+            yield
     finally:
+        application.state.mcp_route.app = None
+        application.state.mcp_server = None
         if executor is not None:
             await executor.stop()
         application.state.graph_store = None
@@ -70,8 +80,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = settings
     application.state.graph_store = None
+    application.state.mcp_server = None
     register_middlewares(application, settings)
     application.include_router(api_router, prefix=settings.api_v1_prefix)
+    mcp_route = ExactMCPRoute()
+    application.state.mcp_route = mcp_route
+    application.router.routes.append(mcp_route)
     return application
 
 

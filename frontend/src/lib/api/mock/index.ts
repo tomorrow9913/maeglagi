@@ -11,6 +11,7 @@ import type {
   ModelSelections,
   ProcessingJob,
   MeetingReview,
+  McpToken,
   WorkspacePerson,
   WorkspaceProject,
   Source,
@@ -90,6 +91,8 @@ const state = {
     isDefault: true,
     updatedAt: "2026-09-08T09:00:00Z",
   }] as WorkspaceSecrets[],
+  /** 계정 MCP 토큰의 메타데이터만 유지합니다. */
+  mcpTokens: [] as McpToken[],
   /** 워크스페이스별로 저장된 모델 선택 */
   models: new Map<string, ModelSelections>([
     ["demo", { answer: { provider: "anthropic", model: "claude-sonnet-4-20250514" } }],
@@ -292,6 +295,36 @@ function registerUpload(workspaceId: string, source: Source): ProcessingJob {
 
 /** 백엔드 없이 모든 화면을 개발할 수 있게 하는 in-memory 구현입니다. */
 export const mockApi: MaeglagiApi = {
+  async listMcpTokens(signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return { items: state.mcpTokens.map((item) => ({ ...item })) };
+  },
+
+  async createMcpToken(input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const label = input.label.trim();
+    if (!label) throw new ApiError(422, "토큰 이름을 입력해 주세요.");
+    const token = `mcp_mock_${crypto.randomUUID().replaceAll("-", "")}`;
+    const now = new Date();
+    const item = {
+      id: nextId("mcp-token"),
+      label,
+      tokenHint: token.slice(-6),
+      createdAt: now.toISOString(),
+      lastUsedAt: null,
+      expiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+    state.mcpTokens.unshift(item);
+    return { item: { ...item }, token };
+  },
+
+  async revokeMcpToken(tokenId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const index = state.mcpTokens.findIndex((item) => item.id === tokenId);
+    if (index < 0) throw new ApiError(404, "토큰을 찾을 수 없습니다.");
+    state.mcpTokens.splice(index, 1);
+  },
+
   async listWorkspaces(signal) {
     await delay(MOCK_LATENCY_MS, signal);
     return state.workspaces.map((workspace) => ({ ...workspace }));
@@ -312,8 +345,8 @@ export const mockApi: MaeglagiApi = {
       : undefined;
     if (input.credentialId && (!chosenCredential || (input.llmProvider && chosenCredential.provider !== input.llmProvider))) throw new ApiError(422, "사용 가능한 계정 AI 연결을 선택해 주세요.");
     const provider = chosenCredential?.provider ?? input.llmProvider;
-    if (!provider) throw new ApiError(422, "AI 연결을 선택해 주세요.");
-    if (!input.credentialId) {
+    if (!provider && (input.llmApiKey || input.models)) throw new ApiError(422, "AI 연결을 선택해 주세요.");
+    if (provider && !input.credentialId) {
       if (provider !== "ollama" && !input.llmApiKey?.trim()) throw new ApiError(422, "API key를 입력해 주세요.");
       const check = checkApiKey(provider, input.llmApiKey ?? "", input.llmBaseUrl);
       if (!check.valid) throw new ApiError(422, check.message);
@@ -328,7 +361,7 @@ export const mockApi: MaeglagiApi = {
     state.workspaces.push(workspace);
 
     // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
-    if (!input.credentialId) storeKey(workspace.id, provider, input.llmApiKey ?? "", "기본", input.llmBaseUrl);
+    if (provider && !input.credentialId) storeKey(workspace.id, provider, input.llmApiKey ?? "", "기본", input.llmBaseUrl);
     if (input.models) state.models.set(workspace.id, { ...input.models });
     return { ...workspace };
   },

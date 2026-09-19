@@ -6,6 +6,8 @@
 
 제품 정의와 슬로건, 브랜드 자산, 디자인 토큰의 기준은 [docs/brand.md](docs/brand.md), 화면 문구와 AI 답변의 말투 기준은 [docs/voice.md](docs/voice.md)에 있습니다.
 
+버그 제보와 개선 제안, 코드·문서 기여를 환영합니다. [GitHub 이슈](https://github.com/tomorrow9913/maeglagi/issues)와 [기여 안내](CONTRIBUTING.md)를 확인해 주세요.
+
 ## 구조
 
 ```text
@@ -18,6 +20,22 @@
 ```
 
 백엔드는 모듈 경계를 분명히 한 모듈러 모놀리스이며, API와 Celery worker를 별도 프로세스로 배포합니다.
+
+### 내 에이전트로 사용하기
+
+AI 제공업체 API 키 없이도 계정을 만들고 [MCP 연결](docs/mcp.md)을 등록해 사용할 수 있습니다. 사용자 에이전트가 전사·분석·질문 답변을 수행하고, 맥락이는 녹음과 자료, 검토된 회의록, 분석 결과와 온톨로지를 보관합니다. 계정 화면 `/account/mcp`에서 만료·해제가 가능한 전용 연결 토큰을 발급합니다. 음성 처리는 사용하는 에이전트가 지원해야 합니다.
+
+```mermaid
+flowchart LR
+    Web[웹 클라이언트] --> HTTP[HTTP API]
+    Agent[사용자 에이전트] --> MCP[MCP 도구·리소스·프롬프트]
+    HTTP --> Services[공통 애플리케이션 서비스]
+    MCP --> Services
+    Services --> Sources[자료·녹음·검토된 대본]
+    Services --> Knowledge[분석 결과·맥락·그래프]
+```
+
+HTTP와 MCP는 인증된 요청을 공통 서비스에 전달하는 진입 계층입니다. MCP 도구에 별도 DB·그래프 저장 규칙을 구현하지 않으며, 원문 근거·소유권·버전·중복 제출 검증은 서비스에서 적용합니다.
 
 ## 빠른 시작
 

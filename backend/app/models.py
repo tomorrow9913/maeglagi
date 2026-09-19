@@ -2,6 +2,7 @@
 
 from sqlmodel import SQLModel
 
+from app.auth.mcp import McpToken
 from app.modules.context_engine.infrastructure.models import (
     Chunk,
     ContextRecord,
@@ -20,6 +21,7 @@ from app.modules.workspaces.infrastructure.models import (
 )
 
 __all__ = [
+    "McpToken",
     "Chunk",
     "ContextRecord",
     "ContextStoreRecord",

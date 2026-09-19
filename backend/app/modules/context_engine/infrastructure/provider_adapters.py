@@ -21,7 +21,9 @@ from app.modules.context_engine.application.provider import (
 
 
 class ProviderError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, http_status: int | None = None) -> None:
+        super().__init__(message)
+        self.http_status = http_status
 
 
 class ProviderCapabilityError(ProviderError):
@@ -127,7 +129,10 @@ class OpenAICompatibleAdapter:
         except httpx.HTTPError as exc:
             raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
-            raise ProviderError(f"모델 목록을 가져오지 못했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"모델 목록을 가져오지 못했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         parsed = (parse_openai_model(item) for item in response.json().get("data", []))
         return [info for info in parsed if info is not None]
 
@@ -154,7 +159,10 @@ class OpenAICompatibleAdapter:
         except httpx.HTTPError as exc:
             raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
-            raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"모델 요청에 실패했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         body = response.json()
         choice = body.get("choices", [{}])[0]
         message = choice.get("message", {})
@@ -189,7 +197,10 @@ class OpenAICompatibleAdapter:
                 json=payload,
             )
         if not response.is_success:
-            raise ProviderError(f"임베딩 요청에 실패했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"임베딩 요청에 실패했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         body = response.json()
         items = sorted(body.get("data", []), key=lambda item: item.get("index", 0))
         usage = {key: int(value) for key, value in body.get("usage", {}).items()}
@@ -219,7 +230,10 @@ class OpenAICompatibleAdapter:
                 files={"file": (request.filename, request.audio, request.content_type)},
             )
         if not response.is_success:
-            raise ProviderError(f"음성 인식 요청에 실패했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"음성 인식 요청에 실패했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         body = response.json()
         segments = [
             TranscriptionSegment(
@@ -292,7 +306,10 @@ class OpenAICompatibleAdapter:
                     raise UnsupportedStructuredFormatError(
                         "이 모델은 native JSON schema 형식을 지원하지 않습니다."
                     )
-            raise ProviderError(f"구조화 출력 요청에 실패했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"구조화 출력 요청에 실패했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         body = response.json()
         content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
         try:
@@ -332,7 +349,10 @@ class OpenAICompatibleAdapter:
             ):
                 if not response.is_success:
                     await response.aread()
-                    raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
+                    raise ProviderError(
+                        f"모델 요청에 실패했습니다 ({response.status_code}).",
+                        http_status=response.status_code,
+                    )
                 async for line in response.aiter_lines():
                     line = line.strip()
                     if not line.startswith("data:"):
@@ -391,7 +411,10 @@ class AnthropicAdapter:
         except httpx.HTTPError as exc:
             raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
-            raise ProviderError(f"모델 목록을 가져오지 못했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"모델 목록을 가져오지 못했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         parsed = (parse_anthropic_model(item) for item in response.json().get("data", []))
         return [info for info in parsed if info is not None]
 
@@ -426,7 +449,10 @@ class AnthropicAdapter:
         except httpx.HTTPError as exc:
             raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
-            raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
+            raise ProviderError(
+                f"모델 요청에 실패했습니다 ({response.status_code}).",
+                http_status=response.status_code,
+            )
         try:
             body = response.json()
             text = "".join(
@@ -473,7 +499,10 @@ class AnthropicAdapter:
                 ) as response,
             ):
                 if not response.is_success:
-                    raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
+                    raise ProviderError(
+                        f"모델 요청에 실패했습니다 ({response.status_code}).",
+                        http_status=response.status_code,
+                    )
                 async for event in self._events(response):
                     event_type = event.get("type")
                     if event_type == "error":

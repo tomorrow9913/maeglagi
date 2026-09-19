@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
+import { Button } from "@/components/ui/button";
 import { CreateWorkspaceDialog } from "@/features/workspace/components/create-workspace-dialog";
 import { useAsync } from "@/hooks/use-async";
 import { api } from "@/lib/api";
@@ -18,7 +19,8 @@ export default function WorkspacesPage() {
 
   // 만들자마자 바로 들어가는 편이 자연스러워 새 워크스페이스로 이동합니다.
   const onCreated = useCallback(
-    (created: Workspace) => router.push(workspacePath(created.id, "ask")),
+    (created: Workspace, mode: "agent" | "service") =>
+      router.push(mode === "agent" ? "/account/mcp" : workspacePath(created.id, "ask")),
     [router],
   );
 
@@ -27,7 +29,14 @@ export default function WorkspacesPage() {
       <PageHeader
         title="워크스페이스"
         description="맥락을 모을 공간을 고르거나 새로 만듭니다."
-        action={<CreateWorkspaceDialog onCreated={onCreated} />}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/account/mcp">MCP 설정</Link>
+            </Button>
+            <CreateWorkspaceDialog onCreated={onCreated} />
+          </div>
+        }
       />
 
       {isLoading ? (

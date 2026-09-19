@@ -37,6 +37,16 @@ class GraphReader:
         with sentry_sdk.start_span(op="db.neo4j.query", name="graph.nodes"):
             return await self.store.execute(_NODES, {"workspace_id": str(workspace_id)})
 
+    async def nodes_page(
+        self, workspace_id: UUID, *, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        """Return a bounded page of graph nodes for external read clients."""
+        with sentry_sdk.start_span(op="db.neo4j.query", name="graph.nodes_page"):
+            return await self.store.execute(
+                _NODES + "\nSKIP $offset LIMIT $limit",
+                {"workspace_id": str(workspace_id), "offset": offset, "limit": limit},
+            )
+
     async def edges(self, workspace_id: UUID, at: datetime) -> list[dict[str, Any]]:
         """Relations that were valid at `at` (timezone-aware)."""
         with sentry_sdk.start_span(op="db.neo4j.query", name="graph.edges"):
@@ -46,5 +56,21 @@ class GraphReader:
                     "workspace_id": str(workspace_id),
                     "at": at.isoformat(),
                     "kinds": [kind.value for kind in RelationKind],
+                },
+            )
+
+    async def edges_page(
+        self, workspace_id: UUID, at: datetime, *, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        """Return a bounded page of relations valid at a chosen instant."""
+        with sentry_sdk.start_span(op="db.neo4j.query", name="graph.edges_page"):
+            return await self.store.execute(
+                _EDGES + "\nSKIP $offset LIMIT $limit",
+                {
+                    "workspace_id": str(workspace_id),
+                    "at": at.isoformat(),
+                    "kinds": [kind.value for kind in RelationKind],
+                    "offset": offset,
+                    "limit": limit,
                 },
             )

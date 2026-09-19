@@ -24,6 +24,19 @@ export type Workspace = {
   sourceCount: number;
 };
 
+/** Account-wide MCP access token metadata. The secret appears only in create's response. */
+export type McpToken = {
+  id: string;
+  label: string;
+  tokenHint: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string;
+};
+
+export type McpTokenList = { items: McpToken[] };
+export type CreatedMcpToken = { item: McpToken; token: string };
+
 /** 백엔드 provider registry가 소유하는 동적 provider 식별자입니다. */
 export type LlmProvider = string;
 
@@ -109,13 +122,14 @@ export type Source = {
   kind: SourceKind;
   title: string;
   status: ProcessingStatus;
+  analysisMode?: "server" | "agent";
   createdAt: string;
   /** 문서일 때만 */
   sizeBytes?: number;
   /** 회의 녹음일 때만 */
   durationSeconds?: number;
   /** server는 오디오 STT, browser는 브라우저 받아쓰기 원문입니다. */
-  transcriptSource?: "server" | "browser";
+  transcriptSource?: "server" | "browser" | "agent";
   projectId?: string | null;
   projectIds?: string[];
   associations?: SourceAssociation[];
@@ -152,7 +166,7 @@ export type SourceContent = {
  * 회의 녹음은 `transcribing`을 거치고 문서는 건너뜁니다. 표시 문구는
  * 프론트가 소유하므로 서버는 이 키만 내려줍니다.
  */
-export type ProcessingStage = "uploaded" | "transcribing" | "awaiting_review" | "confirmed" | "analyzing" | "graphing" | "completed";
+export type ProcessingStage = "uploaded" | "transcribing" | "awaiting_review" | "confirmed" | "awaiting_agent" | "analyzing" | "graphing" | "completed";
 
 /** 업로드 직후의 비동기 처리 상태 */
 export type ProcessingJob = {
@@ -160,7 +174,8 @@ export type ProcessingJob = {
   sourceId: string;
   /** 어떤 단계를 거치는지 화면이 판단할 수 있게 소스 종류를 함께 내려줍니다. */
   sourceKind: SourceKind;
-  transcriptSource?: "server" | "browser";
+  transcriptSource?: "server" | "browser" | "agent";
+  analysisMode?: "server" | "agent";
   status: ProcessingStatus;
   /** 0..1 */
   progress: number;
@@ -225,8 +240,9 @@ export type MeetingUtterance = {
 export type MeetingReview = {
   sourceId: string;
   title: string;
-  transcriptSource: "server" | "browser";
-  reviewState: "transcribing" | "awaiting_review" | "confirmed";
+  transcriptSource: "server" | "browser" | "agent";
+  analysisMode?: "server" | "agent";
+  reviewState: "transcribing" | "awaiting_review" | "awaiting_agent" | "confirmed";
   status: ProcessingStatus;
   stage: ProcessingStage;
   errorMessage: string | null;

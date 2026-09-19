@@ -9,6 +9,8 @@ import type {
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
+  McpTokenList,
+  CreatedMcpToken,
   ProcessingJob,
   MeetingReview,
   MeetingUtterance,
@@ -40,6 +42,15 @@ function timelineQuery(query?: ContextTimelineQuery): string {
 
 /** 실제 FastAPI 백엔드를 호출하는 구현입니다. */
 export const httpApi: MaeglagiApi = {
+  listMcpTokens: (signal) => apiFetch<McpTokenList>("/mcp-tokens", { signal }),
+  createMcpToken: (input, signal) =>
+    apiFetch<CreatedMcpToken>("/mcp-tokens", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
+  revokeMcpToken: (tokenId, signal) =>
+    apiFetch<void>(`/mcp-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE", signal }),
   listWorkspaces: (signal) => apiFetch<Workspace[]>("/workspaces", { signal }),
 
   getWorkspace: (workspaceId, signal) =>

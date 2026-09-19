@@ -1,10 +1,8 @@
 import json
 from datetime import UTC, datetime
 from typing import Annotated
-from urllib.parse import quote
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials
 from kombu.exceptions import OperationalError
@@ -58,12 +56,6 @@ from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
-from app.modules.ingestion.application.upload_validation import (
-    InvalidUploadError,
-    UnsupportedUploadError,
-    validate_document,
-    validate_recording,
-)
 from app.modules.ingestion.infrastructure.pg_executor import enqueue_source as enqueue_pg_source
 from app.modules.ingestion.infrastructure.pg_executor import wake_executors
 from app.modules.ingestion.infrastructure.tasks import process_source
@@ -103,6 +95,7 @@ def _job_response(source: Source) -> JobResponse:
         source_kind=source.kind,
         transcript_source=source.transcript_source,
         status=source.status,
+        analysis_mode=source.analysis_mode,
         progress=source.progress,
         stage=source.processing_stage,
         error_message=source.error_message,
@@ -162,6 +155,21 @@ async def create_workspace(
     body: CreateWorkspaceRequest, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
     from app.api.workspaces.credentials import _base_url, _key_hint, _lock_account
+
+    if body.credential_id is None and body.llm_provider is None:
+        if body.llm_api_key is not None or body.llm_base_url is not None or body.models:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Choose a provider before configuring its credential or models",
+            )
+        from app.modules.agent_workflows.service import AgentWorkflowService
+
+        created = await AgentWorkflowService(session).create_workspace(
+            owner_id=user.id, name=body.name
+        )
+        return WorkspaceResponse(
+            id=created.id, name=created.name, created_at=created.created_at, source_count=0
+        )
 
     await _lock_account(session, user.id)
     account_credentials = list(
@@ -521,66 +529,46 @@ async def _upload_source(
     session: AsyncSession,
     credentials: HTTPAuthorizationCredentials,
 ) -> tuple[Source, bytes]:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    from app.modules.ingestion.application.source_upload import (
+        SourceUploadService,
+        UploadServiceError,
+    )
+
     settings = get_settings()
     content = await file.read(settings.max_upload_bytes + 1)
-    if not content:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
-    if len(content) > settings.max_upload_bytes:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File is too large")
-    filename = file.filename or ("recording.webm" if kind == "meeting" else "document")
-    filename = filename.replace("/", "_").replace("\\", "_")
+
+    async def writer(source: Source, data: bytes) -> None:
+        await _upload_object(source, data, credentials)
+
     try:
-        if kind == "document":
-            validate_document(filename, file.content_type, content)
-        else:
-            extension = validate_recording(filename, file.content_type, content)
-            # The browser client names every MediaRecorder blob recording.webm, even on
-            # Safari where the bytes and MIME are MP4. Keep the STT filename truthful.
-            if filename.lower().endswith(".webm") and extension == ".mp4":
-                filename = filename[:-5] + ".mp4"
-    except UnsupportedUploadError as exc:
-        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(exc)) from exc
-    except InvalidUploadError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
-    source = Source(
-        workspace_id=workspace.id,
-        owner_id=user.id,
-        kind=kind,
-        title=filename,
-        object_path="pending",
-        content_type=file.content_type or "application/octet-stream",
-        size_bytes=len(content),
-    )
-    source.object_path = f"{user.id}/{workspace.id}/{source.id}/{source.title}"
-    await _upload_object(source, content, credentials)
-    session.add(source)
+        source = await SourceUploadService(session, settings).upload(
+            owner_id=user.id,
+            workspace_id=workspace_id,
+            filename=file.filename,
+            content_type=file.content_type,
+            content=content,
+            kind=kind,
+            write_object=writer,
+        )
+    except UploadServiceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
     return source, content
 
 
 async def _upload_object(
     source: Source, content: bytes, credentials: HTTPAuthorizationCredentials
 ) -> None:
-    settings = get_settings()
-    storage_url = (
-        f"{settings.supabase_url.rstrip('/')}/storage/v1/object/"
-        f"{settings.supabase_storage_bucket}/{quote(source.object_path, safe='/')}"
+    from app.modules.ingestion.application.source_upload import (
+        UploadServiceError,
+        store_source_bytes,
     )
-    headers = {
-        "apikey": settings.supabase_publishable_key.get_secret_value(),
-        "Authorization": f"Bearer {credentials.credentials}",
-        "Content-Type": source.content_type,
-        "x-upsert": "false",
-    }
+
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(storage_url, content=content, headers=headers)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Storage unavailable") from exc
-    if response.status_code not in {status.HTTP_200_OK, status.HTTP_201_CREATED}:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Storage upload failed")
+        await store_source_bytes(
+            source, content, settings=get_settings(), storage_token=credentials.credentials
+        )
+    except UploadServiceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 workspaces.include_router(directory_router)
