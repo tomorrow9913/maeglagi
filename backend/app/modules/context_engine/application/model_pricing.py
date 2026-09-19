@@ -11,8 +11,7 @@ import time
 import httpx
 
 PRICE_MAP_URL = (
-    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
-    "model_prices_and_context_window.json"
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 )
 _CACHE_SECONDS = 6 * 60 * 60
 _prices: dict[tuple[str, str], float] = {}
