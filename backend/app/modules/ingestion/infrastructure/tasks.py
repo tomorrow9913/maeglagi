@@ -7,6 +7,7 @@ from uuid import UUID
 import httpx
 from celery import Task
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlmodel import select
 
 from app.core.celery import celery_app
@@ -243,6 +244,10 @@ async def _run_source_attempt(source_id: UUID, *, final_attempt: bool) -> Except
     async with _source_execution_lock(source_id):
         try:
             await _process_source(source_id)
+        except DBAPIError:
+            # SQL failures belong to infrastructure retry even if the database
+            # recovers before the later status update would have succeeded.
+            raise
         except Exception as exc:
             # Commit retry/failure before releasing the lock so a duplicate
             # cannot start while this attempt still appears to be processing.
