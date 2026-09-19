@@ -457,6 +457,29 @@ async def test_lost_upload_response_cleans_only_this_attempt_and_retry_succeeds(
     assert len(storage.objects) == 2
 
 
+@pytest.mark.asyncio
+async def test_existing_upload_path_is_never_deleted_on_create_conflict(monkeypatch) -> None:
+    snapshot, owner = artifact()
+    target = restore_plan(snapshot, owner)["target_workspace_id"]
+    source = snapshot["payload"]["sources"][0]
+    attempt = uuid4()
+    monkeypatch.setattr(snapshot_module, "uuid4", lambda: attempt)
+    remapped_source = snapshot_module._remap(source["id"], UUID(target))
+    path = f"{owner}/{target}/{remapped_source}/{attempt}/demo.md"
+    storage = FakeStorage()
+    storage.objects[path] = b"pre-existing"
+    request = httpx.Request("POST", "https://storage.example/object")
+    response = httpx.Response(409, request=request)
+
+    def conflict(_path, _data, _content_type):
+        raise httpx.HTTPStatusError("object exists", request=request, response=response)
+
+    storage.write = conflict
+    with pytest.raises(httpx.HTTPStatusError, match="object exists"):
+        await restore_snapshot(FakeDb(), FakeGraph(), storage, snapshot, owner)
+    assert storage.objects == {path: b"pre-existing"}
+
+
 class FakeScalars:
     def __init__(self, rows):
         self.rows = rows
