@@ -4,7 +4,6 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Send, Square, Plus, FileUp, Mic } from "lucide-react";
 
 import { DropdownMenu } from "radix-ui";
-import { SourceUploadDialog } from "@/features/source-ingestion/components/source-upload-dialog";
 import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -22,7 +21,6 @@ import { cn } from "@/lib/utils";
 export default function AskPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
   const api = useApi();
-  const [uploadMode, setUploadMode] = useState<"document" | "meeting" | null>(null);
   const [sourceViewer, setSourceViewer] = useState<AnswerSource>();
 
   const [draft, setDraft] = useState("");
@@ -69,6 +67,11 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
   );
 
   const openSource = useCallback((source: AnswerSource) => setSourceViewer(source), []);
+  const openUpload = (mode: "document" | "meeting") => {
+    window.dispatchEvent(
+      new CustomEvent("maeglagi:open-source-upload", { detail: { workspaceId, mode } }),
+    );
+  };
 
   return (
     <div className="flex min-h-[calc(100dvh-8rem)] flex-col">
@@ -185,14 +188,14 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
                 >
                   <DropdownMenu.Item
                     className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 outline-none focus:bg-accent"
-                    onSelect={() => setUploadMode("document")}
+                    onSelect={() => openUpload("document")}
                   >
                     <FileUp className="size-4" />
                     파일 업로드
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 outline-none focus:bg-accent"
-                    onSelect={() => setUploadMode("meeting")}
+                    onSelect={() => openUpload("meeting")}
                   >
                     <Mic className="size-4" />
                     회의 녹음 · 받아쓰기
@@ -220,12 +223,6 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
           onSavingChange={onModelSavingChange}
         />
       </div>
-      <SourceUploadDialog
-        key={workspaceId}
-        workspaceId={workspaceId}
-        mode={uploadMode}
-        onClose={() => setUploadMode(null)}
-      />
       <SourceViewer
         sourceId={sourceViewer?.sourceId}
         highlightChunkId={sourceViewer?.chunkId}

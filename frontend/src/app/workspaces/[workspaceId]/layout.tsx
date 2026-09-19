@@ -59,9 +59,7 @@ export default function WorkspaceLayout({
           </Link>
         ) : null}
         <WorkspaceNav workspaceId={workspaceId} />
-        <div className="hidden md:block">
-          <WorkspaceSources key={workspaceId} workspaceId={workspaceId} />
-        </div>
+        <WorkspaceSources key={workspaceId} workspaceId={workspaceId} />
       </aside>
       <main className="min-w-0 flex-1">
         {isLoading && !data ? (

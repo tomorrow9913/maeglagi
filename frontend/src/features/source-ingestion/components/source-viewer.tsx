@@ -27,6 +27,18 @@ function formatTimestamp(seconds: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
+const speakerTextColors = [
+  "text-blue-700 dark:text-blue-300",
+  "text-violet-700 dark:text-violet-300",
+  "text-emerald-700 dark:text-emerald-300",
+  "text-amber-700 dark:text-amber-300",
+];
+
+function speakerColor(name: string): string {
+  const index = [...name].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return speakerTextColors[index % speakerTextColors.length];
+}
+
 export function SourceViewer({
   sourceId,
   highlightChunkId,
@@ -89,7 +101,7 @@ export function SourceViewer({
               표시할 원문이 없습니다.
             </p>
           ) : (
-            <ol className="space-y-3">
+            <ol className={data.kind === "meeting" ? "space-y-2" : "space-y-3"}>
               {data.chunks.map((chunk) => {
                 const isHighlighted = chunk.id === highlightChunkId;
                 return (
@@ -97,10 +109,13 @@ export function SourceViewer({
                     key={chunk.id}
                     ref={isHighlighted ? highlightRef : undefined}
                     className={cn(
-                      "rounded-lg border p-3 text-sm leading-relaxed transition-colors",
+                      "text-sm leading-relaxed transition-colors",
                       isHighlighted
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-transparent bg-muted/40",
+                        ? "rounded-md bg-primary/5 ring-1 ring-primary/30"
+                        : data.kind === "meeting"
+                          ? ""
+                          : "rounded-lg bg-muted/40",
+                      data.kind === "meeting" ? "px-1 py-2" : "p-3",
                     )}
                   >
                     {chunk.startSeconds != null ? (
@@ -109,7 +124,35 @@ export function SourceViewer({
                         {chunk.endSeconds != null ? ` – ${formatTimestamp(chunk.endSeconds)}` : ""}
                       </span>
                     ) : null}
-                    {chunk.text}
+                    {data.kind === "meeting" ? (
+                      <div className="space-y-1.5">
+                        {chunk.text
+                          .split(/\n+/)
+                          .filter(Boolean)
+                          .map((line, index) => {
+                            const parts = /^([^:\n]{1,80}):\s*(.*)$/.exec(line);
+                            return parts ? (
+                              <div
+                                key={index}
+                                className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]"
+                              >
+                                <span
+                                  className={`truncate font-semibold ${speakerColor(parts[1])}`}
+                                >
+                                  {parts[1]}
+                                </span>
+                                <span className="whitespace-pre-wrap">{parts[2]}</span>
+                              </div>
+                            ) : (
+                              <p key={index} className="whitespace-pre-wrap">
+                                {line}
+                              </p>
+                            );
+                          })}
+                      </div>
+                    ) : (
+                      chunk.text
+                    )}
                   </li>
                 );
               })}

@@ -10,12 +10,12 @@ import { RecordingControls } from "./recording-controls";
 import type { TranscriptSourceInput } from "@/lib/api";
 
 const speakerColors = [
-  "border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-100",
-  "border-violet-300 bg-violet-50 text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100",
-  "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100",
-  "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100",
-  "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-100",
-  "border-cyan-300 bg-cyan-50 text-cyan-900 dark:border-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-100",
+  "text-blue-700 dark:text-blue-300",
+  "text-violet-700 dark:text-violet-300",
+  "text-emerald-700 dark:text-emerald-300",
+  "text-amber-700 dark:text-amber-300",
+  "text-rose-700 dark:text-rose-300",
+  "text-cyan-700 dark:text-cyan-300",
 ];
 const speakerColor = (speaker: string | number) =>
   speakerColors[Number(speaker) % speakerColors.length];
@@ -39,6 +39,7 @@ export function MeetingCapture({
   const [currentSpeaker, setCurrentSpeaker] = useState("0");
   const speakerRef = useRef("0");
   const previousSegments = useRef<TranscriptTurn[]>([]);
+  const deletedIds = useRef(new Set<number>());
   const manualId = useRef(-1);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -51,7 +52,13 @@ export function MeetingCapture({
     (segments) => {
       const speaker = speakerRef.current;
       setDraft((rows) =>
-        mergeTranscript(rows ?? [], [...previousSegments.current, ...segments], speaker),
+        mergeTranscript(
+          rows ?? [],
+          [...previousSegments.current, ...segments].filter(
+            (segment) => !deletedIds.current.has(segment.id),
+          ),
+          speaker,
+        ),
       );
     },
   );
@@ -76,6 +83,10 @@ export function MeetingCapture({
   }, [active, draft, saving]);
   const update = (id: number, values: Partial<TranscriptTurn>) =>
     setDraft((rows) => rows?.map((row) => (row.id === id ? { ...row, ...values } : row)) ?? null);
+  const grow = (element: HTMLTextAreaElement) => {
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  };
   const addTurn = () => {
     const row = {
       id: manualId.current--,
@@ -111,6 +122,7 @@ export function MeetingCapture({
         setDraft(null);
         setDuration(0);
         previousSegments.current = [];
+        deletedIds.current.clear();
       }
     } finally {
       savingRef.current = false;
@@ -169,7 +181,7 @@ export function MeetingCapture({
               {speakers.map((name, index) => (
                 <Input
                   key={index}
-                  className={speakerColor(index)}
+                  className="border-border"
                   aria-label={`화자 ${index + 1} 이름`}
                   value={name}
                   maxLength={80}
@@ -249,7 +261,7 @@ export function MeetingCapture({
             </p>
           )}
           {draft && (
-            <section aria-label="대본 편집" className="space-y-4 rounded-xl border p-4">
+            <section aria-label="대본 편집" className="space-y-4">
               <h3 className="font-medium">
                 {active ? "실시간 대본 · 바로 편집" : "대본 검토 및 편집"}
               </h3>
@@ -271,15 +283,15 @@ export function MeetingCapture({
                   말씀하시면 문장이 여기에 표시됩니다. 화자를 선택한 뒤 발언해 주세요.
                 </p>
               )}
-              {draft.map((row, index) => (
-                <div
-                  key={row.id}
-                  className={`space-y-2 rounded-lg border border-l-4 p-3 ${speakerColor(row.speaker)}`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-1" role="group" aria-label="발언 목록">
+                {draft.map((row, index) => (
+                  <div
+                    key={row.id}
+                    className="group grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 py-1.5 sm:grid-cols-[8rem_minmax(0,1fr)]"
+                  >
                     <select
                       aria-label={`발언 ${index + 1} 화자`}
-                      className={`rounded-md border p-1 text-sm ${speakerColor(row.speaker)}`}
+                      className={`w-full min-w-0 rounded-sm bg-transparent py-1 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring ${speakerColor(row.speaker)}`}
                       value={row.speaker}
                       disabled={saving}
                       onChange={(event) => update(row.id, { speaker: event.target.value })}
@@ -290,52 +302,69 @@ export function MeetingCapture({
                         </option>
                       ))}
                     </select>
-                    <span className="text-xs text-muted-foreground">
-                      {row.edited
-                        ? "직접 수정됨"
-                        : row.isFinal
-                          ? "인식 확정"
-                          : active
-                            ? "인식 중…"
-                            : "최종 확인 필요"}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={saving || active}
-                      onClick={() =>
-                        setDraft((rows) => rows?.filter((item) => item.id !== row.id) ?? null)
-                      }
-                    >
-                      발언 삭제
-                    </Button>
+                    <div className="min-w-0">
+                      <textarea
+                        ref={(element) => {
+                          if (element) grow(element);
+                        }}
+                        id={`${editorId}-${row.id}`}
+                        rows={1}
+                        onKeyDown={(event) => {
+                          if (event.key === "Tab" && event.shiftKey && index > 0) {
+                            event.preventDefault();
+                            document.getElementById(`${editorId}-${draft[index - 1].id}`)?.focus();
+                            return;
+                          }
+                          if (
+                            event.key === "Tab" &&
+                            !event.shiftKey &&
+                            !event.ctrlKey &&
+                            !event.altKey &&
+                            !event.metaKey &&
+                            !event.nativeEvent.isComposing &&
+                            index === draft.length - 1 &&
+                            row.text.trim() &&
+                            !saving
+                          ) {
+                            event.preventDefault();
+                            addTurn();
+                          }
+                        }}
+                        aria-label={`발언 ${index + 1} 내용`}
+                        className="block min-h-7 w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        value={row.text}
+                        disabled={saving}
+                        onChange={(event) => {
+                          grow(event.target);
+                          update(row.id, { text: event.target.value, edited: true });
+                        }}
+                      />
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <span>
+                          {row.edited
+                            ? "수정됨"
+                            : row.isFinal
+                              ? "인식 확정"
+                              : active
+                                ? "인식 중…"
+                                : "확인 필요"}
+                        </span>
+                        <button
+                          type="button"
+                          className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          disabled={saving}
+                          onClick={() => {
+                            deletedIds.current.add(row.id);
+                            setDraft((rows) => rows?.filter((item) => item.id !== row.id) ?? null);
+                          }}
+                        >
+                          발언 삭제
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <textarea
-                    id={`${editorId}-${row.id}`}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Tab" &&
-                        !event.shiftKey &&
-                        !event.ctrlKey &&
-                        !event.altKey &&
-                        !event.metaKey &&
-                        !event.nativeEvent.isComposing &&
-                        index === draft.length - 1 &&
-                        row.text.trim() &&
-                        !saving
-                      ) {
-                        event.preventDefault();
-                        addTurn();
-                      }
-                    }}
-                    aria-label={`발언 ${index + 1} 내용`}
-                    className="min-h-24 w-full rounded-md border bg-background p-2 text-sm text-foreground"
-                    value={row.text}
-                    disabled={saving}
-                    onChange={(event) => update(row.id, { text: event.target.value, edited: true })}
-                  />
-                </div>
-              ))}
+                ))}
+              </div>
               <p className="text-xs text-muted-foreground">
                 마지막 발언에서 Tab: 다음 발언 추가 · Shift+Tab: 이전 항목 이동. 새 발언에는 현재
                 선택한 화자가 적용됩니다.
@@ -358,6 +387,7 @@ export function MeetingCapture({
                       setDraft(null);
                       setDuration(0);
                       previousSegments.current = [];
+                      deletedIds.current.clear();
                     }
                   }}
                 >

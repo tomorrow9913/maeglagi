@@ -131,7 +131,9 @@ class ExtractionPipeline:
             self._record_usage(response.usage)
             if response.provider_metadata.get("finish_reason") in {"length", "max_tokens"}:
                 raise ExtractionError(stage, "모델 응답이 토큰 한도에서 잘렸습니다.")
-            if response.provider_metadata.get("refusal"):
+            if response.provider_metadata.get("refusal") or response.provider_metadata.get(
+                "finish_reason"
+            ) in {"refusal", "content_filter"}:
                 raise ExtractionError(stage, "모델이 추출 요청을 거절했습니다.")
             try:
                 # JSON mode rejects prose, code fences and trailing objects. Pydantic then

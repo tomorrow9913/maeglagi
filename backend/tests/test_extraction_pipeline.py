@@ -281,7 +281,12 @@ async def test_native_format_rejection_falls_back_to_chat_for_that_stage() -> No
 
 @pytest.mark.parametrize(
     ("metadata", "message"),
-    [({"finish_reason": "max_tokens"}, "토큰 한도"), ({"refusal": True}, "거절")],
+    [
+        ({"finish_reason": "max_tokens"}, "토큰 한도"),
+        ({"finish_reason": "refusal"}, "거절"),
+        ({"finish_reason": "content_filter"}, "거절"),
+        ({"refusal": True}, "거절"),
+    ],
 )
 async def test_chat_truncation_or_refusal_stops_without_retry(
     metadata: dict[str, Any], message: str
