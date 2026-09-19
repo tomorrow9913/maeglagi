@@ -4,6 +4,7 @@ import type {
   AiProvider,
   ApiKeyValidation,
   ContextItem,
+  ContextStore,
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
@@ -72,6 +73,8 @@ export interface MaeglagiApi {
     query?: ContextTimelineQuery,
     signal?: AbortSignal,
   ): Promise<ContextItem[]>;
+  /** 프로젝트의 현재 상황. 첫 소스가 분석되기 전에는 null입니다. */
+  getContextStore(workspaceId: string, signal?: AbortSignal): Promise<ContextStore | null>;
   getKnowledgeGraph(workspaceId: string, signal?: AbortSignal): Promise<KnowledgeGraph>;
 
   /**
