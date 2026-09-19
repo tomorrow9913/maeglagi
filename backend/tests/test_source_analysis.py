@@ -543,6 +543,8 @@ async def test_advisory_lock_keeps_a_dedicated_transaction_until_attempt_ends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     statements: list[str] = []
+    workspace_id = uuid4()
+    keys: list[int] = []
 
     class Connection:
         async def __aenter__(self) -> "Connection":
@@ -551,8 +553,13 @@ async def test_advisory_lock_keeps_a_dedicated_transaction_until_attempt_ends(
         async def __aexit__(self, *exc: object) -> None:
             pass
 
-        async def execute(self, statement: Any, parameters: Any = None) -> None:
+        async def execute(self, statement: Any, parameters: Any = None) -> Any:
             statements.append(str(statement))
+            if "pg_advisory_xact_lock" in str(statement):
+                keys.append(parameters["key"])
+            if "SELECT workspace_id" in str(statement):
+                return SimpleNamespace(scalar_one_or_none=lambda: workspace_id)
+            return None
 
         async def rollback(self) -> None:
             statements.append("ROLLBACK")
@@ -563,10 +570,86 @@ async def test_advisory_lock_keeps_a_dedicated_transaction_until_attempt_ends(
 
     monkeypatch.setattr(tasks, "engine", Engine())
     async with tasks._source_execution_lock(uuid4()):
-        assert any("pg_advisory_xact_lock" in statement for statement in statements)
+        assert len(keys) == 2
+        assert keys[0] >= 0 and keys[1] < 0
+        assert any("SELECT workspace_id" in statement for statement in statements)
         assert "ROLLBACK" not in statements
     assert statements[-1] == "ROLLBACK"
     assert not any("pg_try_advisory_lock" in statement for statement in statements)
+
+
+async def test_workspace_lock_survives_checkpoint_commits_and_allows_other_workspaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_source, second_source, other_source = uuid4(), uuid4(), uuid4()
+    workspace, other_workspace = uuid4(), uuid4()
+    source_workspaces = {
+        first_source: workspace,
+        second_source: workspace,
+        other_source: other_workspace,
+    }
+    advisory_locks: dict[int, asyncio.Lock] = {}
+    waiting_for_workspace = asyncio.Event()
+    workspace_key = (int.from_bytes(workspace.bytes[:8], "big") & ((1 << 63) - 1)) - (1 << 63)
+
+    class Connection:
+        def __init__(self) -> None:
+            self.held: list[asyncio.Lock] = []
+
+        async def __aenter__(self) -> "Connection":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            await self.rollback()
+
+        async def execute(self, statement: Any, parameters: Any = None) -> Any:
+            sql = str(statement)
+            if "pg_advisory_xact_lock" in sql:
+                key = parameters["key"]
+                lock = advisory_locks.setdefault(key, asyncio.Lock())
+                if key == workspace_key and lock.locked():
+                    waiting_for_workspace.set()
+                await lock.acquire()
+                self.held.append(lock)
+            elif "SELECT workspace_id" in sql:
+                workspace_id = source_workspaces[parameters["source_id"]]
+                return SimpleNamespace(scalar_one_or_none=lambda: workspace_id)
+            return None
+
+        async def rollback(self) -> None:
+            for lock in reversed(self.held):
+                lock.release()
+            self.held.clear()
+
+    class Engine:
+        def connect(self) -> Connection:
+            return Connection()
+
+    monkeypatch.setattr(tasks, "engine", Engine())
+    first_entered, release_first = asyncio.Event(), asyncio.Event()
+    second_entered, other_entered = asyncio.Event(), asyncio.Event()
+    checkpoint_commits = 0
+
+    async def run(source_id: UUID, entered: asyncio.Event) -> None:
+        nonlocal checkpoint_commits
+        async with tasks._source_execution_lock(source_id):
+            entered.set()
+            checkpoint_commits += 1  # A separate write session commits while the lock stays held.
+            if source_id == first_source:
+                await release_first.wait()
+
+    first = asyncio.create_task(run(first_source, first_entered))
+    await first_entered.wait()
+    second = asyncio.create_task(run(second_source, second_entered))
+    await waiting_for_workspace.wait()
+    other = asyncio.create_task(run(other_source, other_entered))
+    await other_entered.wait()
+    assert checkpoint_commits == 2
+    assert not second_entered.is_set()
+    release_first.set()
+    await asyncio.gather(first, second, other)
+    assert second_entered.is_set()
+    assert checkpoint_commits == 3
 
 
 async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:

@@ -26,17 +26,31 @@ from app.modules.workspaces.infrastructure.models import Source
 
 @asynccontextmanager
 async def _source_execution_lock(source_id: UUID) -> AsyncIterator[None]:
-    """Hold a blocking transaction advisory lock across every source-write commit.
+    """Hold source and workspace locks across every source-write commit.
 
     This dedicated transaction pins a backend connection even through a transaction
     pooler. Source writes use other sessions. A duplicate waits and then rechecks
     persisted state; a worker death rolls the transaction back and releases the lock.
     """
-    key = int.from_bytes(source_id.bytes[:8], "big", signed=True)
+    # Reserve the sign bit as a namespace: source keys are nonnegative and
+    # workspace keys are negative, so the two lock classes cannot overlap.
+    source_key = int.from_bytes(source_id.bytes[:8], "big") & ((1 << 63) - 1)
     async with engine.connect() as connection:
         await connection.execute(text("SET LOCAL idle_in_transaction_session_timeout = 0"))
         await connection.execute(text("SET LOCAL statement_timeout = 0"))
-        await connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+        await connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": source_key})
+        result = await connection.execute(
+            text("SELECT workspace_id FROM sources WHERE id = :source_id"),
+            {"source_id": source_id},
+        )
+        workspace_id = result.scalar_one_or_none()
+        if workspace_id is not None:
+            workspace_key = (int.from_bytes(workspace_id.bytes[:8], "big") & ((1 << 63) - 1)) - (
+                1 << 63
+            )
+            await connection.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": workspace_key}
+            )
         try:
             yield
         finally:
