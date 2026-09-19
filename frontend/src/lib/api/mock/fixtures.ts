@@ -60,14 +60,20 @@ export const sourceContents: SourceContent[] = [
       {
         id: "src-kickoff#1",
         text: "정민규: PoC 범위는 회의 녹음과 문서 업로드 두 갈래로 갑니다. 슬랙 연동은 이번 범위에서 뺍니다.",
+        startSeconds: 0,
+        endSeconds: 38,
       },
       {
         id: "src-kickoff#2",
         text: "윤희원: 그러면 프론트는 Timeline, Graph, Ask 세 화면에 집중하겠습니다. 소스 업로드는 문서 먼저 붙이고 녹음을 이어서 붙입니다.",
+        startSeconds: 38,
+        endSeconds: 81,
       },
       {
         id: "src-kickoff#3",
         text: "정민규: 저장소는 PostgreSQL, MinIO, pgvector, Neo4j 네 가지로 확정합니다. 이건 Day 1에 세워둡니다.",
+        startSeconds: 81,
+        endSeconds: 120,
       },
     ],
   },
@@ -94,10 +100,14 @@ export const sourceContents: SourceContent[] = [
       {
         id: "src-tech-review#1",
         text: "정민규: LLM은 BYOK로 받습니다. 키는 서버에서 암호화해 저장하고 응답으로는 절대 돌려주지 않습니다.",
+        startSeconds: 0,
+        endSeconds: 44,
       },
       {
         id: "src-tech-review#2",
         text: "윤희원: 검색은 벡터 단독으로는 근거가 약해서, 그래프 탐색을 붙인 hybrid retrieval로 갑니다.",
+        startSeconds: 44,
+        endSeconds: 97,
       },
     ],
   },

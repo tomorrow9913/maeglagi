@@ -21,6 +21,12 @@ import { cn } from "@/lib/utils";
  * Timeline·Graph·Ask에서 넘어온 청크를 강조하고 그 위치로 스크롤합니다.
  * 답변이 어디서 나왔는지 원문에서 직접 확인시켜 주는 것이 목적입니다.
  */
+/** 초를 `분:초`로. 회의 녹음에서 그 구간이 나오는 위치를 알려줍니다. */
+function formatTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export function SourceViewer({
   sourceId,
   highlightChunkId,
@@ -96,6 +102,12 @@ export function SourceViewer({
                         : "border-transparent bg-muted/40",
                     )}
                   >
+                    {chunk.startSeconds != null ? (
+                      <span className="mb-1 block font-mono text-xs text-muted-foreground">
+                        {formatTimestamp(chunk.startSeconds)}
+                        {chunk.endSeconds != null ? ` – ${formatTimestamp(chunk.endSeconds)}` : ""}
+                      </span>
+                    ) : null}
                     {chunk.text}
                   </li>
                 );
