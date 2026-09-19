@@ -158,9 +158,7 @@ class IngestionPipeline:
         segments: list[TranscriptSegment],
         language: str | None = None,
     ) -> int:
-        return await self.index_source(
-            session, source=source, segments=segments, language=language
-        )
+        return await self.index_source(session, source=source, segments=segments, language=language)
 
     async def search(
         self,
