@@ -5,6 +5,7 @@ import type {
   AiProvider,
   ApiKeyValidation,
   ContextItem,
+  ContextStore,
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
@@ -96,6 +97,9 @@ export const httpApi: MaeglagiApi = {
     apiFetch<ContextItem[]>(`/workspaces/${workspaceId}/context${timelineQuery(query)}`, {
       signal,
     }),
+
+  getContextStore: (workspaceId, signal) =>
+    apiFetch<ContextStore | null>(`/workspaces/${workspaceId}/context-store`, { signal }),
 
   getKnowledgeGraph: (workspaceId, signal) =>
     apiFetch<KnowledgeGraph>(`/workspaces/${workspaceId}/graph`, { signal }),

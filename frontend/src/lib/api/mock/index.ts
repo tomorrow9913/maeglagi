@@ -16,6 +16,7 @@ import { BOOTSTRAP_AI_PROVIDERS } from "../providers";
 import {
   answers,
   contextItems,
+  contextStore,
   fallbackAnswer,
   knowledgeGraph,
   stageSequence,
@@ -336,6 +337,12 @@ export const mockApi: MaeglagiApi = {
     if (query?.to) items = items.filter((item) => item.occurredAt <= query.to!);
 
     return items.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  },
+
+  async getContextStore(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    if (!state.workspaces.some((item) => item.id === workspaceId)) return null;
+    return structuredClone(contextStore);
   },
 
   async getKnowledgeGraph(workspaceId, signal) {

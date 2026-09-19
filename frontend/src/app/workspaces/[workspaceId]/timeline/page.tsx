@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
+import { CurrentStateCard } from "@/features/context-timeline/components/current-state-card";
 import { TimelineCard } from "@/features/context-timeline/components/timeline-card";
 import {
   TimelineFilters,
@@ -38,6 +39,12 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
     [workspaceId, kindsKey, sourceKindsKey],
   );
 
+  // 현재 상황 카드는 곁가지입니다. 못 받아도 타임라인은 그대로 보여주도록 오류는 무시합니다.
+  const { data: contextStore } = useAsync(
+    (signal) => api.getContextStore(workspaceId, signal),
+    [workspaceId],
+  );
+
   const groups = useMemo(() => groupByDate(data ?? []), [data]);
   const hasFilter = filters.kinds.length > 0 || filters.sourceKinds.length > 0;
 
@@ -66,6 +73,8 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
         title="Timeline"
         description="결정과 이벤트가 쌓인 순서를 시간축으로 따라갑니다."
       />
+
+      {contextStore ? <CurrentStateCard store={contextStore} className="mb-6" /> : null}
 
       <TimelineFilters value={filters} onChange={setFilters} />
 

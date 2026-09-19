@@ -2,6 +2,7 @@ import type {
   AnswerSource,
   ProcessingStage,
   ContextItem,
+  ContextStore,
   KnowledgeGraph,
   Source,
   SourceContent,
@@ -386,4 +387,57 @@ export const fallbackAnswer = {
 export const stageSequence: Record<SourceKind, ProcessingStage[]> = {
   document: ["uploaded", "analyzing", "graphing", "completed"],
   meeting: ["uploaded", "transcribing", "analyzing", "graphing", "completed"],
+};
+
+/** 위 타임라인을 바탕으로 한 현재 상황. 대체된 결정과 해결된 이슈는 빠져 있습니다. */
+export const contextStore: ContextStore = {
+  subject: "맥락이 PoC",
+  summary:
+    "회의 녹음과 문서 업로드에서 결정·이슈·이벤트를 뽑아 Timeline과 Graph로 보여주는 PoC입니다.",
+  currentState:
+    "검색은 벡터에 그래프 이웃을 더한 Hybrid retrieval로 가기로 했고, 저장소 4종 구성은 확정됐습니다. 슬랙·지라 연동은 이번 PoC 범위에서 빠졌습니다.",
+  openIssues: [
+    {
+      title: "그래프 노드가 늘면 화면이 복잡해짐",
+      description: "노드가 스무 개를 넘으면 라벨이 겹쳐 읽기 어렵습니다.",
+      sourceRefs: ["노드가 많아지면 라벨이 서로 겹친다"],
+      sourceId: "src-tech-review",
+      decidedAt: null,
+      assignee: null,
+      dueAt: null,
+    },
+  ],
+  decisions: [
+    {
+      title: "Hybrid retrieval(벡터 + 그래프) 채택",
+      description: "벡터 검색 결과를 그래프 이웃으로 확장해 근거 후보를 넓힙니다.",
+      sourceRefs: ["벡터 검색만으로는 부족하니 그래프 이웃까지 넓히자"],
+      sourceId: "src-tech-review",
+      decidedAt: "2026-09-11",
+      assignee: null,
+      dueAt: null,
+    },
+    {
+      title: "PoC 범위를 회의 녹음과 문서 업로드로 한정",
+      description: "슬랙·지라 연동은 이번 PoC에서 제외합니다.",
+      sourceRefs: ["슬랙과 지라 연동은 이번에는 빼기로 했습니다"],
+      sourceId: "src-kickoff",
+      decidedAt: "2026-09-08",
+      assignee: null,
+      dueAt: null,
+    },
+  ],
+  nextActions: [
+    {
+      title: "Timeline 화면에 대체 관계 표시",
+      description: "",
+      sourceRefs: ["대체된 결정은 흐리게 보여주기로"],
+      sourceId: "src-tech-review",
+      decidedAt: null,
+      assignee: "윤희원",
+      dueAt: "2026-09-17",
+    },
+  ],
+  sourceIds: ["src-kickoff", "src-tech-review"],
+  updatedAt: "2026-09-11T07:10:00Z",
 };

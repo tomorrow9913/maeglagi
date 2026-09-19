@@ -134,6 +134,36 @@ export type ContextItem = {
   supersededBy?: string;
 };
 
+/** Context Store의 한 항목. 근거가 된 원문 인용을 함께 가집니다. */
+export type ContextStoreItem = {
+  title: string;
+  description: string;
+  /** 이 항목을 뒷받침하는 원문 문장 */
+  sourceRefs: string[];
+  sourceId: string | null;
+  /** 결정일 (결정에만 있습니다) */
+  decidedAt: string | null;
+  /** 담당자와 기한 (할 일에만 있습니다) */
+  assignee: string | null;
+  dueAt: string | null;
+};
+
+/**
+ * 프로젝트의 현재 상황. Graph가 업무 세계의 구조라면 Context Store는 지금의 상태를 담당합니다.
+ * 새 소스가 분석될 때마다 갱신되고, 대체된 결정과 해결된 이슈는 여기서 빠집니다.
+ */
+export type ContextStore = {
+  subject: string;
+  summary: string;
+  currentState: string;
+  openIssues: ContextStoreItem[];
+  /** 아직 유효한 결정만 담습니다. 대체된 결정은 타임라인에서 볼 수 있습니다. */
+  decisions: ContextStoreItem[];
+  nextActions: ContextStoreItem[];
+  sourceIds: string[];
+  updatedAt: string;
+};
+
 export type ContextTimelineQuery = {
   kinds?: ContextKind[];
   /** 근거 소스의 종류로 거릅니다. 비우면 전체입니다. */
