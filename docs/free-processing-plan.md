@@ -1,6 +1,6 @@
 # 무료 배포에서 녹음·문서 처리
 
-상태: 검토안. 현재 운영 API에는 Celery broker와 별도 worker가 연결되어 있지 않습니다. 아래 방식은 아직 구현·활성화하지 않았습니다. 리전과 무료 플랜은 유지합니다.
+상태: 보류된 대안. 사용자가 Redis와 Celery worker를 별도 Docker 서버에서 운영하기로 결정했습니다. 현재 권장 경로는 [Docker Compose 배포](docker-deployment.md)의 Render·Vercel 혼합 구성입니다. 아래 API 내 실행기는 구현·활성화하지 않으며, 별도 worker를 운영하지 못할 경우의 검토 기록으로 남깁니다. 리전과 무료 플랜은 유지합니다.
 
 ## 권장 구성
 

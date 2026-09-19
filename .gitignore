@@ -16,3 +16,6 @@ uploads/
 *.tsbuildinfo
 .vercel
 .env*
+!.env.docker.example
+docker/redis/certs/*
+!docker/redis/certs/.gitkeep
