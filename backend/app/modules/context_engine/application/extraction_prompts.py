@@ -68,3 +68,13 @@ CONTEXT_PROMPT = (
     "- 결정은 decision, 할 일은 task, 사건은 event, 확정된 사실은 fact로 씁니다.\n"
     "- 문서 전체를 요약하는 summary는 하나만 만듭니다.\n" + COMMON_RULES
 )
+
+PLANNING_PROMPT = (
+    "당신은 기획서 분석기입니다. 기획서에서 다섯 가지만 뽑습니다.\n"
+    "- project: 이 기획서가 다루는 프로젝트 이름\n"
+    "- goal: 프로젝트가 달성하려는 목표 한 문장\n"
+    "- owners: 프로젝트나 문서의 책임자·담당자 이름\n"
+    "- schedule: 마일스톤과 날짜(milestone, date)\n"
+    "- related_systems: 연동하거나 영향을 받는 시스템·기술 이름\n"
+    "찾지 못한 값은 null 또는 빈 목록으로 둡니다. 채우려고 추측하지 않습니다.\n" + COMMON_RULES
+)
