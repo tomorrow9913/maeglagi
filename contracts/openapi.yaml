@@ -13,8 +13,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /api/v1/workspaces/{workspaceId}/graph:
+    get:
+      operationId: getKnowledgeGraph
+      summary: Knowledge graph of a workspace, as of a moment in time
+      description: >
+        Nodes are entities, edges are relations valid at `at` (default now). A relation with no
+        stated start or end counts as open. A decision replaced by a later one has `supersededBy`
+        and is joined to its successor by a `supersedes` edge (successor -> replaced).
+      parameters:
+        - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: at
+          in: query
+          required: false
+          description: ISO 8601 instant. Defaults to now.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The graph
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeGraph"
+        "404": { description: Workspace not found }
+        "503": { description: Graph store is not configured }
 components:
   schemas:
+    KnowledgeGraph:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/GraphNode" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/GraphEdge" }
+    GraphNode:
+      type: object
+      required: [id, type, kind, label, degree, sources]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [person, project, decision, task, event]
+          description: Frontend entity type. Organization maps to person; Technology to project; Meeting, Event, Issue and Document to event.
+        kind:
+          type: string
+          enum: [Person, Project, Organization, Meeting, Document, Issue, Task, Decision, Event, Technology]
+        label: { type: string }
+        degree: { type: integer, description: Number of edges drawn at `at` }
+        sources:
+          type: array
+          items: { $ref: "#/components/schemas/GraphSource" }
+        supersededBy:
+          type: string
+          description: Id of the decision that explicitly replaced this decision
+    GraphSource:
+      type: object
+      required: [id, kind, title]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        title: { type: string }
+    GraphEdge:
+      type: object
+      required: [id, source, target, type]
+      properties:
+        id: { type: string }
+        source: { type: string }
+        target: { type: string }
+        type:
+          type: string
+          enum: [participates_in, decided, assigned_to, blocks, relates_to, supersedes]
+          description: BLOCKED_BY is drawn reversed (blocker -> blocked). Relations with no frontend equivalent are relates_to.
+        kind:
+          type: string
+          description: Exact ontology relation, or SUPERSEDES for a supersedes edge
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
     Health:
       type: object
       required: [status, service, version]

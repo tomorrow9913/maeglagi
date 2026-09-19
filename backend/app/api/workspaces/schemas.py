@@ -80,6 +80,45 @@ class CredentialResponse(BaseModel):
     updated_at: datetime = Field(serialization_alias="updatedAt")
 
 
+class GraphSourceResponse(BaseModel):
+    """Where an entity was seen, so the UI can jump to the original."""
+
+    id: UUID
+    kind: str
+    title: str
+
+
+class GraphNodeResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    # One of the frontend's five entity types; `kind` keeps the exact ontology kind.
+    type: str
+    kind: str
+    label: str
+    degree: int
+    sources: list[GraphSourceResponse]
+    superseded_by: str | None = Field(default=None, serialization_alias="supersededBy")
+
+
+class GraphEdgeResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    source: str
+    target: str
+    # One of the frontend's relation types; `kind` keeps the exact ontology relation.
+    type: str
+    kind: str | None = None
+    valid_from: str | None = Field(default=None, serialization_alias="validFrom")
+    valid_to: str | None = Field(default=None, serialization_alias="validTo")
+
+
+class KnowledgeGraphResponse(BaseModel):
+    nodes: list[GraphNodeResponse]
+    edges: list[GraphEdgeResponse]
+
+
 class ContextItemSourceResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
