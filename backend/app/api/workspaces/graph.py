@@ -1,11 +1,10 @@
 from collections import Counter
-from collections.abc import AsyncIterator
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -16,7 +15,6 @@ from app.api.workspaces.schemas import (
     KnowledgeGraphResponse,
 )
 from app.auth import CurrentUser
-from app.core.config import Settings, get_settings
 from app.core.database import get_session
 from app.modules.context_engine.application.entity_resolution import entity_id
 from app.modules.context_engine.application.temporal import as_utc
@@ -61,17 +59,8 @@ RELATION_TYPE = {
 }
 
 
-async def get_graph_store(
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> AsyncIterator[Neo4jGraphStore | None]:
-    if not settings.neo4j_enabled:
-        yield None
-        return
-    store = Neo4jGraphStore.from_settings(settings)
-    try:
-        yield store
-    finally:
-        await store.close()
+def get_graph_store(request: Request) -> Neo4jGraphStore | None:
+    return request.app.state.graph_store
 
 
 GraphStore = Annotated[Neo4jGraphStore | None, Depends(get_graph_store)]
@@ -137,14 +126,14 @@ async def get_knowledge_graph(
         UUID(str(identifier)) for row in rows for identifier in row["source_ids"] if identifier
     }
     sources: dict[str, Source] = {}
-    if wanted:
-        found = await session.exec(
-            select(Source).where(
-                Source.id.in_(wanted),  # type: ignore[attr-defined]
-                Source.workspace_id == workspace.id,
-                Source.owner_id == user.id,
-            )
+    if include_materials or wanted:
+        source_query = select(Source).where(
+            Source.workspace_id == workspace.id,
+            Source.owner_id == user.id,
         )
+        if not include_materials:
+            source_query = source_query.where(Source.id.in_(wanted))  # type: ignore[attr-defined]
+        found = await session.exec(source_query)
         sources = {str(source.id): source for source in found.all()}
 
     nodes = [
@@ -256,16 +245,9 @@ async def get_knowledge_graph(
                 )
             )
     if include_materials:
-        material_sources = (
-            await session.exec(
-                select(Source).where(
-                    Source.workspace_id == workspace_id, Source.owner_id == user.id
-                )
-            )
-        ).all()
         visible = {
             source.id: source
-            for source in material_sources
+            for source in sources.values()
             if source.status == SourceStatus.SUCCEEDED
             or (source.kind == "meeting" and source.review_state == ReviewState.CONFIRMED)
         }
@@ -279,6 +261,17 @@ async def get_knowledge_graph(
                 select(SourcePerson).where(SourcePerson.workspace_id == workspace_id)
             )
         ).all()
+        evidence_by_source: dict[str, list[str]] = {}
+        for row in rows:
+            if row["kind"] in {"Event", "Decision", "Task", "Issue", "Technology"}:
+                for source_id in row.get("source_ids", []):
+                    evidence_by_source.setdefault(str(source_id), []).append(str(row["id"]))
+        projects_by_source: dict[UUID, list[SourceProject]] = {}
+        for item in source_projects:
+            projects_by_source.setdefault(item.source_id, []).append(item)
+        people_by_source: dict[UUID, list[SourcePerson]] = {}
+        for item in source_people:
+            people_by_source.setdefault(item.source_id, []).append(item)
         for source in visible.values():
             node_id = str(
                 entity_id(
@@ -301,12 +294,7 @@ async def get_knowledge_graph(
                     source_id=source.id,
                 )
             )
-            for row in rows:
-                if row["kind"] not in {"Event", "Decision", "Task", "Issue", "Technology"}:
-                    continue
-                if str(source.id) not in {str(item) for item in row.get("source_ids", [])}:
-                    continue
-                extracted_id = str(row["id"])
+            for extracted_id in evidence_by_source.get(str(source.id), []):
                 edges.append(
                     GraphEdgeResponse(
                         id=str(
@@ -321,8 +309,8 @@ async def get_knowledge_graph(
                         type="relates_to",
                     )
                 )
-            for item in source_projects:
-                if item.source_id == source.id and item.project_id in project_nodes:
+            for item in projects_by_source.get(source.id, []):
+                if item.project_id in project_nodes:
                     edges.append(
                         explicit_edge(
                             node_id, project_nodes[item.project_id], "RELATED_TO", "project"
@@ -330,7 +318,7 @@ async def get_knowledge_graph(
                     )
             if (
                 source.project_id
-                and not any(item.source_id == source.id for item in source_projects)
+                and source.id not in projects_by_source
                 and source.project_id in project_nodes
             ):
                 edges.append(
@@ -338,8 +326,8 @@ async def get_knowledge_graph(
                         node_id, project_nodes[source.project_id], "RELATED_TO", "project"
                     )
                 )
-            for item in source_people:
-                if item.source_id == source.id and item.person_id in person_nodes:
+            for item in people_by_source.get(source.id, []):
+                if item.person_id in person_nodes:
                     kind = "CREATED" if item.role == "author" else "PARTICIPATED_IN"
                     edges.append(
                         explicit_edge(person_nodes[item.person_id], node_id, kind, item.role)

@@ -52,6 +52,9 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
+  cloneDemoWorkspace: (signal) =>
+    apiFetch<Workspace>("/demo/clone", { method: "POST", signal }),
+
   listProviders: (signal) => apiFetch<AiProvider[]>("/ai/providers", { signal }),
 
   listWorkspaceProviders: (workspaceId, signal) =>

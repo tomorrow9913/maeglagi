@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import sentry_sdk
+
 from app.modules.context_engine.domain.ontology import RelationKind
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 
@@ -32,15 +34,17 @@ class GraphReader:
         self.store = store
 
     async def nodes(self, workspace_id: UUID) -> list[dict[str, Any]]:
-        return await self.store.execute(_NODES, {"workspace_id": str(workspace_id)})
+        with sentry_sdk.start_span(op="db.neo4j.query", name="graph.nodes"):
+            return await self.store.execute(_NODES, {"workspace_id": str(workspace_id)})
 
     async def edges(self, workspace_id: UUID, at: datetime) -> list[dict[str, Any]]:
         """Relations that were valid at `at` (timezone-aware)."""
-        return await self.store.execute(
-            _EDGES,
-            {
-                "workspace_id": str(workspace_id),
-                "at": at.isoformat(),
-                "kinds": [kind.value for kind in RelationKind],
-            },
-        )
+        with sentry_sdk.start_span(op="db.neo4j.query", name="graph.edges"):
+            return await self.store.execute(
+                _EDGES,
+                {
+                    "workspace_id": str(workspace_id),
+                    "at": at.isoformat(),
+                    "kinds": [kind.value for kind in RelationKind],
+                },
+            )

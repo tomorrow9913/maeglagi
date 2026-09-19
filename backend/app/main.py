@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.middleware import register_middlewares
+from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 
 
 class CORSFastAPI(FastAPI):
@@ -32,9 +33,17 @@ class CORSFastAPI(FastAPI):
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # Initialize shared DB, queue, object, vector and graph clients here.
-    yield
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    # Keep the async driver within this app's event loop and close it on shutdown.
+    settings: Settings = application.state.settings
+    store = Neo4jGraphStore.from_settings(settings) if settings.neo4j_enabled else None
+    application.state.graph_store = store
+    try:
+        yield
+    finally:
+        application.state.graph_store = None
+        if store is not None:
+            await store.close()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -49,6 +58,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url="/redoc" if expose_api_docs else None,
         openapi_url="/openapi.json" if expose_api_docs else None,
     )
+    application.state.settings = settings
+    application.state.graph_store = None
     register_middlewares(application, settings)
     application.include_router(api_router, prefix=settings.api_v1_prefix)
     return application

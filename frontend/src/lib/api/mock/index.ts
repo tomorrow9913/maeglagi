@@ -320,6 +320,10 @@ export const mockApi: MaeglagiApi = {
     return { ...workspace };
   },
 
+  async cloneDemoWorkspace() {
+    throw new ApiError(501, "데모 복사는 실제 API 모드에서만 사용할 수 있습니다.");
+  },
+
   async listProviders(signal) {
     await delay(MOCK_LATENCY_MS, signal);
     return BOOTSTRAP_AI_PROVIDERS.map<AiProvider>((provider) => ({
