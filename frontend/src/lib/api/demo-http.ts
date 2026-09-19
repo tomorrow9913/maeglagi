@@ -1,4 +1,4 @@
-import { ApiError, apiPublicBlob, apiPublicFetch } from "./client";
+import { ApiError, apiFetch, apiPublicBlob, apiPublicFetch } from "./client";
 import type { MaeglagiApi } from "./contract";
 import { httpApi } from "./http";
 import type { ContextItem, ContextStore, KnowledgeGraph, Source, SourceContent, Workspace, WorkspacePerson, WorkspaceProject } from "./types";
@@ -8,6 +8,8 @@ const loginRequired = () => { throw new ApiError(403, "데모는 읽기 전용�
 /** Public demo data is read from the configured database workspace, never fixtures. */
 export const demoHttpApi: MaeglagiApi = {
   ...httpApi,
+  // This explicit write uses the authenticated client, unlike every public demo read below.
+  cloneDemoWorkspace: (signal) => apiFetch<Workspace>("/demo/clone", { method: "POST", signal }),
   listWorkspaces: async (signal) => [await apiPublicFetch<Workspace>("/demo/workspace", { signal })],
   getWorkspace: (_id, signal) => apiPublicFetch<Workspace>("/demo/workspace", { signal }),
   listPeople: (_id, signal) => apiPublicFetch<WorkspacePerson[]>("/demo/people", { signal }),

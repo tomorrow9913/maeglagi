@@ -2,8 +2,8 @@
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
+import { DemoAuthGuidance } from "@/components/layout/demo-auth-guidance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useApi, useDemoMode } from "@/lib/api/context";
@@ -90,7 +90,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   }, [isDemo, people.length, projects.length]);
   const selectedOwner = people.find((person) => person.id === projectForm.ownerPersonId);
   const invalidOwner = Boolean(projectForm.ownerPersonId && (!selectedOwner || selectedOwner.archivedAt));
-  if (isDemo) return <div className="space-y-6"><PageHeader title="프로젝트와 참여자" description="공개 데모의 실제 워크스페이스 데이터를 읽기 전용으로 보여줍니다." /><p className="text-sm text-muted-foreground">변경하려면 <Link href="/login" className="underline">로그인</Link>해 내 워크스페이스를 사용하세요.</p><section className="space-y-2"><h2 className="text-lg font-semibold">프로젝트</h2>{projects.map((project) => <div key={project.id} className="space-y-1 rounded-lg border p-3 text-sm"><p className="font-medium">{project.name}{project.archivedAt ? " · 보관됨" : ""}</p>{project.goal && <p>{project.goal}</p>}<p className="text-muted-foreground">참여자: {(project.participantIds ?? []).map((id) => people.find((person) => person.id === id)?.name ?? "목록에 없음").join(", ") || "아직 없음"}</p></div>)}</section><section className="space-y-2"><h2 className="text-lg font-semibold">참여자</h2>{people.map((person) => <div key={person.id} className="rounded-lg border p-3 text-sm"><span className="font-medium">{person.name}</span>{person.email && <span className="ml-2 text-muted-foreground">{person.email}</span>}{person.role && <span className="ml-2 text-muted-foreground">{person.role}</span>}</div>)}</section></div>;
+  if (isDemo) return <div className="space-y-6"><PageHeader title="프로젝트와 참여자" description="공개 데모의 실제 워크스페이스 데이터를 읽기 전용으로 보여줍니다." /><DemoAuthGuidance /><section className="space-y-2"><h2 className="text-lg font-semibold">프로젝트</h2>{projects.map((project) => <div key={project.id} className="space-y-1 rounded-lg border p-3 text-sm"><p className="font-medium">{project.name}{project.archivedAt ? " · 보관됨" : ""}</p>{project.goal && <p>{project.goal}</p>}<p className="text-muted-foreground">참여자: {(project.participantIds ?? []).map((id) => people.find((person) => person.id === id)?.name ?? "목록에 없음").join(", ") || "아직 없음"}</p></div>)}</section><section className="space-y-2"><h2 className="text-lg font-semibold">참여자</h2>{people.map((person) => <div key={person.id} className="rounded-lg border p-3 text-sm"><span className="font-medium">{person.name}</span>{person.email && <span className="ml-2 text-muted-foreground">{person.email}</span>}{person.role && <span className="ml-2 text-muted-foreground">{person.role}</span>}</div>)}</section></div>;
   return <div className="flex flex-col gap-8">
     <PageHeader title="참여자와 프로젝트" description="워크스페이스에서 여러 프로젝트와 회의 참여자를 관리합니다." />
     <section className="space-y-4" aria-labelledby="projects-heading">

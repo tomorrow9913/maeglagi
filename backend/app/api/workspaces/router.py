@@ -14,13 +14,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.jobs.schemas import JobResponse
-from app.api.workspaces.associations import (
-    project_ids as source_project_ids,
-)
-from app.api.workspaces.associations import (
-    replace_projects,
-    source_people,
-)
+from app.api.workspaces.associations import PersonAssociation, replace_projects
 from app.api.workspaces.associations import (
     router as associations_router,
 )
@@ -71,7 +65,13 @@ from app.modules.workspaces.domain.source_state import (
     ReviewState,
     SourceStatus,
 )
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    ProviderCredential,
+    Source,
+    SourcePerson,
+    SourceProject,
+    Workspace,
+)
 
 router = APIRouter()
 router.include_router(credentials_router)
@@ -209,14 +209,43 @@ async def list_sources(
         .order_by(Source.created_at.desc())
     )
     sources = list(result.all())
+    if not sources:
+        return []
+    source_ids = [source.id for source in sources]
+    project_rows = (
+        await session.exec(
+            select(SourceProject)
+            .where(
+                SourceProject.workspace_id == workspace_id,
+                SourceProject.source_id.in_(source_ids),  # type: ignore[attr-defined]
+            )
+            .order_by(SourceProject.position)
+        )
+    ).all()
+    projects_by_source: dict[UUID, list[UUID]] = {}
+    for row in project_rows:
+        projects_by_source.setdefault(row.source_id, []).append(row.project_id)
+    person_rows = (
+        await session.exec(
+            select(SourcePerson).where(
+                SourcePerson.workspace_id == workspace_id,
+                SourcePerson.source_id.in_(source_ids),  # type: ignore[attr-defined]
+            )
+        )
+    ).all()
+    people_by_source: dict[UUID, list[dict[str, str]]] = {}
+    for row in person_rows:
+        people_by_source.setdefault(row.source_id, []).append(
+            PersonAssociation(person_id=row.person_id, role=row.role).model_dump(
+                by_alias=True, mode="json"
+            )
+        )
     return [
         SourceResponse.model_validate(source, from_attributes=True).model_copy(
             update={
-                "project_ids": await source_project_ids(session, source),
-                "associations": [
-                    item.model_dump(by_alias=True, mode="json")
-                    for item in await source_people(session, source)
-                ],
+                "project_ids": projects_by_source.get(source.id)
+                or ([source.project_id] if source.project_id else []),
+                "associations": people_by_source.get(source.id, []),
                 "has_recording": source.kind == "meeting"
                 and source.content_type.startswith(("audio/", "video/")),
             }
