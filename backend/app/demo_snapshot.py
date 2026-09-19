@@ -214,9 +214,7 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
         )
         if context.get("chunk_id") is not None:
             chunk_id = _uuid(context["chunk_id"], "context chunk ID")
-            _require(
-                chunk_id in chunk_ids, "Orphan context chunk"
-            )
+            _require(chunk_id in chunk_ids, "Orphan context chunk")
             _require(
                 chunk_sources[chunk_id] == context["source_id"],
                 "Context chunk belongs to another source",
