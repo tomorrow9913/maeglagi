@@ -99,6 +99,7 @@ class IngestionPipeline:
         )
         if chosen is not None:
             credentials = [c for c in credentials if c.provider == chosen.provider]
+        needs_key_match = chosen is not None and len(credentials) > 1
         for credential in credentials:
             adapter = provider_registry.get(credential.provider)
             if adapter is None or capability not in adapter.capabilities:
@@ -108,16 +109,17 @@ class IngestionPipeline:
             except CredentialUnavailableError:
                 continue
             if chosen is not None:
-                try:
-                    offered = await adapter.list_model_infos(api_key)
-                except ProviderError:
-                    continue
-                if not any(
-                    info.id == chosen.model
-                    and (info.shutdown_date is None or info.shutdown_date > date.today())
-                    for info in offered
-                ):
-                    continue
+                if needs_key_match:
+                    try:
+                        offered = await adapter.list_model_infos(api_key)
+                    except ProviderError:
+                        continue
+                    if not any(
+                        info.id == chosen.model
+                        and (info.shutdown_date is None or info.shutdown_date > date.today())
+                        for info in offered
+                    ):
+                        continue
                 model = chosen.model
             elif legacy_embedding:
                 # Old chunks have no model metadata. They used the flat deployment setting;
