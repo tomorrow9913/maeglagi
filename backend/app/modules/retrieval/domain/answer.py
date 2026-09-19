@@ -11,7 +11,7 @@ class AnswerSource(BaseModel):
 
     index: int  # matches the [n] the answer cites
     source_id: UUID = Field(serialization_alias="sourceId")
-    chunk_id: UUID = Field(serialization_alias="chunkId")
+    chunk_id: UUID | None = Field(default=None, serialization_alias="chunkId")
     kind: str
     title: str
     excerpt: str

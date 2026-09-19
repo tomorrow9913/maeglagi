@@ -12,7 +12,7 @@ import { MeetingCapture } from "@/features/source-ingestion/components/meeting-c
 import { MeetingReviewDialog } from "@/features/source-ingestion/components/meeting-review-dialog";
 import { SourceList } from "@/features/source-ingestion/components/source-list";
 import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
-import { UploadDropzone } from "@/features/source-ingestion/components/upload-dropzone";
+import { SourceFileUpload } from "@/features/source-ingestion/components/source-file-upload";
 import { UploadQueue } from "@/features/source-ingestion/components/upload-queue";
 import { useJobPolling } from "@/features/source-ingestion/hooks/use-job-polling";
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
@@ -93,6 +93,7 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
       if (job.status === "awaiting_review") { toast.info("회의 대본 검토가 준비됐습니다."); setReviewSourceId(job.sourceId); return; }
       if (job.status === "failed") {
         toast.error("소스 처리에 실패했습니다.");
+        if (job.sourceKind === "meeting") setReviewSourceId(job.sourceId);
         return;
       }
 
@@ -115,13 +116,13 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
       {!isDemo && <Tabs defaultValue="document">
         <TabsList>
           <TabsTrigger value="document" disabled={meetingBusy}>
-            문서 업로드
+            문서·녹음 파일
           </TabsTrigger>
           <TabsTrigger value="meeting">회의 녹음</TabsTrigger>
         </TabsList>
 
         <TabsContent value="document" className="mt-4">
-          <UploadDropzone onFilesSelected={uploadDocuments} />
+          <SourceFileUpload workspaceId={workspaceId} onDocuments={uploadDocuments} onAudio={uploadRecording} />
         </TabsContent>
 
         <TabsContent value="meeting" className="mt-4">

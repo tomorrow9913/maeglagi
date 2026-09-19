@@ -54,10 +54,14 @@ Supabase가 인증, PostgreSQL, 비공개 Object Storage를 담당합니다. 프
 Supabase Auth 세션을 쿠키로 유지하고, FastAPI는 전달받은 access token을
 `/auth/v1/user`로 검증합니다. 업로드는 같은 사용자 토큰으로 Storage에 전달되어
 `storage.objects`의 RLS 정책을 그대로 적용받습니다. 비동기 worker만 업로드된 원본을
-다시 읽기 위해 `SUPABASE_SERVICE_ROLE_KEY`를 사용하며, 이 값은 Render 서버 환경에만
+다시 읽기 위해 `SUPABASE_SERVICE_ROLE_KEY`를 사용하며, 이 값은 API·워커 서버 환경에만
 두고 프론트엔드에는 절대 노출하지 않습니다.
 
 ## 배포
+
+Docker로 API·프론트·워커를 함께 실행하거나 Redis·워커만 선택해 Render/Vercel과
+연결하려면 [Docker Compose 배포 가이드](docs/docker-deployment.md)를 사용하세요.
+Supabase Auth·PostgreSQL·Storage·Vault는 기존 Supabase 프로젝트에 연결합니다.
 
 백엔드는 저장소 루트의 `render.yaml`을 Render Blueprint로 가져온 뒤 다음 값을 설정합니다.
 

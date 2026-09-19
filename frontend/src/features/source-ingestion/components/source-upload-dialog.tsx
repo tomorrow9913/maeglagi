@@ -14,7 +14,7 @@ import { useSourceUpload } from "../hooks/use-source-upload";
 import { useJobPolling } from "../hooks/use-job-polling";
 import { MeetingCapture } from "./meeting-capture";
 import { MeetingReviewDialog } from "./meeting-review-dialog";
-import { UploadDropzone } from "./upload-dropzone";
+import { SourceFileUpload } from "./source-file-upload";
 import { UploadQueue } from "./upload-queue";
 import type { ProcessingJob } from "@/lib/api";
 
@@ -62,7 +62,7 @@ export function SourceUploadDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{mode === "meeting" ? "회의 녹음 및 받아쓰기" : "파일 업로드"}</DialogTitle>
+          <DialogTitle>{mode === "meeting" ? "회의 녹음 및 받아쓰기" : "문서·녹음 파일 업로드"}</DialogTitle>
           <DialogDescription>
             이 워크스페이스에 소스를 추가하고 Ask에서 이어서 질문하세요.
           </DialogDescription>
@@ -75,7 +75,7 @@ export function SourceUploadDialog({
             onBusyChange={setRecordingBusy}
           />
         ) : (
-          <UploadDropzone onFilesSelected={uploadDocuments} />
+          <SourceFileUpload workspaceId={workspaceId} onDocuments={uploadDocuments} onAudio={uploadRecording} />
         )}
         <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} />
         {busy ? (

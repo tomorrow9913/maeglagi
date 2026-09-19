@@ -24,7 +24,8 @@ export function AnswerPreview() {
   const router = useRouter();
 
   const openSource = (source: AnswerSource) => {
-    const query = new URLSearchParams({ source: source.sourceId, chunk: source.chunkId });
+    const query = new URLSearchParams({ source: source.sourceId });
+    if (source.chunkId) query.set("chunk", source.chunkId);
     router.push(`${demoPath("sources")}?${query.toString()}`);
   };
 
