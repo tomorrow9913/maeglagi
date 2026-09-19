@@ -3,6 +3,7 @@ name: maeglagi
 # Supabase Auth, Storage, and PostgreSQL remain external. See docs/docker-deployment.md.
 x-backend-env: &backend-env
   APP_ENV: ${APP_ENV:-production}
+  DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-self_hosted}
   APP_SECRET_KEY: ${APP_SECRET_KEY:?Set APP_SECRET_KEY in .env.docker}
   DATABASE_URL: ${DATABASE_URL:?Set the Supabase PostgreSQL connection in .env.docker}
   SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL in .env.docker}
@@ -17,6 +18,7 @@ x-backend-env: &backend-env
   NEO4J_USERNAME: ${NEO4J_USERNAME:-}
   NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+  OLLAMA_ALLOWED_PRIVATE_HOSTS: ${OLLAMA_ALLOWED_PRIVATE_HOSTS:-[]}
   LLM_PROVIDER: ${LLM_PROVIDER:-mock}
   DEMO_WORKSPACE_ID: ${DEMO_WORKSPACE_ID:-}
   CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
@@ -32,6 +34,8 @@ x-backend: &backend
     dockerfile: Dockerfile
   image: maeglagi-backend:local
   environment: *backend-env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   restart: unless-stopped
 
 services:

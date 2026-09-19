@@ -26,7 +26,10 @@ from app.modules.context_engine.application.provider import (
     StructuredOutputResponse,
 )
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
-from app.modules.context_engine.infrastructure.provider_registry import provider_registry
+from app.modules.context_engine.infrastructure.provider_registry import (
+    adapter_for_credential,
+    provider_registry,
+)
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/ai")
@@ -41,7 +44,6 @@ async def _workspace_credentials(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
     result = await session.exec(
         select(ProviderCredential).where(
-            ProviderCredential.workspace_id == workspace_id,
             ProviderCredential.owner_id == user.id,
             ProviderCredential.status == "active",
         )
@@ -53,27 +55,29 @@ async def _provider_with_credential(
     provider_id: str,
     capability: str,
     credential_label: str | None,
+    credential_id: str | None,
     credentials: list[ProviderCredential],
     session: AsyncSession,
 ) -> tuple[ProviderAdapter, str]:
-    adapter = provider_registry.get(provider_id)
-    if adapter is None or capability not in adapter.capabilities:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"{capability}을 지원하지 않는 provider입니다.",
-        )
     credential = next(
         (
             item
             for item in credentials
             if item.provider == provider_id
+            and (credential_id is None or str(item.id) == credential_id)
             and (credential_label is None or item.label == credential_label)
-            and (credential_label is not None or item.is_default)
+            and (credential_label is not None or credential_id is not None or item.is_default)
         ),
         None,
     )
     if credential is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "사용 가능한 API key가 없습니다.")
+    adapter = adapter_for_credential(credential)
+    if adapter is None or capability not in adapter.capabilities:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"{capability}을 지원하지 않는 provider입니다.",
+        )
     try:
         api_key = await resolve_credential_secret(session, credential)
     except CredentialUnavailableError as exc:
@@ -91,31 +95,38 @@ async def list_available_providers(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> list[ProviderCatalogItem]:
     credentials = await _workspace_credentials(workspace_id, user, session)
-    by_provider = {credential.provider: credential for credential in credentials}
     items: list[ProviderCatalogItem] = []
     for adapter in provider_registry.all():
-        credential = by_provider.get(adapter.id)
-        models: list[str] = []
-        if credential is not None:
+        matching = [credential for credential in credentials if credential.provider == adapter.id]
+        models: set[str] = set()
+        for credential in matching:
             try:
                 api_key = await resolve_credential_secret(session, credential)
-                infos = await adapter.list_model_infos(api_key)
+                configured_adapter = (
+                    adapter_for_credential(credential)
+                    if credential.provider == "ollama"
+                    else adapter
+                )
+                infos = (
+                    await configured_adapter.list_model_infos(api_key) if configured_adapter else []
+                )
                 today = date.today()
-                models = sorted(
+                models.update(
                     info.id
                     for info in infos
                     if info.shutdown_date is None or info.shutdown_date > today
                 )
             except (ProviderError, CredentialUnavailableError):
-                models = []
+                continue
         items.append(
             ProviderCatalogItem(
                 id=adapter.id,
                 display_name=adapter.display_name,
                 capabilities=list(adapter.capabilities),
-                configured=credential is not None,
-                auth_mode="none" if adapter.id == "ollama" else "apiKey",
-                models=models,
+                configured=bool(matching),
+                auth_mode="optionalApiKey" if adapter.id == "ollama" else "apiKey",
+                requires_base_url=adapter.id == "ollama",
+                models=sorted(models),
                 default_models=settings.provider_default_models.get(adapter.id, {}),
             )
         )
@@ -128,7 +139,7 @@ async def chat(
 ) -> ChatResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
     adapter, api_key = await _provider_with_credential(
-        body.provider, "chat", body.credential_label, credentials, session
+        body.provider, "chat", body.credential_label, body.credential_id, credentials, session
     )
     request = ChatRequest(
         messages=body.messages,
@@ -149,7 +160,7 @@ async def embedding(
 ) -> EmbeddingResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
     adapter, api_key = await _provider_with_credential(
-        body.provider, "embedding", body.credential_label, credentials, session
+        body.provider, "embedding", body.credential_label, body.credential_id, credentials, session
     )
     request = EmbeddingRequest(
         input=body.input,
@@ -172,7 +183,12 @@ async def structured_output(
 ) -> StructuredOutputResponse:
     credentials = await _workspace_credentials(workspace_id, user, session)
     adapter, api_key = await _provider_with_credential(
-        body.provider, "structuredOutput", body.credential_label, credentials, session
+        body.provider,
+        "structuredOutput",
+        body.credential_label,
+        body.credential_id,
+        credentials,
+        session,
     )
     request = StructuredOutputRequest(
         messages=body.messages,

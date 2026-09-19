@@ -43,7 +43,11 @@ from app.api.workspaces.source_content import router as source_content_router
 from app.api.workspaces.source_events import router as source_events_router
 from app.auth import CurrentUser, bearer
 from app.core.config import Settings, get_settings
-from app.core.credentials import store_credential_secret
+from app.core.credentials import (
+    CredentialUnavailableError,
+    resolve_credential_secret,
+    store_credential_secret,
+)
 from app.core.database import get_session
 from app.modules.context_engine.application.model_catalog import (
     options_for_key,
@@ -157,42 +161,105 @@ async def list_workspaces(user: CurrentUser, session: Session) -> list[Workspace
 async def create_workspace(
     body: CreateWorkspaceRequest, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
-    key = _credential_key(body.llm_provider, body.llm_api_key)
-    valid, message = await validate_provider_credential(body.llm_provider, key)
+    from app.api.workspaces.credentials import _base_url, _key_hint, _lock_account
+
+    await _lock_account(session, user.id)
+    account_credentials = list(
+        (
+            await session.exec(
+                select(ProviderCredential).where(ProviderCredential.owner_id == user.id)
+            )
+        ).all()
+    )
+    if body.credential_id is not None:
+        credential = next(
+            (
+                item
+                for item in account_credentials
+                if item.id == body.credential_id and item.status == "active"
+            ),
+            None,
+        )
+        if credential is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Credential not found")
+        if body.llm_provider is not None and body.llm_provider != credential.provider:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider mismatch")
+        if body.llm_api_key is not None or body.llm_base_url is not None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Use the saved credential")
+        try:
+            key = await resolve_credential_secret(session, credential)
+        except CredentialUnavailableError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Saved credential is unavailable"
+            ) from exc
+        provider = credential.provider
+        base_url = credential.base_url
+    else:
+        if body.llm_provider is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "credentialId or llmProvider is required"
+            )
+        provider = body.llm_provider
+        key = _credential_key(provider, body.llm_api_key)
+        base_url = _base_url(provider, body.llm_base_url)
+        credential = None
+    valid, message = await (
+        validate_provider_credential(provider, key, base_url)
+        if provider == "ollama"
+        else validate_provider_credential(provider, key)
+    )
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
-    options = await options_for_key(body.llm_provider, key)
+    options = await (
+        options_for_key(provider, key, base_url, credential.id if credential else None)
+        if provider == "ollama"
+        else options_for_key(provider, key, credential_id=credential.id)
+        if credential is not None
+        else options_for_key(provider, key)
+    )
     problems = invalid_selections(body.models or {}, options)
     if problems:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " ".join(problems))
-    workspace = Workspace(
-        owner_id=user.id,
-        name=body.name.strip(),
-        # What the user chose wins; whatever they left out gets the key's recommended model.
-        model_settings=with_recommended_defaults(
-            {role: choice.model_dump() for role, choice in (body.models or {}).items()}, options
-        ),
-    )
+    workspace = Workspace(owner_id=user.id, name=body.name.strip())
     session.add(workspace)
-    # Persist the referenced row before inserting its credential, while keeping
-    # both writes in the same transaction.
     await session.flush()
-    credential = ProviderCredential(
-        workspace_id=workspace.id,
-        owner_id=user.id,
-        provider=body.llm_provider,
-        key_hint="local" if body.llm_provider == "ollama" else key[-4:],
-        is_default=True,
-    )
-    if body.llm_provider != "ollama":
-        credential.vault_secret_id = await store_credential_secret(
-            session,
-            secret=key,
-            credential_id=credential.id,
+    if credential is None:
+        existing_labels = {item.label for item in account_credentials if item.provider == provider}
+        label = "기본"
+        suffix = 2
+        while label in existing_labels:
+            label = f"기본 {suffix}"
+            suffix += 1
+        credential = ProviderCredential(
             workspace_id=workspace.id,
-            provider=body.llm_provider,
+            owner_id=user.id,
+            provider=provider,
+            label=label,
+            key_hint=_key_hint(provider, key),
+            base_url=base_url,
+            is_default=not any(item.is_default for item in account_credentials),
         )
-    session.add(credential)
+        if key:
+            credential.vault_secret_id = await store_credential_secret(
+                session,
+                secret=key,
+                credential_id=credential.id,
+                workspace_id=workspace.id,
+                provider=provider,
+            )
+        session.add(credential)
+    # Every new workspace model choice names the credential used to preview it.
+    choices = with_recommended_defaults(
+        {
+            role: choice.model_dump(mode="json", by_alias=True)
+            for role, choice in (body.models or {}).items()
+        },
+        options,
+    )
+    workspace.model_settings = {
+        role: {**choice, "credentialId": str(credential.id)} for role, choice in choices.items()
+    }
+    session.add(workspace)
     await session.commit()
     await session.refresh(workspace)
     return _response(workspace)

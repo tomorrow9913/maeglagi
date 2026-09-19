@@ -15,7 +15,10 @@ from app.modules.context_engine.application.model_roles import (
 from app.modules.context_engine.application.provider import ModelInfo, ProviderAdapter
 from app.modules.context_engine.infrastructure.models import Chunk
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
-from app.modules.context_engine.infrastructure.provider_registry import provider_registry
+from app.modules.context_engine.infrastructure.provider_registry import (
+    adapter_for_credential,
+    provider_registry,
+)
 from app.modules.workspaces.infrastructure.models import ProviderCredential
 
 
@@ -31,26 +34,35 @@ def _defaults() -> dict[str, dict[str, str]]:
     return get_settings().provider_default_models
 
 
-async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[ModelOption]]:
+async def options_for_key(
+    provider: str,
+    api_key: str,
+    base_url: str | None = None,
+    credential_id: UUID | None = None,
+) -> dict[ModelRole, list[ModelOption]]:
     """Model options of a single key, before any workspace exists."""
-    adapter = provider_registry.get(provider)
+    adapter = (
+        provider_registry.get(provider, base_url=base_url)
+        if provider == "ollama"
+        else provider_registry.get(provider)
+    )
     if adapter is None:
         return options_by_role([])
     return options_by_role(
         [(adapter, await models_of(adapter, api_key))],
         {} if provider == "ollama" else await model_prices(),
         defaults=_defaults(),
+        credential_ids=[credential_id],
     )
 
 
 async def options_for_workspace(
     session: AsyncSession, workspace_id: UUID, owner_id: UUID, provider: str | None = None
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Models from active keys, optionally limited to the provider being configured."""
+    """Models from the owner's active account connections for this workspace."""
     statement = (
         select(ProviderCredential)
         .where(
-            ProviderCredential.workspace_id == workspace_id,
             ProviderCredential.owner_id == owner_id,
             ProviderCredential.status == "active",
         )
@@ -60,8 +72,9 @@ async def options_for_workspace(
         statement = statement.where(ProviderCredential.provider == provider)
     result = await session.exec(statement)
     listings: list[tuple[ProviderAdapter, list[ModelInfo]]] = []
+    credential_ids: list[UUID | None] = []
     for credential in result.all():
-        adapter = provider_registry.get(credential.provider)
+        adapter = adapter_for_credential(credential)
         if adapter is None:
             continue
         try:
@@ -69,13 +82,18 @@ async def options_for_workspace(
         except CredentialUnavailableError:
             continue
         listings.append((adapter, await models_of(adapter, api_key)))
+        credential_ids.append(credential.id)
     prices = {} if listings and all(a.id == "ollama" for a, _ in listings) else await model_prices()
-    return options_by_role(listings, prices, defaults=_defaults())
+    return options_by_role(listings, prices, defaults=_defaults(), credential_ids=credential_ids)
 
 
 async def has_indexed_chunks(session: AsyncSession, workspace_id: UUID) -> bool:
     """Once anything is embedded, the embedding model is fixed: vectors of two models do not mix."""
-    found = await session.exec(select(Chunk.id).where(Chunk.workspace_id == workspace_id).limit(1))
+    found = await session.exec(
+        select(Chunk.id)
+        .where(Chunk.workspace_id == workspace_id, Chunk.embedding.is_not(None))
+        .limit(1)
+    )
     return found.first() is not None
 
 
@@ -83,7 +101,11 @@ def recommended_selections(
     options: dict[ModelRole, list[ModelOption]],
 ) -> dict[str, dict[str, str]]:
     """The first (recommended) option of every role that has one, in storable form."""
-    return {role.value: items[0].model_dump() for role, items in options.items() if items}
+    return {
+        role.value: items[0].model_dump(mode="json", by_alias=True)
+        for role, items in options.items()
+        if items
+    }
 
 
 def with_recommended_defaults(

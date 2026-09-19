@@ -12,7 +12,12 @@ from app.modules.context_engine.infrastructure.provider_registry import provider
 
 
 def test_registry_exposes_only_registered_providers() -> None:
-    assert [adapter.id for adapter in provider_registry.all()] == ["openai", "anthropic", "nvidia"]
+    assert [adapter.id for adapter in provider_registry.all()] == [
+        "openai",
+        "anthropic",
+        "nvidia",
+        "ollama",
+    ]
 
 
 def test_nvidia_uses_openai_compatible_capabilities() -> None:

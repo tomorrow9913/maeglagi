@@ -4,7 +4,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-function viewerHarness(api, { demo = true } = {}) {
+function viewerHarness(api, { demo = true, content = { kind: "meeting", title: "Meeting", hasRecording: true, chunks: [{ id: "c1", text: "Hello", startSeconds: 12 }] } } = {}) {
   const slots = [];
   const effects = [];
   const timers = new Map();
@@ -71,7 +71,7 @@ function viewerHarness(api, { demo = true } = {}) {
       if (name === "react") return react;
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
       if (name === "@/lib/api/context") return { useApi: () => api, useDemoMode: () => demo };
-      if (name === "@/hooks/use-async") return { useAsync: () => ({ data: { kind: "meeting", title: "Meeting", hasRecording: true, chunks: [{ id: "c1", text: "Hello", startSeconds: 12 }] }, isLoading: false }) };
+      if (name === "@/hooks/use-async") return { useAsync: () => ({ data: content, isLoading: false }) };
       if (name === "@/lib/utils") return { cn: (...parts) => parts.filter(Boolean).join(" ") };
       if (name === "sonner") return { toast: { error() {}, success() {} } };
       if (name === "lucide-react") return { FileText: "FileText", Loader2: "Loader2", Mic: "Mic" };
@@ -83,11 +83,11 @@ function viewerHarness(api, { demo = true } = {}) {
     Date: FakeDate,
     setTimeout() { return 1; }, clearTimeout() {},
   });
-  const render = (sourceId = "s1") => {
+  const render = (sourceId = "s1", highlightChunkId) => {
     do {
       dirty = false;
       cursor = 0;
-      tree = exports.SourceViewer({ workspaceId: "w1", sourceId, onClose() {} });
+      tree = exports.SourceViewer({ workspaceId: "w1", sourceId, highlightChunkId, onClose() {} });
       for (const effect of effects) if (effect?.run) { effect.run = false; effect.cleanup = effect.fn(); }
     } while (dirty);
   };
@@ -143,6 +143,37 @@ test("playback URL refreshes before expiry, keeps position, and retries only aft
   view.audio.metadata();
   view.render();
   assert.equal(view.audio.currentTime, 45);
+});
+
+test("saved review text remains visible without chunks and timestamps can seek recording", async () => {
+  const api = { listSources: async () => [], listPeople: async () => [], listProjects: async () => [], getSourcePlaybackUrl: async () => ({ url: "recording", expiresAt: new Date(Date.now() + 300_000).toISOString() }) };
+  const view = viewerHarness(api, { content: {
+    kind: "meeting", title: "Confirmed draft", hasRecording: true, originalText: "민규: 수정한 원문",
+    utterances: [{ id: "turn-1", speakerName: "민규", text: "수정한 원문", startSeconds: 9 }], chunks: [],
+  } });
+  view.render();
+  const saved = view.find((node) => node.type === "section" && node.props["aria-label"] === "저장된 원문");
+  assert.ok(saved);
+  assert.match(JSON.stringify(saved), /수정한 원문/);
+  assert.equal(view.find((node) => node.type === "section" && node.props["aria-label"] === "인덱싱된 근거"), undefined);
+  view.find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("0:09")).props.onClick();
+  await new Promise(setImmediate);
+  view.render();
+  view.audio.metadata();
+  view.render();
+  assert.equal(view.audio.currentTime, 9);
+});
+
+test("indexed evidence is still reachable by its real chunk ID", () => {
+  const api = { listSources: async () => [], listPeople: async () => [], listProjects: async () => [] };
+  const view = viewerHarness(api, { content: {
+    kind: "meeting", title: "Confirmed draft", hasRecording: false, originalText: "수정한 원문",
+    utterances: [], chunks: [{ id: "real-chunk", text: "Indexed excerpt" }],
+  } });
+  view.render("s1", "real-chunk");
+  assert.ok(view.find((node) => node.type === "section" && node.props["aria-label"] === "저장된 원문"));
+  assert.ok(view.find((node) => node.type === "section" && node.props["aria-label"] === "인덱싱된 근거"));
+  assert.ok(view.find((node) => node.type === "li" && JSON.stringify(node.props.children).includes("Indexed excerpt")));
 });
 
 const flush = () => new Promise(setImmediate);

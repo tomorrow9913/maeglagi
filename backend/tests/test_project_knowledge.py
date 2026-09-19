@@ -124,8 +124,7 @@ def test_keyless_ollama_marker_keeps_other_providers_keyed() -> None:
     assert CreateWorkspaceRequest(name="Local", llmProvider="ollama").llm_api_key is None
     with pytest.raises(HTTPException):
         _credential_key("openai", None)
-    with pytest.raises(HTTPException):
-        _credential_key("ollama", "fake-key")
+    assert _credential_key("ollama", "optional-key") == "optional-key"
 
 
 async def test_same_email_create_reuses_person_identity() -> None:

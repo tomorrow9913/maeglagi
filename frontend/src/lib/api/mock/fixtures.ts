@@ -57,6 +57,8 @@ export const sourceContents: SourceContent[] = [
     sourceId: "src-kickoff",
     title: "9/8 제품 킥오프 회의",
     kind: "meeting",
+    originalText: null,
+    utterances: [],
     chunks: [
       {
         id: "src-kickoff#1",
@@ -82,6 +84,8 @@ export const sourceContents: SourceContent[] = [
     sourceId: "src-prd",
     title: "맥락이 PRD v0.2.pdf",
     kind: "document",
+    originalText: null,
+    utterances: [],
     chunks: [
       {
         id: "src-prd#1",
@@ -97,6 +101,8 @@ export const sourceContents: SourceContent[] = [
     sourceId: "src-tech-review",
     title: "9/11 기술 검토 회의",
     kind: "meeting",
+    originalText: null,
+    utterances: [],
     chunks: [
       {
         id: "src-tech-review#1",
@@ -515,6 +521,11 @@ export const contextStore: ContextStore = {
  * 임베딩·받아쓰기 모델이 없어, 옵션이 빈 용도를 화면에서 확인할 수 있습니다.
  */
 export const modelCatalog: Record<string, Partial<Record<ModelRole, string[]>>> = {
+  ollama: {
+    answer: ["llama3.2:latest", "qwen2.5:latest"],
+    extraction: ["llama3.2:latest", "qwen2.5:latest"],
+    embedding: ["nomic-embed-text:latest"],
+  },
   openai: {
     answer: ["gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
     extraction: ["gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],

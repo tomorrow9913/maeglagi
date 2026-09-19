@@ -1,5 +1,6 @@
 import importlib
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,7 +20,7 @@ from app.modules.context_engine.application.model_roles import (
     options_by_role,
 )
 from app.modules.context_engine.application.provider import ModelInfo
-from app.modules.workspaces.infrastructure.models import Workspace
+from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 # `app.api.workspaces.router` is shadowed by the package's `router` attribute, so load the module.
 workspaces_router_module = importlib.import_module("app.api.workspaces.router")
@@ -68,6 +69,9 @@ class FakeSession:
         self.get_calls.append(kwargs)
         self.workspace_locked = bool(kwargs.get("with_for_update"))
         return self.workspace if identifier == self.workspace.id else None
+
+    async def exec(self, statement: Any) -> Any:
+        return SimpleNamespace(all=lambda: [])
 
     def add(self, obj: Any) -> None:
         self.added.append(obj)
@@ -390,7 +394,8 @@ def test_the_chosen_models_are_stored_and_the_rest_get_the_recommended_one(env: 
     assert len(env.session.flushed) == 1
     assert [type(item).__name__ for item in env.session.flushed[0]] == ["Workspace"]
     settings = created_workspace(env).model_settings
-    assert settings["embedding"] == EMBED_LARGE  # what the user chose wins
+    credential = next(item for item in env.session.added if isinstance(item, ProviderCredential))
+    assert settings["embedding"] == {**EMBED_LARGE, "credentialId": str(credential.id)}
     assert settings["answer"]["model"] == "gpt-4o-mini"  # recommended alias, not the dated one
     assert settings["transcription"]["model"] == "whisper-1"
 
@@ -495,5 +500,6 @@ def test_a_workspace_created_with_an_embedding_model_starts_locked(env: Env) -> 
 
     roles = by_role(get_models(TestClient(app)))
 
-    assert roles["embedding"]["selected"] == EMBED_LARGE
+    credential = next(item for item in env.session.added if isinstance(item, ProviderCredential))
+    assert roles["embedding"]["selected"] == {**EMBED_LARGE, "credentialId": str(credential.id)}
     assert roles["embedding"]["locked"] is True

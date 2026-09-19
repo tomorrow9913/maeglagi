@@ -31,7 +31,8 @@ export type LlmProvider = string;
 export type AiProvider = {
   id: LlmProvider;
   displayName: string;
-  authMode?: "apiKey" | "none";
+  authMode?: "apiKey" | "optionalApiKey" | "none";
+  requiresBaseUrl?: boolean;
   capabilities: string[];
   configured: boolean;
   models: string[];
@@ -46,7 +47,7 @@ export type AiProvider = {
 export type ModelRole = "answer" | "extraction" | "embedding" | "transcription";
 
 /** 어느 공급자의 어느 모델인지. 한 워크스페이스가 용도마다 다른 공급자를 쓸 수도 있습니다. */
-export type ModelOption = { provider: LlmProvider; model: string };
+export type ModelOption = { provider: LlmProvider; model: string; credentialId?: string | null };
 
 /** 한 용도에서 고를 수 있는 모델과 지금 선택된 모델. */
 export type RoleModels = {
@@ -69,9 +70,11 @@ export type ModelSelections = Partial<Record<ModelRole, ModelOption>>;
 
 export type CreateWorkspaceInput = {
   name: string;
-  /** BYOK. 서버는 암호화해 저장하고 어떤 응답으로도 다시 내려주지 않습니다. */
-  llmApiKey: string;
-  llmProvider: LlmProvider;
+  /** 기존 인라인 등록 경로. 저장된 계정 연결을 고를 때는 보내지 않습니다. */
+  llmApiKey?: string;
+  llmProvider?: LlmProvider;
+  llmBaseUrl?: string;
+  credentialId?: string;
   /** 용도별로 고른 모델. 비우면 서버가 정한 기본을 씁니다. */
   models?: ModelSelections;
 };
@@ -84,7 +87,7 @@ export type ApiKeyValidation = {
 };
 
 /**
- * 워크스페이스에 저장된 BYOK 키 정보.
+ * 계정에 저장된 AI 연결 정보.
  *
  * 키 원문은 포함되지 않습니다. 사용자가 어떤 키를 넣었는지 알아볼 수 있도록
  * 마지막 4자만 `keyHint`로 내려줍니다.
@@ -94,6 +97,7 @@ export type WorkspaceSecrets = {
   provider: LlmProvider;
   label: string;
   keyHint: string;
+  baseUrl?: string | null;
   status: string;
   isDefault: boolean;
   updatedAt: string;
@@ -128,6 +132,10 @@ export type SourceContent = {
   title: string;
   kind: SourceKind;
   hasRecording?: boolean;
+  /** 저장된 원문. 검토 중인 수정본과 확인된 대본은 인덱싱 전에도 제공됩니다. */
+  originalText: string | null;
+  /** 회의 원문의 발언. 청크 ID와 무관하며 원본 녹음의 시각을 보존합니다. */
+  utterances: MeetingUtterance[];
   /** 청크 단위 본문. 근거 하이라이트가 chunkId로 위치를 찾습니다. */
   chunks: {
     id: string;

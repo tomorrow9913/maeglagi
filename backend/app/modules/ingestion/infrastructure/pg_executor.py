@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from weakref import WeakSet
 
 import sentry_sdk
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -20,7 +20,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import Settings
 from app.core.database import session_factory
 from app.modules.ingestion.infrastructure.pg_jobs import ProcessingJob
-from app.modules.ingestion.infrastructure.source_processor import process_source_attempt
+from app.modules.ingestion.infrastructure.pg_recovery import recover_missing_jobs
+from app.modules.ingestion.infrastructure.source_processor import (
+    SafeAttemptError,
+    _safe_attempt_error,
+    process_source_attempt,
+)
 from app.modules.workspaces.domain.source_state import SourceStatus
 from app.modules.workspaces.infrastructure.models import Source
 
@@ -34,20 +39,47 @@ def wake_executors() -> None:
         executor.wake()
 
 
-def _report_terminal_failure(source_id: UUID, generation: int) -> None:
-    # Provider errors can contain user content. Report a generic exception and
-    # only stable job identifiers to logs and telemetry.
+def _report_terminal_failure(
+    source_id: UUID,
+    generation: int,
+    error: Exception | None = None,
+    *,
+    stage: str = "unknown",
+) -> None:
+    # Provider errors can contain user content. Keep only vetted fields and an
+    # optional traceback from a sanitized error, without frame locals.
+    safe_error = (
+        error
+        if isinstance(error, SafeAttemptError)
+        else _safe_attempt_error(error, stage)
+        if error is not None
+        else SafeAttemptError(code="recovered_terminal", stage=stage, error_type="Unknown")
+    )
     # Logging integration records ERROR as a Sentry event; WARN plus the scoped
     # exception below produces one terminal event instead of two.
     logger.warning(
-        "PostgreSQL ingestion provider retries exhausted (source_id=%s, generation=%s)",
+        "PostgreSQL ingestion failed (source_id=%s, generation=%s, stage=%s, code=%s, type=%s)",
         source_id,
         generation,
+        safe_error.stage,
+        safe_error.code,
+        safe_error.error_type,
     )
     with sentry_sdk.push_scope() as scope:
         scope.set_tag("source_id", str(source_id))
         scope.set_tag("job_generation", str(generation))
-        sentry_sdk.capture_exception(RuntimeError("Ingestion provider retries exhausted"))
+        scope.set_tag("failure_stage", safe_error.stage)
+        scope.set_tag("failure_code", safe_error.code)
+        scope.set_tag("error_type", safe_error.error_type)
+        if safe_error.cause_type:
+            scope.set_tag("cause_type", safe_error.cause_type)
+        if safe_error.http_status is not None:
+            scope.set_tag("http_status", str(safe_error.http_status))
+        if safe_error.capability:
+            scope.set_tag("capability", safe_error.capability)
+        if safe_error.provider:
+            scope.set_tag("provider", safe_error.provider)
+        sentry_sdk.capture_exception(safe_error)
 
 
 async def enqueue_source(
@@ -61,7 +93,7 @@ async def enqueue_source(
         stage=str(source.processing_stage),
         provider_attempts=0,
         claim_generation=0,
-        next_run_at=datetime.now(UTC),
+        next_run_at=func.now(),
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -74,7 +106,7 @@ async def enqueue_source(
             "claim_generation": ProcessingJob.claim_generation + 1,
             "lease_owner": None,
             "lease_expires_at": None,
-            "next_run_at": datetime.now(UTC),
+            "next_run_at": func.now(),
             "last_error": None,
             "updated_at": datetime.now(UTC),
         },
@@ -176,7 +208,9 @@ async def _execute_claim(
                     "provider_attempts = provider_attempts + 1",
                 )
                 if updated:
-                    _report_terminal_failure(source_id, generation)
+                    _report_terminal_failure(
+                        source_id, generation, stage=str(source.processing_stage)
+                    )
                 return
         try:
             error = await process_source_attempt(source_id, final_attempt=attempts >= 3)
@@ -190,7 +224,14 @@ async def _execute_claim(
                 "next_run_at = now() + interval '30 seconds'",
             )
             return
-        if error is None:
+        safe_error = (
+            error
+            if isinstance(error, SafeAttemptError)
+            else _safe_attempt_error(error, "unknown")
+            if error is not None
+            else None
+        )
+        if safe_error is None:
             await _fenced_update(
                 source_id,
                 owner,
@@ -198,17 +239,17 @@ async def _execute_claim(
                 "status = 'completed', lease_owner = NULL, lease_expires_at = NULL, "
                 "last_error = NULL",
             )
-        elif attempts >= 3:
+        elif attempts >= 3 or safe_error.terminal:
             updated = await _fenced_update(
                 source_id,
                 owner,
                 generation,
                 "status = 'failed', lease_owner = NULL, lease_expires_at = NULL, "
                 "provider_attempts = provider_attempts + 1, last_error = :error",
-                {"error": str(error)[:2000]},
+                {"error": safe_error.code},
             )
             if updated:
-                _report_terminal_failure(source_id, generation)
+                _report_terminal_failure(source_id, generation, safe_error)
         else:
             # 10, 20, 40 seconds; the fourth failure is terminal.
             await _fenced_update(
@@ -218,7 +259,7 @@ async def _execute_claim(
                 "status = 'pending', lease_owner = NULL, lease_expires_at = NULL, "
                 "provider_attempts = provider_attempts + 1, "
                 "next_run_at = now() + (:delay * interval '1 second'), last_error = :error",
-                {"delay": min(300, 10 * 2**attempts), "error": str(error)[:2000]},
+                {"delay": min(300, 10 * 2**attempts), "error": safe_error.code},
             )
     except asyncio.CancelledError:
         # Graceful API shutdown releases this claim immediately. A hard kill is
@@ -247,6 +288,7 @@ class PostgresExecutor:
         self._stopping = asyncio.Event()
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
+        self._reconciled = False
 
     def start(self) -> None:
         logger.info(
@@ -273,6 +315,12 @@ class PostgresExecutor:
         while not self._stopping.is_set():
             self._wake.clear()
             try:
+                if not self._reconciled:
+                    async with session_factory() as session:
+                        recovered = await recover_missing_jobs(session)
+                        await session.commit()
+                    self._reconciled = True
+                    logger.info("Reconciled %s missing PostgreSQL ingestion jobs", recovered)
                 claim = await claim_job(self.owner, self.settings.pg_executor_lease_seconds)
                 if claim is not None:
                     idle_seconds = self.settings.pg_executor_poll_seconds

@@ -165,7 +165,7 @@ def test_default_transition_and_deletion_rules(setup_api):
     assert case.client.get(f"/api/v1/workspaces/{case.workspace.id}/llm-key").json() is None
 
 
-def test_cross_workspace_and_owner_ids_cannot_mutate(setup_api):
+def test_same_account_cross_workspace_id_can_mutate_but_other_owner_cannot(setup_api):
     case = setup_api
     path = f"/api/v1/workspaces/{case.workspace.id}/provider-credentials"
     other = ProviderCredential(
@@ -177,11 +177,9 @@ def test_cross_workspace_and_owner_ids_cannot_mutate(setup_api):
         vault_secret_id=uuid4(),
     )
     case.credentials.append(other)
-    assert case.client.put(f"{path}/{other.id}", json={"apiKey": "private"}).status_code == 404
-    assert case.client.put(f"{path}/{other.id}/default").status_code == 404
-    assert case.client.delete(f"{path}/{other.id}").status_code == 404
-    assert case.update.await_count == 0
-    assert case.delete.await_count == 0
+    assert case.client.put(f"{path}/{other.id}", json={"apiKey": "private"}).status_code == 200
+    assert case.client.put(f"{path}/{other.id}/default").status_code == 200
+    assert case.update.await_count == 1
     case.workspace.owner_id = uuid4()
     assert (
         case.client.post(

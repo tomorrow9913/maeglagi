@@ -6,7 +6,10 @@ from uuid import UUID
 from celery import Task
 
 from app.core.celery import celery_app
-from app.modules.ingestion.infrastructure.source_processor import process_source_attempt
+from app.modules.ingestion.infrastructure.source_processor import (
+    SafeAttemptError,
+    process_source_attempt,
+)
 
 
 @celery_app.task(
@@ -34,6 +37,10 @@ def process_source(self: Task, source_id: str, app_attempt: int = 0) -> None:
             kwargs={"app_attempt": app_attempt},
         ) from exc
     if error is not None:
+        if isinstance(error, SafeAttemptError) and error.terminal:
+            # The source processor has already persisted a terminal failure.
+            # Acknowledging here prevents three identical provider attempts.
+            return
         if final_attempt:
             raise error
         raise self.retry(
