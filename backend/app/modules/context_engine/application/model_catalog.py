@@ -5,6 +5,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
+from app.modules.context_engine.application.model_pricing import model_prices
 from app.modules.context_engine.application.model_roles import (
     ModelOption,
     ModelRole,
@@ -30,7 +31,7 @@ async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[M
     adapter = provider_registry.get(provider)
     if adapter is None:
         return options_by_role([])
-    return options_by_role([(adapter, await models_of(adapter, api_key))])
+    return options_by_role([(adapter, await models_of(adapter, api_key))], await model_prices())
 
 
 async def options_for_workspace(
@@ -56,7 +57,7 @@ async def options_for_workspace(
         except CredentialUnavailableError:
             continue
         listings.append((adapter, await models_of(adapter, api_key)))
-    return options_by_role(listings)
+    return options_by_role(listings, await model_prices())
 
 
 async def has_indexed_chunks(session: AsyncSession, workspace_id: UUID) -> bool:

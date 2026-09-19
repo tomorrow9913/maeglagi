@@ -70,7 +70,8 @@ export function WorkspaceModelsCard({ workspaceId }: { workspaceId: string }) {
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">사용할 모델</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            등록한 키로 쓸 수 있는 모델 중에서 용도마다 고릅니다.
+            등록한 키로 쓸 수 있는 모델 중에서 용도마다 고릅니다. 가격을 확인할 수 있는
+            모델은 낮은 순서로, 가격 정보가 없는 모델은 뒤에 표시됩니다.
           </p>
 
           <div className="mt-4">

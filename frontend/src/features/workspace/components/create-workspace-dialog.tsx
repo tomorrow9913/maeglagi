@@ -62,8 +62,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
         name,
         llmProvider: provider,
         llmApiKey: apiKey,
-        // 목록을 받았을 때만 보냅니다. 못 받았다면 서버가 정한 기본을 씁니다.
-        ...(keyModels.roles ? { models: keyModels.selections } : {}),
+        models: keyModels.selections,
       });
 
       toast.success(`${created.name} 워크스페이스를 만들었습니다.`);
@@ -164,7 +163,14 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
           <DialogFooter>
             <Button
               type="submit"
-              disabled={!name.trim() || !isKeyValid || keyModels.isLoading || isSubmitting}
+              disabled={
+                !name.trim() ||
+                !isKeyValid ||
+                !keyModels.roles ||
+                Object.keys(keyModels.selections).length === 0 ||
+                keyModels.isLoading ||
+                isSubmitting
+              }
             >
               {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               만들기

@@ -9,8 +9,7 @@ import { ModelPicker } from "./model-picker";
 /**
  * 키를 확인한 뒤 나타나는 "사용할 모델" 영역입니다.
  *
- * 키가 아직 확인되지 않았으면 아무것도 그리지 않습니다. 목록을 받지 못해도 생성은 막지 않고
- * 서버가 정한 기본 모델을 쓰게 두므로, 오류는 안내만 합니다.
+ * 공급자를 고르는 순간 선택 방식을 보여주고, 키가 확인되면 추천 선택을 드러냅니다.
  */
 export function KeyModelSection({
   idPrefix,
@@ -31,24 +30,27 @@ export function KeyModelSection({
   error: Error | undefined;
   disabled?: boolean;
 }) {
-  if (!hasValidKey) return null;
-
   return (
     <div className="space-y-3 border-t border-border pt-4">
       <div>
         <h3 className="text-sm font-medium">사용할 모델</h3>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          이 키로 쓸 수 있는 모델입니다. 용도마다 골라 주세요.
+          키로 확인된 모델 중 가격 정보가 있는 것은 낮은 순서로 보여줍니다.
+          가격을 확인할 수 없는 모델은 뒤에 표시됩니다. 추천값도 아래에서 직접 확인하세요.
         </p>
       </div>
 
-      {isLoading ? (
+      {!hasValidKey ? (
+        <p className="text-xs text-muted-foreground">
+          선택한 공급자의 키를 검증하면 용도별 추천 모델과 다른 선택지를 보여줍니다.
+        </p>
+      ) : isLoading ? (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="size-3 animate-spin" aria-hidden />쓸 수 있는 모델을 불러오는 중…
         </p>
       ) : error ? (
         <p className="text-xs text-destructive">
-          모델 목록을 불러오지 못했습니다. 지금 만들면 서버가 정한 기본 모델을 씁니다.
+          모델 목록을 불러오지 못했습니다. 목록을 확인한 뒤 다시 시도해 주세요.
           <span className="mt-0.5 block text-muted-foreground">{error.message}</span>
         </p>
       ) : roles ? (

@@ -73,8 +73,9 @@ def recommendation_rank(model_id: str) -> tuple[bool, bool, str]:
 
 def options_by_role(
     listings: list[tuple[ProviderAdapter, list[str]]],
+    prices: dict[tuple[str, str], float] | None = None,
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Sort what each key offered into roles. `listings` is in key priority order."""
+    """Order known prices low-to-high; unknown prices follow in stable name order."""
     options: dict[ModelRole, list[ModelOption]] = {role: [] for role in ROLE_ORDER}
     for adapter, models in listings:
         for model in sorted(set(models), key=recommendation_rank):
@@ -83,6 +84,16 @@ def options_by_role(
                     option = ModelOption(provider=adapter.id, model=model)
                     if option not in options[role]:
                         options[role].append(option)
+    if prices:
+        for role in ROLE_ORDER:
+            options[role].sort(
+                key=lambda option: (
+                    (option.provider, option.model) not in prices,
+                    prices.get((option.provider, option.model), float("inf")),
+                    recommendation_rank(option.model),
+                    option.provider,
+                )
+            )
     return options
 
 
