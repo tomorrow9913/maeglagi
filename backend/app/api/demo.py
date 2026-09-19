@@ -20,9 +20,10 @@ from app.api.workspaces.schemas import (
     SourceResponse,
     WorkspaceResponse,
 )
-from app.auth import AuthUser
+from app.auth import AuthUser, CurrentUser
 from app.core.config import Settings, get_settings
 from app.core.database import get_session
+from app.demo_clone import CloneUnavailable, clone_demo
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 
 router = APIRouter(prefix="/demo", tags=["public-demo"])
@@ -43,6 +44,25 @@ async def published_workspace(
 
 
 Published = Annotated[Workspace, Depends(published_workspace)]
+
+
+@router.post("/clone", response_model=WorkspaceResponse)
+async def clone(
+    workspace: Published,
+    user: CurrentUser,
+    session: Session,
+    store: graph.GraphStore,
+) -> WorkspaceResponse:
+    try:
+        copied, source_count = await clone_demo(session, store, workspace, user.id)
+    except CloneUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return WorkspaceResponse(
+        id=copied.id,
+        name=copied.name,
+        created_at=copied.created_at,
+        source_count=source_count,
+    )
 
 
 def reader(workspace: Workspace) -> AuthUser:
