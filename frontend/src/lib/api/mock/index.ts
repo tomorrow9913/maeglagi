@@ -654,6 +654,20 @@ export const mockApi: MaeglagiApi = {
     if (!job) throw new ApiError(404, "처리 작업을 찾을 수 없습니다.");
     return advanceJob(job);
   },
+  async *sourceEvents(workspaceId, sourceIds, signal) {
+    if (sourceIds.length < 1 || sourceIds.length > 100) throw new ApiError(422, "소스는 1~100개를 선택해 주세요.");
+    const selected = new Set(sourceIds);
+    const seen = new Map<string, string>();
+    while (!signal?.aborted) {
+      for (const job of state.jobs.values()) {
+        if (!selected.has(job.sourceId) || !state.sources.some((source) => source.id === job.sourceId && source.workspaceId === workspaceId)) continue;
+        const current = advanceJob(job);
+        const fingerprint = JSON.stringify(current);
+        if (seen.get(job.id) !== fingerprint) { seen.set(job.id, fingerprint); yield current; }
+      }
+      await delay(300, signal);
+    }
+  },
   async getMeetingReview(workspaceId, sourceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     const review = state.reviews.get(sourceId);

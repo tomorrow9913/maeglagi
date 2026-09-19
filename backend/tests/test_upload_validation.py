@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
+from app.core.config import Settings
 from app.core.database import get_session
 from app.main import create_app
 from app.modules.ingestion.application.upload_validation import (
@@ -168,6 +169,48 @@ def test_rejected_uploads_never_reach_storage_or_queue(
         )
         assert response.status_code == expected
     assert uploaded == session.sources == []
+
+
+@pytest.mark.parametrize("endpoint", ["documents", "recordings"])
+@pytest.mark.parametrize("executor", ["postgres", "celery"])
+def test_upload_uses_application_executor_when_global_differs(
+    client: tuple[TestClient, FakeSession, list[Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+    executor: str,
+) -> None:
+    http, _, _ = client
+    http.app.state.settings = Settings(_env_file=None, processing_executor=executor)
+    global_executor = "celery" if executor == "postgres" else "postgres"
+    monkeypatch.setattr(
+        workspace_router,
+        "get_settings",
+        lambda: Settings(_env_file=None, processing_executor=global_executor),
+    )
+    selected: list[str] = []
+
+    async def enqueue_pg(_session: Any, _source: Source) -> None:
+        selected.append("postgres")
+
+    async def enqueue_celery(_source: Source, _session: Any) -> None:
+        selected.append("celery")
+
+    monkeypatch.setattr(workspace_router, "enqueue_pg_source", enqueue_pg)
+    monkeypatch.setattr(workspace_router, "_enqueue_source", enqueue_celery)
+    monkeypatch.setattr(workspace_router, "wake_executors", lambda: None)
+    field = "file" if endpoint == "documents" else "audio"
+    upload = (
+        ("notes.txt", b"Notes", "text/plain")
+        if endpoint == "documents"
+        else ("recording.webm", b"\x1a\x45\xdf\xa3webm", "audio/webm")
+    )
+    response = http.post(
+        f"/api/v1/workspaces/{WORKSPACE}/sources/{endpoint}",
+        files={field: upload},
+        headers={"Authorization": "Bearer test"},
+    )
+    assert response.status_code == 202
+    assert selected == [executor]
 
 
 def test_browser_mp4_is_stored_with_matching_filename(

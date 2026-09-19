@@ -106,7 +106,7 @@ export interface MaeglagiApi {
   getSourcePlaybackUrl(sourceId: string, signal?: AbortSignal): Promise<{ url: string; expiresAt: string }>;
   exportSourceMarkdown(sourceId: string, signal?: AbortSignal): Promise<Blob>;
   updateSourceAssociations(workspaceId: string, sourceId: string, input: { revision: number; projectIds: string[]; people: { personId: string; role: "participant" | "author" }[] }, signal?: AbortSignal): Promise<SourceAssociations>;
-  /** 문서 업로드. 전송이 끝나면 반환된 job으로 처리 진행률을 폴링합니다. */
+  /** 문서 업로드. 전송이 끝나면 반환된 job으로 처리 이벤트를 구독합니다. */
   uploadDocument(workspaceId: string, file: File, options?: UploadOptions): Promise<ProcessingJob>;
   /** 회의 녹음 업로드. STT 이후 파이프라인은 문서와 동일합니다. */
   uploadRecording(
@@ -123,6 +123,8 @@ export interface MaeglagiApi {
     signal?: AbortSignal,
   ): Promise<ProcessingJob>;
   getJob(jobId: string, signal?: AbortSignal): Promise<ProcessingJob>;
+  /** Snapshots followed by changes for up to 100 source IDs. The server closes the stream after 55 seconds. */
+  sourceEvents(workspaceId: string, sourceIds: string[], signal?: AbortSignal): AsyncIterable<ProcessingJob>;
   getMeetingReview(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<MeetingReview>;
   retryMeetingTranscription(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<ProcessingJob>;
   saveMeetingReview(workspaceId: string, sourceId: string, input: { revision: number; projectId?: string | null; projectIds?: string[]; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;

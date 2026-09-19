@@ -134,32 +134,43 @@ test("failed audio stays selectable for a single retry", async () => {
   assert.equal(allNodes(tree).some((node) => node.type === "Button" && node.props.children === "업로드 다시 시도"), false);
 });
 
-test("an awaiting-review recording opens the existing review dialog", () => {
+test("meeting panel remains mounted when collapsed and review opens only on request", () => {
   let cursor = 0;
   const slots = [];
   let settled;
+  let reviewAction;
+  let mode = "meeting";
   const react = {
     useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = initial; return [slots[index], (value) => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }]; },
-    useMemo(fn) { return fn(); },
+    useEffect(fn) { fn(); },
     useCallback(fn) { return fn; },
   };
   const element = (type, props) => ({ type, props });
   const exports = load("../src/features/source-ingestion/components/source-upload-dialog.tsx", {
     react,
     "react/jsx-runtime": { jsx: element, jsxs: element },
-    sonner: { toast: { info() {}, error() {}, success() {} } },
+    sonner: { toast: { info(_message, options) { reviewAction = options?.action; }, error() {}, success() {} } },
+    "lucide-react": { Mic: "Mic", Minus: "Minus" },
     "@/components/ui/button": { Button: "Button" },
     "@/components/ui/dialog": { Dialog: "Dialog", DialogContent: "DialogContent", DialogHeader: "DialogHeader", DialogTitle: "DialogTitle", DialogDescription: "DialogDescription" },
     "../hooks/use-source-upload": { useSourceUpload: () => ({ items: [], uploadDocuments() {}, uploadRecording() {}, uploadTranscript() {}, dismiss() {} }) },
-    "../hooks/use-job-polling": { useJobPolling: (_ids, callback) => { settled = callback; return {}; } },
+    "../hooks/use-job-events": { useJobEvents: (_workspaceId, _jobs, callback) => { settled = callback; return {}; } },
     "./meeting-capture": { MeetingCapture: "MeetingCapture" },
     "./meeting-review-dialog": { MeetingReviewDialog: "MeetingReviewDialog" },
     "./source-file-upload": { SourceFileUpload: "SourceFileUpload" },
     "./upload-queue": { UploadQueue: "UploadQueue" },
   }, { window: { dispatchEvent() {} }, Event });
-  function render() { cursor = 0; return exports.SourceUploadDialog({ workspaceId: "workspace-1", mode: "document", onClose() {} }); }
-  render();
+  function render() { cursor = 0; return exports.SourceUploadDialog({ workspaceId: "workspace-1", mode, onClose() { mode = null; } }); }
+  let tree = render();
+  assert.ok(allNodes(tree).some((node) => node.type === "MeetingCapture"));
+  allNodes(tree).find((node) => node.type === "Button" && node.props["aria-label"] === "회의 패널 접기").props.onClick();
+  tree = render();
+  assert.ok(allNodes(tree).some((node) => node.type === "MeetingCapture"));
+  assert.ok(allNodes(tree).some((node) => node.type === "Button" && node.props["aria-label"] === "회의 패널 다시 열기"));
+  assert.match(allNodes(tree).find((node) => node.type === "aside").props.className, /bottom-\[calc\(7rem\+env\(safe-area-inset-bottom\)\)\]/);
   settled({ id: "job-1", sourceId: "source-1", sourceKind: "meeting", status: "awaiting_review" });
+  assert.equal(allNodes(render()).find((node) => node.type === "MeetingReviewDialog").props.sourceId, undefined);
+  reviewAction.onClick();
   const review = allNodes(render()).find((node) => node.type === "MeetingReviewDialog");
   assert.equal(review.props.sourceId, "source-1");
 });

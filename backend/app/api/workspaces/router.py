@@ -5,7 +5,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials
 from kombu.exceptions import OperationalError
 from pydantic import TypeAdapter, ValidationError
@@ -40,8 +40,9 @@ from app.api.workspaces.schemas import (
     WorkspaceResponse,
 )
 from app.api.workspaces.source_content import router as source_content_router
+from app.api.workspaces.source_events import router as source_events_router
 from app.auth import CurrentUser, bearer
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.credentials import store_credential_secret
 from app.core.database import get_session
 from app.modules.context_engine.application.model_catalog import (
@@ -127,8 +128,10 @@ async def _enqueue_source(source: Source, session: AsyncSession) -> None:
         ) from exc
 
 
-async def _persist_and_enqueue_source(source: Source, session: AsyncSession) -> None:
-    if get_settings().processing_executor == "postgres":
+async def _persist_and_enqueue_source(
+    source: Source, session: AsyncSession, settings: Settings | None = None
+) -> None:
+    if (settings or get_settings()).processing_executor == "postgres":
         await enqueue_pg_source(session, source)
         await session.commit()
         wake_executors()
@@ -277,11 +280,14 @@ async def upload_document(
     user: CurrentUser,
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
+    request: Request = None,
 ) -> JobResponse:
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
     source.status = SourceStatus.QUEUED
     source.processing_stage = ProcessingStage.UPLOADED
-    await _persist_and_enqueue_source(source, session)
+    await _persist_and_enqueue_source(
+        source, session, request.app.state.settings if request is not None else None
+    )
     return _job_response(source)
 
 
@@ -296,6 +302,7 @@ async def upload_recording(
     user: CurrentUser,
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
+    request: Request = None,
     live_draft: Annotated[str | None, Form(alias="liveDraft")] = None,
     project_id: Annotated[UUID | None, Form(alias="projectId")] = None,
     project_ids: Annotated[str | None, Form(alias="projectIds")] = None,
@@ -330,7 +337,9 @@ async def upload_recording(
     source.progress = 0
     await session.flush()
     await replace_projects(session, source, ids)
-    await _persist_and_enqueue_source(source, session)
+    await _persist_and_enqueue_source(
+        source, session, request.app.state.settings if request is not None else None
+    )
     return _job_response(source)
 
 
@@ -509,5 +518,6 @@ async def _upload_object(
 
 workspaces.include_router(directory_router)
 workspaces.include_router(review_router)
+workspaces.include_router(source_events_router)
 workspaces.include_router(associations_router)
 router.include_router(workspaces)

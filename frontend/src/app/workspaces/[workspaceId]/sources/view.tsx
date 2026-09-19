@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, use, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, use, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -14,10 +14,10 @@ import { SourceList } from "@/features/source-ingestion/components/source-list";
 import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { SourceFileUpload } from "@/features/source-ingestion/components/source-file-upload";
 import { UploadQueue } from "@/features/source-ingestion/components/upload-queue";
-import { useJobPolling } from "@/features/source-ingestion/hooks/use-job-polling";
+import { useJobEvents } from "@/features/source-ingestion/hooks/use-job-events";
+import { useLiveSources } from "@/features/source-ingestion/hooks/use-live-sources";
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
-import { useAsync } from "@/hooks/use-async";
-import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
+import { useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { ProcessingJob } from "@/lib/api";
 
 export default function SourcesPage({ params }: { params: Promise<{ workspaceId: string }> }) {
@@ -31,7 +31,6 @@ export function SourcesView({ workspaceId }: { workspaceId: string }) {
 }
 
 function SourcesContent({ workspaceId }: { workspaceId: string }) {
-  const api = useApi();
   const isDemo = useDemoMode();
   const router = useRouter();
   const workspacePath = useWorkspacePath();
@@ -66,34 +65,18 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
     if (searchParams.get("source")) router.replace(workspacePath(workspaceId, "sources"));
   }, [router, searchParams, workspaceId, workspacePath]);
 
-  const {
-    data: sources,
-    error,
-    isLoading,
-    reload,
-  } = useAsync((signal) => api.listSources(workspaceId, signal), [workspaceId]);
-  useEffect(() => {
-    if (!sources?.some((source) => source.status === "processing" || source.status === "queued" || source.status === "enqueue_pending")) return;
-    const timer = window.setInterval(reload, 3000);
-    return () => window.clearInterval(timer);
-  }, [sources, reload]);
+  const { sources, progress, error, isLoading, reload } = useLiveSources(workspaceId);
 
-  const onUploaded = useCallback(() => reload(), [reload]);
   const { items, uploadDocuments, uploadRecording, uploadTranscript, dismiss } = useSourceUpload(
     workspaceId,
-    onUploaded,
   );
-
-  const jobIds = useMemo(() => items.flatMap((item) => (item.job ? [item.job.id] : [])), [items]);
 
   const onSettled = useCallback(
     (job: ProcessingJob) => {
-      reload();
-
-      if (job.status === "awaiting_review") { toast.info("회의 대본 검토가 준비됐습니다."); setReviewSourceId(job.sourceId); return; }
+      if (job.status === "awaiting_review") { toast.info("회의 대본 검토가 준비됐습니다.", { action: { label: "검토 열기", onClick: () => setReviewSourceId(job.sourceId) } }); return; }
       if (job.status === "failed") {
         toast.error("소스 처리에 실패했습니다.");
-        if (job.sourceKind === "meeting") setReviewSourceId(job.sourceId);
+        if (job.sourceKind === "meeting") toast.info("저장된 대본을 확인할 수 있습니다.", { action: { label: "대본 열기", onClick: () => setReviewSourceId(job.sourceId) } });
         return;
       }
 
@@ -104,10 +87,10 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
         },
       });
     },
-    [reload, router, workspaceId, workspacePath],
+    [router, workspaceId, workspacePath],
   );
 
-  const jobs = useJobPolling(jobIds, onSettled, restartKey);
+  const jobs = useJobEvents(workspaceId, items.flatMap((item) => item.job ? [item.job] : []), onSettled, restartKey);
 
   return (
     <>
@@ -142,10 +125,10 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
 
         {isLoading ? (
           <ListSkeleton count={2} className="h-20" />
-        ) : error ? (
+        ) : error && !sources ? (
           <ErrorState error={error} onRetry={reload} />
         ) : sources && sources.length > 0 ? (
-          <SourceList sources={sources} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (!isDemo && (source?.status === "awaiting_review" || (source?.kind === "meeting" && source.status === "failed"))) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
+          <SourceList sources={sources} progress={progress} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (!isDemo && (source?.status === "awaiting_review" || (source?.kind === "meeting" && source.status === "failed"))) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
         ) : (
           <EmptyState
             title="아직 올라온 소스가 없습니다"

@@ -846,46 +846,61 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
               </Button>
             </div>
             {addMode === "existing" ? (
-              <select
-                aria-label="기존 참여자"
-                required
-                value={selectedPersonId}
-                onChange={(event) => setSelectedPersonId(event.target.value)}
-                className="min-h-9 w-full rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="">참여자 선택</option>
-                {availablePeople.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                    {item.email ? ` · ${item.email}` : ""}
-                  </option>
-                ))}
-              </select>
+              <div className="space-y-1">
+                <label htmlFor="add-existing-person" className="block text-sm font-medium">
+                  기존 참여자 (필수)
+                </label>
+                <select
+                  id="add-existing-person"
+                  required
+                  value={selectedPersonId}
+                  onChange={(event) => setSelectedPersonId(event.target.value)}
+                  className="min-h-9 w-full rounded-md border bg-background px-3 text-sm"
+                >
+                  <option value="">참여자 선택</option>
+                  {availablePeople.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                      {item.email ? ` · ${item.email}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
             ) : (
-              <div className="space-y-2">
-                <Input
-                  aria-label="새 참여자 이름"
-                  placeholder="이름"
-                  value={newPerson.name}
-                  required
-                  maxLength={120}
-                  disabled={Boolean(createdPersonId)}
-                  onChange={(event) =>
-                    setNewPerson((form) => ({ ...form, name: event.target.value }))
-                  }
-                />
-                <Input
-                  aria-label="새 참여자 이메일"
-                  placeholder="이메일"
-                  type="email"
-                  value={newPerson.email}
-                  required
-                  maxLength={320}
-                  disabled={Boolean(createdPersonId)}
-                  onChange={(event) =>
-                    setNewPerson((form) => ({ ...form, email: event.target.value }))
-                  }
-                />
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label htmlFor="add-person-name" className="block text-sm font-medium">
+                    이름 (필수)
+                  </label>
+                  <Input
+                    id="add-person-name"
+                    placeholder="예: 김민지"
+                    value={newPerson.name}
+                    required
+                    maxLength={120}
+                    disabled={Boolean(createdPersonId)}
+                    onChange={(event) =>
+                      setNewPerson((form) => ({ ...form, name: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="add-person-email" className="block text-sm font-medium">
+                    이메일 (필수)
+                  </label>
+                  <Input
+                    id="add-person-email"
+                    placeholder="예: minji@example.com"
+                    type="email"
+                    value={newPerson.email}
+                    required
+                    maxLength={320}
+                    disabled={Boolean(createdPersonId)}
+                    onChange={(event) =>
+                      setNewPerson((form) => ({ ...form, email: event.target.value }))
+                    }
+                  />
+                </div>
                 {createdPersonId && (
                   <p role="status" className="text-xs text-muted-foreground">
                     참여자가 등록되었습니다. 프로젝트 연결을 다시 시도할 수 있습니다.
@@ -929,41 +944,64 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
           {person && (
             <div className="space-y-5 text-sm">
               {personEditing && !isDemo ? (
-                <form className="grid gap-2 md:grid-cols-2" onSubmit={submitPerson}>
-                  <Input
-                    aria-label="참여자 이름"
-                    value={personForm.name}
-                    required
-                    maxLength={120}
-                    onChange={(event) =>
-                      setPersonForm((form) => ({ ...form, name: event.target.value }))
-                    }
-                  />
-                  <Input
-                    aria-label="참여자 이메일"
-                    type="email"
-                    value={personForm.email}
-                    maxLength={320}
-                    onChange={(event) =>
-                      setPersonForm((form) => ({ ...form, email: event.target.value }))
-                    }
-                  />
-                  <Input
-                    aria-label="참여자 별칭"
-                    placeholder="별칭 (쉼표 구분)"
-                    value={personForm.aliases}
-                    onChange={(event) =>
-                      setPersonForm((form) => ({ ...form, aliases: event.target.value }))
-                    }
-                  />
-                  <Input
-                    aria-label="참여자 역할"
-                    value={personForm.role}
-                    maxLength={120}
-                    onChange={(event) =>
-                      setPersonForm((form) => ({ ...form, role: event.target.value }))
-                    }
-                  />
+                <form className="grid gap-3 md:grid-cols-2" onSubmit={submitPerson}>
+                  <div className="space-y-1">
+                    <label htmlFor="edit-person-name" className="block font-medium">
+                      이름 (필수)
+                    </label>
+                    <Input
+                      id="edit-person-name"
+                      placeholder="예: 김민지"
+                      value={personForm.name}
+                      required
+                      maxLength={120}
+                      onChange={(event) =>
+                        setPersonForm((form) => ({ ...form, name: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="edit-person-email" className="block font-medium">
+                      이메일 (선택)
+                    </label>
+                    <Input
+                      id="edit-person-email"
+                      placeholder="예: minji@example.com"
+                      type="email"
+                      value={personForm.email}
+                      maxLength={320}
+                      onChange={(event) =>
+                        setPersonForm((form) => ({ ...form, email: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="edit-person-aliases" className="block font-medium">
+                      별칭 (선택)
+                    </label>
+                    <Input
+                      id="edit-person-aliases"
+                      placeholder="예: 민지, MJ (쉼표로 구분)"
+                      value={personForm.aliases}
+                      onChange={(event) =>
+                        setPersonForm((form) => ({ ...form, aliases: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="edit-person-role" className="block font-medium">
+                      역할 (선택)
+                    </label>
+                    <Input
+                      id="edit-person-role"
+                      placeholder="예: 프로덕트 매니저"
+                      value={personForm.role}
+                      maxLength={120}
+                      onChange={(event) =>
+                        setPersonForm((form) => ({ ...form, role: event.target.value }))
+                      }
+                    />
+                  </div>
                   <div className="flex gap-2 md:col-span-2">
                     <Button type="submit" disabled={busy || !personForm.name.trim()}>
                       저장
