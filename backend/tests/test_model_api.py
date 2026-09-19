@@ -60,8 +60,12 @@ class FakeSession:
         self.workspace = workspace
         self.added: list[Any] = []
         self.commits = 0
+        self.get_calls: list[dict[str, Any]] = []
+        self.workspace_locked = False
 
-    async def get(self, model: Any, identifier: Any) -> Workspace | None:
+    async def get(self, model: Any, identifier: Any, **kwargs: Any) -> Workspace | None:
+        self.get_calls.append(kwargs)
+        self.workspace_locked = bool(kwargs.get("with_for_update"))
         return self.workspace if identifier == self.workspace.id else None
 
     def add(self, obj: Any) -> None:
@@ -69,6 +73,7 @@ class FakeSession:
 
     async def commit(self) -> None:
         self.commits += 1
+        self.workspace_locked = False
 
     async def refresh(self, obj: Any) -> None:
         pass
@@ -238,6 +243,23 @@ def test_choosing_models_saves_them_on_the_workspace(env: Env) -> None:
     assert env.workspace.model_settings["embedding"] == EMBED_LARGE
     assert env.session.commits == 1
     assert by_role(response)["answer"]["selected"]["model"] == "gpt-4o"
+
+
+def test_model_update_locks_workspace_before_reading_key_options(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def locked_options(*args: Any) -> Any:
+        assert env.session.workspace_locked is True
+        assert env.session.get_calls[-1] == {
+            "with_for_update": True,
+            "populate_existing": True,
+        }
+        return OPTIONS
+
+    monkeypatch.setattr(models_module, "options_for_workspace", locked_options)
+    response = put_models(TestClient(app), {"answer": {"provider": "openai", "model": "gpt-4o"}})
+    assert response.status_code == 200
+    assert env.session.workspace_locked is False
 
 
 def test_a_partial_update_keeps_the_choices_it_does_not_mention(env: Env) -> None:
