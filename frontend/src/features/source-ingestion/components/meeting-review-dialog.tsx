@@ -10,11 +10,12 @@ import { useApi } from "@/lib/api/context";
 import { reviewUtterances, unresolvedReviewPeople, type TranscriptTurn } from "../lib/transcript-draft";
 import { TranscriptEditor, type SpeakerOption } from "./transcript-editor";
 
-export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirmed }: {
+export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirmed, onRetried }: {
   workspaceId: string;
   sourceId?: string;
   onClose: () => void;
   onConfirmed?: (job: ProcessingJob) => void;
+  onRetried?: (job: ProcessingJob) => void;
 }) {
   const api = useApi();
   const [review, setReview] = useState<MeetingReview>();
@@ -61,12 +62,26 @@ export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirme
   }, [api, workspaceId]);
   useEffect(() => { if (sourceId) void load(sourceId); else { setReview(undefined); setRows([]); setJob(undefined); setLoadError(undefined); } }, [sourceId, load]);
   useEffect(() => {
-    if (!sourceId || review?.reviewState !== "transcribing") return;
+    if (!sourceId || review?.reviewState !== "transcribing" || review.status === "failed") return;
     const timer = window.setInterval(() => void load(sourceId, true), 3000);
     return () => window.clearInterval(timer);
-  }, [sourceId, review?.reviewState, load]);
+  }, [sourceId, review?.reviewState, review?.status, load]);
   const invalidPersonRows = unresolvedReviewPeople(rows, people);
   const utterances = (): MeetingUtterance[] => reviewUtterances(rows, people, speakers, idMap.current);
+  const retryTranscription = async () => {
+    if (!sourceId || busy || review?.reviewState !== "transcribing" || review.status !== "failed") return;
+    setBusy(true);
+    try {
+      const job = await api.retryMeetingTranscription(workspaceId, sourceId);
+      await load(sourceId);
+      onRetried?.(job);
+      window.dispatchEvent(new Event("maeglagi:sources-changed"));
+      toast.success("저장된 녹음으로 음성 인식을 다시 시작했습니다.");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) await load(sourceId);
+      toast.error(error instanceof Error ? error.message : "음성 인식을 다시 시작하지 못했습니다.");
+    } finally { setBusy(false); }
+  };
   const save = async () => {
     if (!sourceId || !review || busy || invalidPersonRows.length) return;
     setBusy(true);
@@ -103,8 +118,8 @@ export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirme
   };
   return <Dialog open={Boolean(sourceId)} onOpenChange={(open) => { if (!open && !busy && (!dirty || window.confirm("저장하지 않은 변경을 버릴까요?"))) onClose(); }}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>회의 대본 검토</DialogTitle><DialogDescription>{review?.reviewState === "confirmed" ? "확인된 대본과 프로젝트 정보는 유지됩니다." : "프로젝트와 화자·내용을 저장한 뒤 확인하면 분석과 색인을 시작합니다."}</DialogDescription></DialogHeader>
     {loading ? <p className="text-sm text-muted-foreground">대본을 불러오는 중…</p> : loadError ? <div role="alert" className="space-y-2 rounded-md border border-destructive p-3 text-sm"><p>{loadError}</p><Button size="sm" variant="outline" onClick={() => sourceId && void load(sourceId)}>다시 불러오기</Button></div> : !review ? <p className="text-sm text-muted-foreground">대본을 불러올 수 없습니다.<Button size="sm" variant="outline" onClick={() => sourceId && void load(sourceId)}>다시 시도</Button></p> : <div className="space-y-4">
-      <p className="text-sm font-medium">{review.title} · {review.reviewState === "transcribing" ? "서버 음성 인식 중" : review.reviewState === "confirmed" ? "확인됨" : "검토 필요"}</p>
-      {review.reviewState === "transcribing" ? <div className="space-y-2"><p className="text-sm text-muted-foreground">음성 인식이 끝나면 대본이 자동으로 갱신됩니다. 소스 목록에서도 다시 열 수 있습니다.</p><Button size="sm" variant="outline" onClick={() => sourceId && void load(sourceId, true)}>지금 새로고침</Button></div> : <>
+      <p className="text-sm font-medium">{review.title} · {review.reviewState === "transcribing" ? review.status === "failed" ? "음성 인식 실패" : "서버 음성 인식 중" : review.reviewState === "confirmed" ? "확인됨" : "검토 필요"}</p>
+      {review.reviewState === "transcribing" ? review.status === "failed" ? <div role="alert" className="space-y-2 rounded-md border border-destructive p-3 text-sm"><p>서버 음성 인식이 완료되지 않았습니다. 업로드한 녹음{review.utterances.length ? "과 실시간 대본 초안은" : "은"} 저장돼 있습니다.</p>{review.errorMessage && <p className="text-muted-foreground">{review.errorMessage}</p>}<div className="flex gap-2"><Button size="sm" disabled={busy} onClick={() => void retryTranscription()}>{busy ? "다시 시도 중…" : "저장된 녹음으로 다시 시도"}</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => sourceId && void load(sourceId)}>상태 새로고침</Button></div></div> : <div className="space-y-2"><p className="text-sm text-muted-foreground">음성 인식이 끝나면 대본이 자동으로 갱신됩니다. 소스 목록에서도 다시 열 수 있습니다.</p><Button size="sm" variant="outline" onClick={() => sourceId && void load(sourceId, true)}>지금 새로고침</Button></div> : <>
         {conflict && <div role="alert" className="rounded-md border border-destructive p-3 text-sm">대본 버전이 달라졌습니다. 현재 편집 내용을 보관하려면 복사한 뒤 다시 불러와 주세요.<Button size="sm" variant="outline" className="ml-2" onClick={() => sourceId && void load(sourceId)}>다시 불러오기</Button></div>}
         <label className="block space-y-1 text-sm">회의 프로젝트<select aria-label="회의 프로젝트" value={projectId} disabled={busy || review.reviewState === "confirmed"} onChange={(event) => { setProjectId(event.target.value); setDirty(true); }} className="w-full rounded-md border bg-background px-3 py-2"><option value="">프로젝트를 선택하세요</option>{projects.filter((item) => !item.archivedAt || item.id === projectId).map((item) => <option key={item.id} value={item.id}>{item.name}{item.archivedAt ? " (보관됨)" : ""}</option>)}</select></label>
         <div className="space-y-2"><p className="text-sm font-medium">새 발언 화자</p><div className="flex flex-wrap gap-1.5">{speakers.map((speaker) => <Button key={speaker.id} size="sm" variant="outline" disabled={review.reviewState === "confirmed"} aria-pressed={activeSpeaker === speaker.id} className={activeSpeaker === speaker.id ? "ring-2 ring-current" : ""} onClick={() => setActiveSpeaker(speaker.id)}>{speaker.name}</Button>)}</div><Button size="sm" variant="ghost" disabled={review.reviewState === "confirmed"} onClick={() => { const name = window.prompt("새 화자 이름"); if (name?.trim()) { const id = `local-${Date.now()}`; setSpeakers((values) => [...values, { id, name: name.trim() }]); setActiveSpeaker(id); } }}>미등록 화자 추가</Button></div>

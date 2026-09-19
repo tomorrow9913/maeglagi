@@ -1,10 +1,13 @@
+import asyncio
 import copy
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import Settings
 from app.modules.context_engine.application.context_store import (
@@ -235,6 +238,9 @@ class FakeSession:
     async def get(self, model: Any, identifier: Any) -> Any:
         return Workspace(id=WORKSPACE, owner_id=OWNER, name="맥락이 PoC")
 
+    def add(self, obj: Any) -> None:
+        pass
+
     async def commit(self) -> None:
         self.commits += 1
 
@@ -287,7 +293,91 @@ async def test_the_service_names_the_store_after_the_workspace_and_releases_its_
 
     assert repository.record is not None
     assert repository.record.subject == "맥락이 PoC"
-    assert session.commits == 1  # commits right after the store update so the row lock is freed
+    assert session.commits == 3  # extraction, context/phase, and completed checkpoint
+
+
+@pytest.mark.parametrize("decisions_changed", [False, True])
+async def test_extracted_checkpoint_revalidates_decisions_before_context_apply(
+    monkeypatch: pytest.MonkeyPatch, decisions_changed: bool
+) -> None:
+    repository = FakeRepository(stored_record("old decision"))
+    record, session = source(), FakeSession()
+    record.review_state = "confirmed"
+    adapter = FakeAdapter(architecture_meeting().responses)
+    service = SourceAnalysisService(
+        WithKey(adapter),  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: repository,  # type: ignore[arg-type]
+    )
+    original_apply = ContextStoreService.apply
+    attempts = 0
+
+    async def fail_once(self: ContextStoreService, **kwargs: Any) -> list[str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("context update interrupted")
+        return await original_apply(self, **kwargs)
+
+    monkeypatch.setattr(ContextStoreService, "apply", fail_once)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    assert record.analysis_checkpoint["phase"] == "extracted"
+    initial_fingerprint = record.analysis_checkpoint["decision_fingerprint"]
+    initial_requests = sum(
+        request.schema_name != "extraction_context_update" for request in adapter.requests
+    )
+
+    if decisions_changed:
+        # A terminal failure can leave an extracted checkpoint for an explicit
+        # retry after another source has advanced the workspace decisions.
+        record.status = "failed"
+        repository.record = stored_record("replacement decision")
+    await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert record.analysis_checkpoint["phase"] == "done"
+    extraction_requests = sum(
+        request.schema_name != "extraction_context_update" for request in adapter.requests
+    )
+    assert (extraction_requests > initial_requests) is decisions_changed
+    assert (
+        record.analysis_checkpoint["decision_fingerprint"] != initial_fingerprint
+    ) is decisions_changed
+
+
+async def test_legacy_extracted_checkpoint_is_reextracted_before_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FakeRepository(stored_record("replacement decision"))
+    record, session = source(), FakeSession()
+    record.review_state = "confirmed"
+    adapter = FakeAdapter(architecture_meeting().responses)
+    service = SourceAnalysisService(
+        WithKey(adapter),  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: repository,  # type: ignore[arg-type]
+    )
+    original_apply = ContextStoreService.apply
+    attempts = 0
+
+    async def fail_once(self: ContextStoreService, **kwargs: Any) -> list[str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("context update interrupted")
+        return await original_apply(self, **kwargs)
+
+    monkeypatch.setattr(ContextStoreService, "apply", fail_once)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    del record.analysis_checkpoint["decision_fingerprint"]
+    first_requests = len(adapter.requests)
+
+    await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert record.analysis_checkpoint["phase"] == "done"
+    assert "decision_fingerprint" in record.analysis_checkpoint
+    assert len(adapter.requests) > first_requests
 
 
 # --- the Celery task calls it ---------------------------------------------------------------
@@ -434,6 +524,40 @@ async def test_server_stt_stops_at_review_and_keeps_live_edits(wired: Any) -> No
     assert RecordingAnalysis.calls == []
 
 
+async def test_final_stt_failure_is_retryable_without_downstream_writes(
+    wired: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = source()
+    record.transcript_source = "server"
+    record.review_state = "transcribing"
+    record.review_utterances = [
+        {"id": "live-1", "speakerName": "지훈", "text": "사람이 수정한 문장"}
+    ]
+    wired(record, b"audio")
+
+    async def fail_transcription(self: Any, session: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("transcription provider unavailable")
+
+    @asynccontextmanager
+    async def held_lock(source_id: UUID) -> Any:
+        yield
+
+    monkeypatch.setattr(StubIngestion, "transcribe", fail_transcription)
+    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+
+    error = await tasks._run_source_attempt(record.id, final_attempt=True)
+
+    assert isinstance(error, RuntimeError)
+    assert (record.status, record.review_state, record.processing_stage) == (
+        "failed",
+        "transcribing",
+        "transcribing",
+    )
+    assert record.review_utterances[0]["text"] == "사람이 수정한 문장"
+    assert StubIngestion.index_calls == 0
+    assert RecordingAnalysis.calls == []
+
+
 async def test_duplicate_confirmed_job_does_not_index_twice(wired: Any) -> None:
     record = source()
     record.transcript_source = "browser"
@@ -449,6 +573,170 @@ async def test_duplicate_confirmed_job_does_not_index_twice(wired: Any) -> None:
     assert len(RecordingAnalysis.calls) == 1
 
 
+async def test_redelivered_processing_job_resumes_after_worker_loss(wired: Any) -> None:
+    record = source()
+    record.transcript_source = "browser"
+    record.review_state = "confirmed"
+    record.status = "processing"  # The dead worker committed this before it died.
+    record.transcript_text = "민수: 수정본"
+    record.review_utterances = [{"id": "1", "speakerName": "민수", "text": "수정본"}]
+    wired(record)
+
+    await tasks._process_source(record.id)
+
+    assert record.status == "succeeded"
+    assert StubIngestion.index_calls == 1
+    assert len(RecordingAnalysis.calls) == 1
+
+
+async def test_concurrent_attempts_wait_then_recheck_succeeded_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock = asyncio.Lock()
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+    status = "processing"
+
+    @asynccontextmanager
+    async def held_lock(source_id: UUID) -> Any:
+        async with lock:
+            yield
+
+    async def process(source_id: UUID) -> None:
+        nonlocal calls, status
+        if status == "succeeded":
+            return
+        calls += 1
+        entered.set()
+        await release.wait()
+        status = "succeeded"
+
+    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(tasks, "_process_source", process)
+    identifier = uuid4()
+    first = asyncio.create_task(tasks._run_source_attempt(identifier, final_attempt=False))
+    await entered.wait()
+    second = asyncio.create_task(tasks._run_source_attempt(identifier, final_attempt=False))
+    await asyncio.sleep(0)
+    assert calls == 1
+    release.set()
+    assert await asyncio.gather(first, second) == [None, None]
+    assert calls == 1
+
+
+async def test_advisory_lock_keeps_a_dedicated_transaction_until_attempt_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[str] = []
+    workspace_id = uuid4()
+    keys: list[int] = []
+
+    class Connection:
+        async def __aenter__(self) -> "Connection":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            pass
+
+        async def execute(self, statement: Any, parameters: Any = None) -> Any:
+            statements.append(str(statement))
+            if "pg_advisory_xact_lock" in str(statement):
+                keys.append(parameters["key"])
+            if "SELECT workspace_id" in str(statement):
+                return SimpleNamespace(scalar_one_or_none=lambda: workspace_id)
+            return None
+
+        async def rollback(self) -> None:
+            statements.append("ROLLBACK")
+
+    class Engine:
+        def connect(self) -> Connection:
+            return Connection()
+
+    monkeypatch.setattr(tasks, "engine", Engine())
+    async with tasks._source_execution_lock(uuid4()):
+        assert len(keys) == 2
+        assert keys[0] >= 0 and keys[1] < 0
+        assert any("SELECT workspace_id" in statement for statement in statements)
+        assert "ROLLBACK" not in statements
+    assert statements[-1] == "ROLLBACK"
+    assert not any("pg_try_advisory_lock" in statement for statement in statements)
+
+
+async def test_workspace_lock_survives_checkpoint_commits_and_allows_other_workspaces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_source, second_source, other_source = uuid4(), uuid4(), uuid4()
+    workspace, other_workspace = uuid4(), uuid4()
+    source_workspaces = {
+        first_source: workspace,
+        second_source: workspace,
+        other_source: other_workspace,
+    }
+    advisory_locks: dict[int, asyncio.Lock] = {}
+    waiting_for_workspace = asyncio.Event()
+    workspace_key = (int.from_bytes(workspace.bytes[:8], "big") & ((1 << 63) - 1)) - (1 << 63)
+
+    class Connection:
+        def __init__(self) -> None:
+            self.held: list[asyncio.Lock] = []
+
+        async def __aenter__(self) -> "Connection":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            await self.rollback()
+
+        async def execute(self, statement: Any, parameters: Any = None) -> Any:
+            sql = str(statement)
+            if "pg_advisory_xact_lock" in sql:
+                key = parameters["key"]
+                lock = advisory_locks.setdefault(key, asyncio.Lock())
+                if key == workspace_key and lock.locked():
+                    waiting_for_workspace.set()
+                await lock.acquire()
+                self.held.append(lock)
+            elif "SELECT workspace_id" in sql:
+                workspace_id = source_workspaces[parameters["source_id"]]
+                return SimpleNamespace(scalar_one_or_none=lambda: workspace_id)
+            return None
+
+        async def rollback(self) -> None:
+            for lock in reversed(self.held):
+                lock.release()
+            self.held.clear()
+
+    class Engine:
+        def connect(self) -> Connection:
+            return Connection()
+
+    monkeypatch.setattr(tasks, "engine", Engine())
+    first_entered, release_first = asyncio.Event(), asyncio.Event()
+    second_entered, other_entered = asyncio.Event(), asyncio.Event()
+    checkpoint_commits = 0
+
+    async def run(source_id: UUID, entered: asyncio.Event) -> None:
+        nonlocal checkpoint_commits
+        async with tasks._source_execution_lock(source_id):
+            entered.set()
+            checkpoint_commits += 1  # A separate write session commits while the lock stays held.
+            if source_id == first_source:
+                await release_first.wait()
+
+    first = asyncio.create_task(run(first_source, first_entered))
+    await first_entered.wait()
+    second = asyncio.create_task(run(second_source, second_entered))
+    await waiting_for_workspace.wait()
+    other = asyncio.create_task(run(other_source, other_entered))
+    await other_entered.wait()
+    assert checkpoint_commits == 2
+    assert not second_entered.is_set()
+    release_first.set()
+    await asyncio.gather(first, second, other)
+    assert second_entered.is_set()
+    assert checkpoint_commits == 3
+
+
 async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:
     adapter = FakeAdapter(architecture_meeting().responses)
     ingestion = WithKey(adapter)
@@ -462,3 +750,196 @@ async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:
 
     assert [role.value for role in ingestion.roles] == ["extraction"]
     assert {r.model for r in adapter.requests} == {"chosen-extraction-model"}
+
+
+async def test_partial_graph_write_replays_checkpoint_without_reextracting_or_reapplying_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PartialGraph(FakeStore):
+        failed = False
+
+        async def execute(self, query: str, parameters: dict[str, Any] | None = None) -> Any:
+            if "MERGE (a)-[r:" in query and not self.failed:
+                self.failed = True
+                raise RuntimeError("Neo4j stopped after entity write")
+            return await super().execute(query, parameters)
+
+        async def close(self) -> None:
+            pass
+
+    graph = PartialGraph()
+    monkeypatch.setattr(
+        "app.modules.ingestion.application.source_analysis.Neo4jGraphStore.from_settings",
+        lambda settings: graph,
+    )
+    settings = Settings(
+        _env_file=None,
+        neo4j_uri="bolt://localhost",
+        neo4j_username="neo4j",
+        neo4j_password="test",
+    )
+    record, repository, session = source(), FakeRepository(), FakeSession()
+    record.review_state = "confirmed"
+    adapter = FakeAdapter(architecture_meeting().responses)
+    service = SourceAnalysisService(
+        WithKey(adapter),
+        settings,
+        repository_factory=lambda _: repository,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RuntimeError, match="Neo4j stopped"):
+        await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    assert record.analysis_checkpoint["phase"] == "context_applied"
+    assert session.commits == 2
+    initial_requests = len(adapter.requests)
+    timeline_ids = [row.id for row in repository.timeline[record.id]]
+    initial_entities = graph.rows("MERGE (e:Entity {id: row.id})")
+
+    await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert len(adapter.requests) == initial_requests
+    assert [row.id for row in repository.timeline[record.id]] == timeline_ids
+    assert record.analysis_checkpoint["phase"] == "done"
+    entity_writes = [
+        params["rows"] for query, params in graph.calls if "MERGE (e:Entity {id: row.id})" in query
+    ]
+    assert entity_writes == [initial_entities, initial_entities]
+
+
+async def test_committed_analysis_checkpoint_skips_provider_and_graph_on_redelivery() -> None:
+    record, session = source(), FakeSession()
+    record.review_state = "confirmed"
+    first = SourceAnalysisService(
+        WithKey(FakeAdapter(architecture_meeting().responses)),  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: FakeRepository(),
+    )
+    warnings = await first.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    assert record.analysis_checkpoint["phase"] == "done"
+    commits = session.commits
+
+    resumed = SourceAnalysisService(NoChatKey(), Settings(_env_file=None))  # type: ignore[arg-type]
+    assert await resumed.run(session, source=record, text=architecture_meeting().text) == warnings  # type: ignore[arg-type]
+    assert session.commits == commits
+
+
+async def test_task_resumes_committed_analysis_without_reindexing(wired: Any) -> None:
+    record = source()
+    record.kind = "document"
+    record.content_text = "persisted document"
+    record.analysis_checkpoint = {"phase": "done"}
+    wired(record)
+
+    await tasks._process_source(record.id)
+
+    assert record.status == "succeeded"
+    assert StubIngestion.index_calls == 0
+    assert RecordingAnalysis.calls[0]["text"] == "persisted document"
+
+
+async def test_worker_loss_after_analysis_commit_resumes_without_reindexing(
+    wired: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = source()
+    record.kind = "document"
+    record.title = "plan.md"
+    wired(record, b"persisted document")
+
+    class CommitThenDie:
+        calls = 0
+
+        async def run(self, session: Any, *, source: Source, text: str) -> list[str]:
+            type(self).calls += 1
+            if type(self).calls == 1:
+                source.analysis_checkpoint = {"phase": "done"}
+                session.add(source)
+                await session.commit()
+                raise RuntimeError("worker lost after analysis commit")
+            return []
+
+    monkeypatch.setattr(tasks, "SourceAnalysisService", CommitThenDie)
+    with pytest.raises(RuntimeError, match="worker lost"):
+        await tasks._process_source(record.id)
+    assert record.analysis_checkpoint["phase"] == "done"
+    assert StubIngestion.index_calls == 1
+
+    await tasks._process_source(record.id)
+    assert record.status == "succeeded"
+    assert StubIngestion.index_calls == 1
+    assert CommitThenDie.calls == 2
+
+
+async def test_database_error_inside_pipeline_is_an_infrastructure_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updates: list[UUID] = []
+
+    @asynccontextmanager
+    async def held_lock(source_id: UUID) -> Any:
+        yield
+
+    async def fail_query(source_id: UUID) -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database unavailable"))
+
+    async def update(source_id: UUID, **kwargs: Any) -> None:
+        updates.append(source_id)
+
+    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(tasks, "_process_source", fail_query)
+    monkeypatch.setattr(tasks, "_update_source", update)
+
+    with pytest.raises(OperationalError):
+        await tasks._run_source_attempt(SOURCE, final_attempt=True)
+    assert updates == []
+
+
+def test_infrastructure_retries_do_not_consume_application_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[bool, dict[str, Any]]] = []
+
+    async def infrastructure_failure(source_id: UUID, *, final_attempt: bool) -> Any:
+        calls.append((final_attempt, {}))
+        raise ConnectionError("advisory lock unavailable")
+
+    def retry(**kwargs: Any) -> Exception:
+        calls[-1] = (calls[-1][0], kwargs)
+        return RuntimeError("scheduled retry")
+
+    monkeypatch.setattr(tasks, "_run_source_attempt", infrastructure_failure)
+    monkeypatch.setattr(tasks.process_source, "retry", retry)
+    tasks.process_source.push_request(retries=100)
+    try:
+        with pytest.raises(RuntimeError, match="scheduled retry"):
+            tasks.process_source.run(str(SOURCE), app_attempt=1)
+    finally:
+        tasks.process_source.pop_request()
+
+    assert calls[0][0] is False
+    assert calls[0][1]["kwargs"] == {"app_attempt": 1}
+    assert calls[0][1]["countdown"] == 30
+
+
+def test_provider_failure_advances_only_application_attempt_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retries: list[dict[str, Any]] = []
+
+    async def provider_failure(source_id: UUID, *, final_attempt: bool) -> Exception:
+        assert final_attempt is False
+        return RuntimeError("provider unavailable")
+
+    def retry(**kwargs: Any) -> Exception:
+        retries.append(kwargs)
+        return RuntimeError("scheduled retry")
+
+    monkeypatch.setattr(tasks, "_run_source_attempt", provider_failure)
+    monkeypatch.setattr(tasks.process_source, "retry", retry)
+    tasks.process_source.push_request(retries=100)
+    try:
+        with pytest.raises(RuntimeError, match="scheduled retry"):
+            tasks.process_source.run(str(SOURCE), app_attempt=2)
+    finally:
+        tasks.process_source.pop_request()
+
+    assert retries[0]["kwargs"] == {"app_attempt": 3}

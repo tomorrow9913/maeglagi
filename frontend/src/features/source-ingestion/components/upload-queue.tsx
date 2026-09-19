@@ -75,7 +75,7 @@ export function UploadQueue({
             ) : item.status === "failed" ? (
               <p className="mt-1.5 text-xs text-destructive">{item.errorMessage}</p>
             ) : job ? (
-              <><ProcessingTracker job={job} className="mt-2" />{job.status === "awaiting_review" && onReview && <Button size="sm" className="mt-2" onClick={() => onReview(job.sourceId)}>대본 검토</Button>}</>
+              <><ProcessingTracker job={job} className="mt-2" />{(job.status === "awaiting_review" || (job.status === "failed" && job.sourceKind === "meeting")) && onReview && <Button size="sm" className="mt-2" onClick={() => onReview(job.sourceId)}>{job.status === "failed" ? "대본·재시도 열기" : "대본 검토"}</Button>}</>
             ) : null}
           </li>
         );

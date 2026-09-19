@@ -10,12 +10,15 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    String,
     Text,
     UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
+
+from app.modules.workspaces.domain.source_state import ProcessingStage, ReviewState, SourceStatus
 
 
 class Workspace(SQLModel, table=True):
@@ -122,7 +125,9 @@ class Source(SQLModel, table=True):
     review_utterances: list[dict[str, Any]] = Field(
         default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
     )
-    review_state: str | None = Field(default=None, max_length=24)
+    review_state: ReviewState | None = Field(
+        default=None, sa_column=Column(String(24), nullable=True)
+    )
     review_revision: int = Field(default=0)
     project_id: UUID | None = Field(
         default=None, sa_column=Column(ForeignKey("workspace_projects.id", ondelete="SET NULL"))
@@ -132,8 +137,15 @@ class Source(SQLModel, table=True):
         default=None, sa_column=Column(JSONB, nullable=True)
     )
     content_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    status: str = Field(default="queued", max_length=20)
-    processing_stage: str = Field(default="uploaded", max_length=20)
+    analysis_checkpoint: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    status: SourceStatus = Field(
+        default=SourceStatus.QUEUED, sa_column=Column(String(20), nullable=False)
+    )
+    processing_stage: ProcessingStage = Field(
+        default=ProcessingStage.UPLOADED, sa_column=Column(String(20), nullable=False)
+    )
     progress: float = Field(default=0, ge=0, le=1, sa_column=Column(Float, nullable=False))
     error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(

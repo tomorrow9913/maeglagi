@@ -37,8 +37,10 @@ export function SourceUploadDialog({
   const settled = useCallback((job: ProcessingJob) => {
     window.dispatchEvent(new Event("maeglagi:sources-changed"));
     if (job.status === "awaiting_review") { toast.info("대본 검토가 준비됐습니다."); setReviewSourceId(job.sourceId); }
-    else if (job.status === "failed")
-      toast.error("소스 분석에 실패했습니다. 소스에서 상태를 확인해 주세요.");
+    else if (job.status === "failed") {
+      toast.error(job.sourceKind === "meeting" ? "회의 처리에 실패했습니다. 저장된 녹음이나 대본을 확인해 주세요." : "소스 분석에 실패했습니다. 소스에서 상태를 확인해 주세요.");
+      if (job.sourceKind === "meeting") setReviewSourceId(job.sourceId);
+    }
     else toast.success("소스 분석이 완료됐습니다. Ask에서 질문해 보세요.");
   }, []);
   const jobs = useJobPolling(ids, settled, restartKey);
@@ -86,6 +88,6 @@ export function SourceUploadDialog({
           </Button>
         )}
       </DialogContent>
-    </Dialog><MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onConfirmed={() => { setRestartKey((value) => value + 1); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} /></>
+    </Dialog><MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onRetried={() => setRestartKey((value) => value + 1)} onConfirmed={() => { setRestartKey((value) => value + 1); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} /></>
   );
 }
