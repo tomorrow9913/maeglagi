@@ -88,6 +88,119 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WorkspaceModels" }
         "422": { description: The key is not valid }
+  /api/v1/workspaces/{workspaceId}/provider-credentials:
+    parameters:
+      - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listProviderCredentials
+      summary: List credential metadata without secrets
+      responses:
+        "200":
+          description: Credentials ordered by creation time
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderCredential" } }
+        "404": { description: Workspace not found }
+    post:
+      operationId: addProviderCredential
+      summary: Add a labeled key without changing the workspace default or model choices
+      description: Provider and label must be unique within the workspace. The new key is not the default.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CredentialInput" }
+      responses:
+        "201":
+          description: Credential metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "404": { description: Workspace not found }
+        "409": { description: Provider and label already exist }
+        "422": { description: Provider or key is invalid }
+  /api/v1/workspaces/{workspaceId}/provider-credentials/{credentialId}:
+    parameters:
+      - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: credentialId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: rotateProviderCredential
+      summary: Rotate one key by ID without changing its default status or model choices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apiKey]
+              properties:
+                apiKey: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Updated credential metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "404": { description: Workspace or credential not found }
+        "422": { description: Key is invalid }
+    delete:
+      operationId: removeProviderCredential
+      summary: Remove one credential and its Vault secret
+      description: >
+        If other credentials exist, first choose another default before deleting the default.
+        The last active credential for a provider selected by a workspace model cannot be
+        removed. Removing the final credential is allowed when no model selects its provider;
+        the workspace then has no default. Model choices never change during deletion.
+      responses:
+        "204": { description: Credential and Vault secret removed }
+        "404": { description: Workspace or credential not found }
+        "409": { description: Default must be changed first or a selected model needs this provider }
+  /api/v1/workspaces/{workspaceId}/provider-credentials/{credentialId}/default:
+    parameters:
+      - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: credentialId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: chooseDefaultProviderCredential
+      summary: Select the workspace default key without changing model choices
+      responses:
+        "200":
+          description: Selected credential metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "404": { description: Workspace or credential not found }
+        "409": { description: Credential is inactive }
+  /api/v1/workspaces/{workspaceId}/llm-key:
+    parameters:
+      - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getDefaultLlmKey
+      summary: Get the default credential metadata, or null
+      responses:
+        "200":
+          description: Default credential metadata or null
+          content:
+            application/json:
+              schema:
+                oneOf: [{ $ref: "#/components/schemas/ProviderCredential" }, { type: "null" }]
+        "404": { description: Workspace not found }
+    put:
+      operationId: upsertDefaultLlmKey
+      summary: Legacy key save, rotating the matching provider and label and making it default
+      description: Preserves the existing frontend flow and leaves model choices unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CredentialInput" }
+      responses:
+        "200":
+          description: Default credential metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "404": { description: Workspace not found }
+        "422": { description: Provider or key is invalid }
   /api/v1/workspaces/{workspaceId}/ai/models:
     parameters:
       - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -127,6 +240,24 @@ paths:
         "422": { description: A job is unknown or the model is not offered for it }
 components:
   schemas:
+    CredentialInput:
+      type: object
+      required: [provider, apiKey]
+      properties:
+        provider: { type: string }
+        apiKey: { type: string, minLength: 1, writeOnly: true }
+        label: { type: string, minLength: 1, maxLength: 80, default: "기본" }
+    ProviderCredential:
+      type: object
+      required: [id, provider, label, keyHint, status, isDefault, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        provider: { type: string }
+        label: { type: string }
+        keyHint: { type: string }
+        status: { type: string }
+        isDefault: { type: boolean }
+        updatedAt: { type: string, format: date-time }
     ModelOption:
       type: object
       required: [provider, model]
@@ -250,4 +381,3 @@ components:
         status: { type: string, const: ok }
         service: { type: string }
         version: { type: string }
-
