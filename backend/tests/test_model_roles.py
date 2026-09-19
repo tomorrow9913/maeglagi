@@ -1,9 +1,11 @@
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from app.core.config import Settings
+from app.modules.context_engine.application.model_catalog import live_model_ids, models_of
 from app.modules.context_engine.application.model_roles import (
     ModelOption,
     ModelRole,
@@ -12,6 +14,11 @@ from app.modules.context_engine.application.model_roles import (
     recommendation_rank,
     roles_for_model,
     selection_of,
+)
+from app.modules.context_engine.application.provider import ModelInfo
+from app.modules.context_engine.infrastructure.provider_adapters import (
+    parse_anthropic_model,
+    parse_openai_model,
 )
 from app.modules.ingestion.application import pipeline as pipeline_module
 from app.modules.ingestion.application.pipeline import (
@@ -236,3 +243,127 @@ async def test_a_choice_whose_key_is_gone_falls_back_instead_of_calling_the_wron
 
     assert resolved.adapter.id == "anthropic"
     assert resolved.model != "gpt-4o"  # never sends an OpenAI model name to Anthropic
+
+
+# --- a job nobody chose never gets another provider's model name -----------------------------
+
+
+async def test_an_unchosen_job_never_sends_one_providers_model_name_to_another(
+    providers: None,
+) -> None:
+    resolved = await resolve({}, ["anthropic"], ModelRole.ANSWER)
+
+    assert resolved.adapter.id == "anthropic"
+    assert resolved.model == "claude-haiku-4-5"  # anthropic's own fallback, not "gpt-4o-mini"
+
+
+async def test_a_provider_without_a_configured_fallback_uses_the_flat_deployment_setting(
+    providers: None,
+) -> None:
+    resolved = await resolve({}, ["openai"], ModelRole.EMBEDDING)
+
+    assert resolved.model == "deployment-default"
+
+
+async def test_operators_can_change_a_providers_fallback_without_touching_code(
+    providers: None,
+) -> None:
+    configured = IngestionPipeline(
+        Settings(
+            _env_file=None,
+            provider_fallback_models={"anthropic": {"answer": "claude-newer"}},
+        )
+    )
+
+    resolved = await configured.provider_with_model(
+        Session({}, ["anthropic"]),  # type: ignore[arg-type]
+        workspace_id=WORKSPACE,
+        owner_id=OWNER,
+        role=ModelRole.ANSWER,
+    )
+
+    assert resolved.model == "claude-newer"
+
+
+# --- retired models are not offered ----------------------------------------------------------
+
+TODAY = date(2026, 9, 20)
+
+
+def test_a_model_the_provider_has_already_retired_is_not_offered() -> None:
+    live = live_model_ids(
+        [
+            ModelInfo(id="gpt-old", shutdown_date=date(2026, 9, 1)),
+            ModelInfo(id="gpt-today", shutdown_date=TODAY),
+            ModelInfo(id="gpt-later", shutdown_date=date(2026, 12, 1)),
+            ModelInfo(id="gpt-4o-mini"),
+        ],
+        today=TODAY,
+    )
+
+    assert live == ["gpt-later", "gpt-4o-mini"]
+
+
+def test_a_shutdown_date_that_is_today_counts_as_gone() -> None:
+    assert live_model_ids([ModelInfo(id="m", shutdown_date=TODAY)], today=TODAY) == []
+
+
+def test_retirement_filtering_does_not_disturb_the_price_ordering() -> None:
+    live = live_model_ids(
+        [ModelInfo(id="gpt-cheap"), ModelInfo(id="gpt-old", shutdown_date=date(2026, 1, 1))],
+        today=TODAY,
+    )
+
+    options = options_by_role([(OPENAI, live)], {("openai", "gpt-cheap"): 1.0})
+
+    assert [o.model for o in options[ModelRole.ANSWER]] == ["gpt-cheap"]
+
+
+async def test_the_catalog_leaves_retired_models_out_of_what_a_key_offers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Listing:
+        id = "openai"
+        capabilities = OPENAI_CAPS
+
+        async def list_model_infos(self, api_key: str) -> list[ModelInfo]:
+            return [
+                ModelInfo(id="gpt-4o-mini"),
+                ModelInfo(id="gpt-retired", shutdown_date=date(2020, 1, 1)),
+            ]
+
+    assert await models_of(Listing(), "key") == ["gpt-4o-mini"]  # type: ignore[arg-type]
+
+
+# --- what the provider reports ---------------------------------------------------------------
+
+
+def test_openai_style_metadata_is_read_from_the_models_list() -> None:
+    info = parse_openai_model(
+        {"id": "gpt-x", "created": 1686935002, "shutdown_date": "2027-02-03", "owned_by": "o"}
+    )
+
+    assert info is not None
+    assert info.id == "gpt-x"
+    assert info.created == datetime(2023, 6, 16, 17, 3, 22, tzinfo=UTC)  # 1686935002, UTC
+    assert info.shutdown_date == date(2027, 2, 3)
+
+
+def test_missing_or_odd_metadata_is_unknown_not_an_error() -> None:
+    assert parse_openai_model({"id": "gpt-x"}) == ModelInfo(id="gpt-x")
+    assert parse_openai_model({"id": "gpt-y", "created": "soon", "shutdown_date": 5}) == ModelInfo(
+        id="gpt-y"
+    )
+    assert parse_openai_model({"object": "model"}) is None
+    assert parse_openai_model("nope") is None
+
+
+def test_anthropic_metadata_is_read_from_the_models_list() -> None:
+    info = parse_anthropic_model({"id": "claude-x", "created_at": "2026-07-24T00:00:00Z"})
+
+    assert info is not None
+    assert info.created == datetime(2026, 7, 24, tzinfo=UTC)
+    assert info.shutdown_date is None
+    assert parse_anthropic_model({"id": "claude-y", "created_at": "garbage"}) == ModelInfo(
+        id="claude-y"
+    )

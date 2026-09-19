@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -9,6 +10,7 @@ from app.modules.context_engine.application.provider import (
     ChatResponse,
     EmbeddingRequest,
     EmbeddingResponse,
+    ModelInfo,
     StructuredOutputRequest,
     StructuredOutputResponse,
     TranscriptionRequest,
@@ -23,6 +25,40 @@ class ProviderError(RuntimeError):
 
 class ProviderCapabilityError(ProviderError):
     pass
+
+
+def _parse_date(value: Any) -> date | None:
+    """A provider's date field: ISO date or datetime string. Anything else is unknown."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+
+
+def parse_openai_model(item: Any) -> ModelInfo | None:
+    """One entry of an OpenAI-style `/models` list: id, created (epoch), shutdown_date."""
+    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+        return None
+    created = item.get("created")
+    return ModelInfo(
+        id=item["id"],
+        created=datetime.fromtimestamp(created, UTC) if isinstance(created, int) else None,
+        shutdown_date=_parse_date(item.get("shutdown_date")),
+    )
+
+
+def parse_anthropic_model(item: Any) -> ModelInfo | None:
+    """One entry of Anthropic's `/models` list: id and created_at (RFC 3339)."""
+    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+        return None
+    created_at = item.get("created_at")
+    try:
+        created = datetime.fromisoformat(created_at) if isinstance(created_at, str) else None
+    except ValueError:
+        created = None
+    return ModelInfo(id=item["id"], created=created)
 
 
 class OpenAICompatibleAdapter:
@@ -69,7 +105,7 @@ class OpenAICompatibleAdapter:
             return False, "유효하지 않거나 권한이 없는 API key입니다."
         return False, f"Provider가 API key를 확인하지 못했습니다 ({response.status_code})."
 
-    async def list_models(self, api_key: str) -> list[str]:
+    async def list_model_infos(self, api_key: str) -> list[ModelInfo]:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(
@@ -79,10 +115,11 @@ class OpenAICompatibleAdapter:
             raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
             raise ProviderError(f"모델 목록을 가져오지 못했습니다 ({response.status_code}).")
-        payload = response.json()
-        return sorted(
-            item["id"] for item in payload.get("data", []) if isinstance(item.get("id"), str)
-        )
+        parsed = (parse_openai_model(item) for item in response.json().get("data", []))
+        return [info for info in parsed if info is not None]
+
+    async def list_models(self, api_key: str) -> list[str]:
+        return sorted(info.id for info in await self.list_model_infos(api_key))
 
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
         payload: dict[str, Any] = {
@@ -301,7 +338,7 @@ class AnthropicAdapter:
             return False, "유효하지 않거나 권한이 없는 API key입니다."
         return False, f"Provider가 API key를 확인하지 못했습니다 ({response.status_code})."
 
-    async def list_models(self, api_key: str) -> list[str]:
+    async def list_model_infos(self, api_key: str) -> list[ModelInfo]:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(
@@ -311,7 +348,11 @@ class AnthropicAdapter:
             raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
             raise ProviderError(f"모델 목록을 가져오지 못했습니다 ({response.status_code}).")
-        return sorted(item["id"] for item in response.json().get("data", []))
+        parsed = (parse_anthropic_model(item) for item in response.json().get("data", []))
+        return [info for info in parsed if info is not None]
+
+    async def list_models(self, api_key: str) -> list[str]:
+        return sorted(info.id for info in await self.list_model_infos(api_key))
 
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
         payload: dict[str, Any] = {

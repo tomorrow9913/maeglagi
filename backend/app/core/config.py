@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     transcription_model: str = "whisper-1"
     extraction_model: str = "gpt-4o-mini"
     answer_model: str = "gpt-4o-mini"
+    # What a job uses when a workspace never chose a model, per provider. Without this the flat
+    # settings above (OpenAI names) would be sent to whichever provider the key belongs to.
+    # Operators keep it current (env PROVIDER_FALLBACK_MODELS takes JSON).
+    provider_fallback_models: dict[str, dict[str, str]] = {
+        "anthropic": {"answer": "claude-haiku-4-5"},
+        "nvidia": {"answer": "meta/llama-3.1-8b-instruct"},
+    }
     chunk_size_chars: int = 1200
     chunk_overlap_chars: int = 200
     sentry_dsn: SecretStr = SecretStr("")

@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -11,17 +12,26 @@ from app.modules.context_engine.application.model_roles import (
     ModelRole,
     options_by_role,
 )
-from app.modules.context_engine.application.provider import ProviderAdapter
+from app.modules.context_engine.application.provider import ModelInfo, ProviderAdapter
 from app.modules.context_engine.infrastructure.models import Chunk
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.workspaces.infrastructure.models import ProviderCredential
 
 
+def live_model_ids(infos: list[ModelInfo], today: date | None = None) -> list[str]:
+    """Ids of models the provider has not retired. A shutdown date that has arrived means gone."""
+    today = today or date.today()
+    return [i.id for i in infos if i.shutdown_date is None or i.shutdown_date > today]
+
+
 async def models_of(adapter: ProviderAdapter, api_key: str) -> list[str]:
-    """What the key can use right now. A provider that cannot answer offers nothing."""
+    """What the key can use right now. A provider that cannot answer offers nothing.
+
+    Models the provider itself has already retired are left out, so they are never offered.
+    """
     try:
-        return await adapter.list_models(api_key)
+        return live_model_ids(await adapter.list_model_infos(api_key))
     except ProviderError:
         return []
 
