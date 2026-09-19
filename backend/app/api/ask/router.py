@@ -1,0 +1,152 @@
+import json
+import logging
+from collections.abc import AsyncIterator
+from typing import Annotated, Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, field_validator
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.auth import CurrentUser
+from app.core.config import Settings, get_settings
+from app.core.database import get_session
+from app.modules.context_engine.application.context_store import state_from_record
+from app.modules.context_engine.domain.context_store import ContextStoreState
+from app.modules.context_engine.infrastructure.models import Chunk, ContextStoreRecord
+from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
+from app.modules.retrieval.application.answer import answer_events
+from app.modules.retrieval.application.hybrid import HybridRetriever
+from app.modules.retrieval.domain.answer import error_event
+from app.modules.retrieval.infrastructure.graph_neighborhood import GraphNeighborhood
+from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
+from app.modules.workspaces.infrastructure.models import Source, Workspace
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/workspaces")
+Session = Annotated[AsyncSession, Depends(get_session)]
+AppSettings = Annotated[Settings, Depends(get_settings)]
+
+INTERNAL_ERROR = "답변을 만드는 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요."
+
+
+class AskRequest(BaseModel):
+    question: str = Field(max_length=2000)
+
+    @field_validator("question")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("질문을 입력해 주세요.")
+        return value
+
+
+async def _sse(events: AsyncIterator[dict[str, Any]]) -> AsyncIterator[str]:
+    """Server-sent events the frontend's `apiStream` reads: `data: {json}` lines, then [DONE]."""
+    try:
+        async for event in events:
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+    except Exception:  # the stream is already open, so a failure can only be reported in it
+        logger.exception("ask stream failed")
+        yield f"data: {json.dumps(error_event(INTERNAL_ERROR), ensure_ascii=False)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+async def _load_sources(
+    session: AsyncSession, workspace_id: UUID, owner_id: UUID, ids: list[UUID]
+) -> dict[UUID, Source]:
+    found = await session.exec(
+        select(Source).where(
+            Source.id.in_(ids),  # type: ignore[attr-defined]
+            Source.workspace_id == workspace_id,
+            Source.owner_id == owner_id,
+        )
+    )
+    return {source.id: source for source in found.all()}
+
+
+async def _load_store(
+    session: AsyncSession, workspace_id: UUID, owner_id: UUID
+) -> ContextStoreState | None:
+    found = await session.exec(
+        select(ContextStoreRecord).where(
+            ContextStoreRecord.workspace_id == workspace_id,
+            ContextStoreRecord.owner_id == owner_id,
+        )
+    )
+    record = found.first()
+    return state_from_record(record) if record else None
+
+
+@router.post("/{workspace_id}/ask")
+async def ask(
+    workspace_id: UUID,
+    body: AskRequest,
+    user: CurrentUser,
+    session: Session,
+    settings: AppSettings,
+) -> StreamingResponse:
+    """Answer a question from the workspace's own sources, streaming, with its evidence.
+
+    Everything that touches the database or the graph (key lookup, search, evidence) is finished
+    before the first byte is sent; only the model's tokens stream. No evidence means no model call.
+    """
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None or workspace.owner_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+
+    ingestion = IngestionPipeline(settings)
+    try:
+        adapter, api_key = await ingestion.workspace_provider(
+            session, workspace_id=workspace_id, owner_id=user.id, capability="chat"
+        )
+    except IngestionError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+    async def search(
+        query: str, source_ids: list[UUID] | None, limit: int
+    ) -> list[tuple[Chunk, float]]:
+        return await ingestion.search(
+            session,
+            workspace_id=workspace_id,
+            owner_id=user.id,
+            query=query,
+            limit=limit,
+            source_ids=source_ids,
+        )
+
+    async def load_sources(ids: list[UUID]) -> dict[UUID, Source]:
+        return await _load_sources(session, workspace_id, user.id, ids)
+
+    graph_store = Neo4jGraphStore.from_settings(settings) if settings.neo4j_enabled else None
+    try:
+        retriever = HybridRetriever(
+            search=search,
+            load_sources=load_sources,
+            graph=GraphNeighborhood(graph_store) if graph_store else None,
+        )
+        retrieval = await retriever.retrieve(workspace_id, body.question)
+    except IngestionError as exc:  # e.g. no key that can embed the question
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    finally:
+        if graph_store is not None:
+            await graph_store.close()
+
+    store = await _load_store(session, workspace_id, user.id)
+    events = answer_events(
+        adapter=adapter,
+        api_key=api_key,
+        model=settings.answer_model,
+        question=body.question,
+        retrieval=retrieval,
+        store=store,
+    )
+    return StreamingResponse(
+        _sse(events),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

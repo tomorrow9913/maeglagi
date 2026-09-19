@@ -60,6 +60,19 @@ class IngestionPipeline:
                 continue
         raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
 
+    async def workspace_provider(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: UUID,
+        owner_id: UUID,
+        capability: str,
+    ) -> tuple[ProviderAdapter, str]:
+        """The owner's default API key that supports `capability`, for work without a source."""
+        return await self._provider(
+            session, workspace_id=workspace_id, owner_id=owner_id, capability=capability
+        )
+
     async def provider_for(
         self, session: AsyncSession, *, source: Source, capability: str
     ) -> tuple[ProviderAdapter, str]:
@@ -179,7 +192,9 @@ class IngestionPipeline:
         owner_id: UUID,
         query: str,
         limit: int,
+        source_ids: list[UUID] | None = None,
     ) -> list[tuple[Chunk, float]]:
+        """Nearest chunks to `query`, optionally only within `source_ids`."""
         adapter, api_key = await self._provider(
             session,
             workspace_id=workspace_id,
@@ -199,10 +214,10 @@ class IngestionPipeline:
             raise IngestionError(str(exc)) from exc
         embedding = response.embeddings[0]
         distance = Chunk.embedding.cosine_distance(embedding).label("distance")
-        result = await session.exec(
-            select(Chunk, distance)
-            .where(Chunk.workspace_id == workspace_id, Chunk.owner_id == owner_id)
-            .order_by(distance)
-            .limit(limit)
+        statement = select(Chunk, distance).where(
+            Chunk.workspace_id == workspace_id, Chunk.owner_id == owner_id
         )
+        if source_ids is not None:
+            statement = statement.where(Chunk.source_id.in_(source_ids))  # type: ignore[attr-defined]
+        result = await session.exec(statement.order_by(distance).limit(limit))
         return [(chunk, float(score)) for chunk, score in result.all()]

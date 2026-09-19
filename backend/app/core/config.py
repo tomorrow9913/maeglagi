@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     transcription_model: str = "whisper-1"
     extraction_model: str = "gpt-4o-mini"
+    answer_model: str = "gpt-4o-mini"
     chunk_size_chars: int = 1200
     chunk_overlap_chars: int = 200
     sentry_dsn: SecretStr = SecretStr("")

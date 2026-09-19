@@ -37,8 +37,76 @@ paths:
                 $ref: "#/components/schemas/KnowledgeGraph"
         "404": { description: Workspace not found }
         "503": { description: Graph store is not configured }
+  /api/v1/workspaces/{workspaceId}/ask:
+    post:
+      operationId: ask
+      summary: Answer a question from the workspace's sources, streaming, with its evidence
+      description: >
+        Server-sent events, one `data: {json}` line per event, ending with `data: [DONE]`.
+        Order is `sources`, then `token` events, then `done`. When nothing relevant is found the
+        stream is a single `error` event and no model is called. A failure after the stream has
+        started is also reported as an `error` event. Citations in the text (`[1]`) always refer
+        to an `index` in the `sources` event; citations to missing evidence are removed.
+      parameters:
+        - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "200":
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/AnswerEvent"
+        "404": { description: Workspace not found }
+        "422": { description: Blank question, or the workspace has no key that can chat or embed }
 components:
   schemas:
+    AnswerEvent:
+      oneOf:
+        - type: object
+          required: [type, sources]
+          properties:
+            type: { type: string, const: sources }
+            sources:
+              type: array
+              items: { $ref: "#/components/schemas/AnswerSource" }
+        - type: object
+          required: [type, text]
+          properties:
+            type: { type: string, const: token }
+            text: { type: string }
+        - type: object
+          required: [type]
+          properties:
+            type: { type: string, const: done }
+        - type: object
+          required: [type, message]
+          properties:
+            type: { type: string, const: error }
+            message: { type: string }
+    AnswerSource:
+      type: object
+      required: [index, sourceId, chunkId, kind, title, excerpt]
+      properties:
+        index:
+          type: integer
+          description: The n in the answer's [n] citations
+        sourceId: { type: string, format: uuid }
+        chunkId: { type: string, format: uuid }
+        kind: { type: string, enum: [document, meeting] }
+        title: { type: string }
+        excerpt: { type: string }
+        timestamp:
+          type: number
+          description: Seconds into the meeting where this evidence starts. Absent for documents.
     KnowledgeGraph:
       type: object
       required: [nodes, edges]
