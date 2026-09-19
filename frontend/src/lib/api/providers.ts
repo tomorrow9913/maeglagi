@@ -27,7 +27,7 @@ export const BOOTSTRAP_AI_PROVIDERS: readonly AiProvider[] = [
     capabilities: ["chat", "models"],
     configured: false,
     models: [],
-    defaultModels: { answer: "claude-haiku-4-5" },
+    defaultModels: { answer: "claude-haiku-4-5", extraction: "claude-haiku-4-5" },
   },
   {
     id: "nvidia",
@@ -35,7 +35,10 @@ export const BOOTSTRAP_AI_PROVIDERS: readonly AiProvider[] = [
     capabilities: ["chat", "models"],
     configured: false,
     models: [],
-    defaultModels: { answer: "meta/llama-3.1-8b-instruct" },
+    defaultModels: {
+      answer: "meta/llama-3.1-8b-instruct",
+      extraction: "meta/llama-3.1-8b-instruct",
+    },
   },
 ] as const;
 

@@ -8,11 +8,16 @@ from app.modules.context_engine.application.extraction import (
     ExtractionPipeline,
 )
 from app.modules.context_engine.application.provider import (
+    ChatRequest,
+    ChatResponse,
     StructuredOutputRequest,
     StructuredOutputResponse,
 )
 from app.modules.context_engine.domain.ontology import EntityKind, RelationKind
-from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
+from app.modules.context_engine.infrastructure.provider_adapters import (
+    ProviderError,
+    UnsupportedStructuredFormatError,
+)
 
 STAGES = ["classification", "entity", "event", "relation", "context"]
 
@@ -108,6 +113,37 @@ class FakeAdapter:
         )
 
 
+class ChatAdapter:
+    display_name = "Chat only"
+    capabilities = ("chat", "models")
+
+    def __init__(self, provider: str = "anthropic", overrides: dict[str, list[str]] | None = None):
+        self.id = provider
+        self.overrides = overrides or {}
+        self.requests: list[ChatRequest] = []
+        self.attempts: dict[str, int] = {}
+
+    async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+        assert api_key == "key"
+        self.requests.append(request)
+        # A correction repeats the same stage; otherwise the next stage advances.
+        stage = (
+            next(reversed(self.attempts))
+            if len(request.messages) == 4
+            else STAGES[len(self.attempts)]
+        )
+        attempt = self.attempts.get(stage, 0)
+        self.attempts[stage] = attempt + 1
+        outputs = self.overrides.get(stage, [])
+        answer = outputs[attempt] if attempt < len(outputs) else json.dumps(RESPONSES[stage])
+        return ChatResponse(
+            text=answer,
+            model=request.model,
+            provider=self.id,
+            usage={"completion_tokens": 5},
+        )
+
+
 def pipeline(adapter: FakeAdapter) -> ExtractionPipeline:
     return ExtractionPipeline(adapter, "key", model="test-model")  # type: ignore[arg-type]
 
@@ -177,12 +213,89 @@ async def test_provider_error_is_reported_with_its_stage() -> None:
     assert len(adapter.requests) == 3
 
 
-def test_provider_without_structured_output_is_rejected() -> None:
+def test_provider_without_chat_or_structured_output_is_rejected() -> None:
     adapter = FakeAdapter()
-    adapter.capabilities = ("chat",)
+    adapter.capabilities = ("models",)
 
     with pytest.raises(ExtractionError):
         pipeline(adapter)
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "nvidia"])
+async def test_chat_only_provider_extracts_validated_stages(provider: str) -> None:
+    adapter = ChatAdapter(provider)
+
+    result = await ExtractionPipeline(adapter, "key", model="chat-model").extract("본문")  # type: ignore[arg-type]
+
+    assert len(adapter.requests) == 5
+    assert result.usage == {"completion_tokens": 25}
+    assert result.entities[0].name == "김민수"
+    assert "JSON Schema" in adapter.requests[0].messages[0].content
+    assert all(request.max_tokens == 4096 for request in adapter.requests)
+
+
+async def test_malformed_chat_response_gets_one_corrective_retry() -> None:
+    adapter = ChatAdapter(overrides={"classification": ["```json\n{}\n```"]})
+
+    result = await ExtractionPipeline(adapter, "key", model="chat-model").extract("본문")  # type: ignore[arg-type]
+
+    assert result.classification.language == "ko"
+    assert len(adapter.requests) == 6
+    assert len(adapter.requests[1].messages) == 4
+
+
+async def test_invalid_chat_schema_is_rejected_after_one_retry() -> None:
+    adapter = ChatAdapter(overrides={"classification": ["{}", "{}"]})
+
+    with pytest.raises(ExtractionError, match="스키마") as error:
+        await ExtractionPipeline(adapter, "key", model="chat-model").extract("본문")  # type: ignore[arg-type]
+
+    assert error.value.stage == "classification"
+    assert len(adapter.requests) == 2
+
+
+async def test_native_format_rejection_falls_back_to_chat_for_that_stage() -> None:
+    class MixedAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+
+        async def structured_output(
+            self, request: StructuredOutputRequest, api_key: str
+        ) -> StructuredOutputResponse:
+            if request.schema_name == "extraction_entity":
+                self.requests.append(request)
+                raise UnsupportedStructuredFormatError("unsupported format")
+            return await super().structured_output(request, api_key)
+
+        async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+            return ChatResponse(
+                text=json.dumps(RESPONSES["entity"]), model=request.model, provider="fake"
+            )
+
+    adapter = MixedAdapter()
+    result = await pipeline(adapter).extract("본문")
+
+    assert len(adapter.requests) == 5
+    assert result.entities[0].name == "김민수"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [({"finish_reason": "max_tokens"}, "토큰 한도"), ({"refusal": True}, "거절")],
+)
+async def test_chat_truncation_or_refusal_stops_without_retry(
+    metadata: dict[str, Any], message: str
+) -> None:
+    class StoppedAdapter(ChatAdapter):
+        async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+            response = await super().chat(request, api_key)
+            response.provider_metadata = metadata
+            return response
+
+    adapter = StoppedAdapter()
+    with pytest.raises(ExtractionError, match=message):
+        await ExtractionPipeline(adapter, "key", model="chat-model").extract("본문")  # type: ignore[arg-type]
+    assert len(adapter.requests) == 1
 
 
 async def test_items_without_source_refs_are_dropped_with_warning() -> None:

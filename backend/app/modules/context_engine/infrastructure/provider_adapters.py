@@ -27,6 +27,10 @@ class ProviderCapabilityError(ProviderError):
     pass
 
 
+class UnsupportedStructuredFormatError(ProviderCapabilityError):
+    """The selected chat model rejects native JSON schema response format."""
+
+
 def _parse_date(value: Any) -> date | None:
     """A provider's date field: ISO date or datetime string. Anything else is unknown."""
     if not isinstance(value, str):
@@ -135,24 +139,32 @@ class OpenAICompatibleAdapter:
             payload["temperature"] = request.temperature
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(api_key),
-                json=payload,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(api_key),
+                    json=payload,
+                )
+        except httpx.HTTPError as exc:
+            raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
             raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
         body = response.json()
         choice = body.get("choices", [{}])[0]
-        text = choice.get("message", {}).get("content", "")
+        message = choice.get("message", {})
+        text = message.get("content") or ""
         usage = {key: int(value) for key, value in body.get("usage", {}).items()}
         return ChatResponse(
             text=text,
             model=body.get("model", request.model),
             provider=self.id,
             usage=usage,
-            provider_metadata={"request_id": response.headers.get("x-request-id")},
+            provider_metadata={
+                "request_id": response.headers.get("x-request-id"),
+                "finish_reason": choice.get("finish_reason"),
+                "refusal": bool(message.get("refusal")),
+            },
         )
 
     async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse:
@@ -256,6 +268,25 @@ class OpenAICompatibleAdapter:
                 json=payload,
             )
         if not response.is_success:
+            if response.status_code == 400:
+                try:
+                    error = response.json().get("error", {})
+                except (ValueError, AttributeError):
+                    error = {}
+                if isinstance(error, dict) and (
+                    error.get("code") == "unsupported_response_format"
+                    or (
+                        error.get("param") == "response_format"
+                        and isinstance(error.get("message"), str)
+                        and any(
+                            phrase in error["message"].lower()
+                            for phrase in ("not support", "unsupported")
+                        )
+                    )
+                ):
+                    raise UnsupportedStructuredFormatError(
+                        "이 모델은 native JSON schema 형식을 지원하지 않습니다."
+                    )
             raise ProviderError(f"구조화 출력 요청에 실패했습니다 ({response.status_code}).")
         body = response.json()
         content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -398,7 +429,11 @@ class AnthropicAdapter:
                 key: value for key, value in body.get("usage", {}).items() if isinstance(value, int)
             }
             return ChatResponse(
-                text=text, model=body.get("model", request.model), provider=self.id, usage=usage
+                text=text,
+                model=body.get("model", request.model),
+                provider=self.id,
+                usage=usage,
+                provider_metadata={"finish_reason": body.get("stop_reason")},
             )
         except (ValueError, TypeError, AttributeError, KeyError) as exc:
             raise ProviderError("Provider가 유효한 답변을 반환하지 않았습니다.") from exc

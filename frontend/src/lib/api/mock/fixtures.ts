@@ -523,8 +523,10 @@ export const modelCatalog: Record<string, Partial<Record<ModelRole, string[]>>> 
   },
   anthropic: {
     answer: ["claude-haiku-4-5", "claude-sonnet-4-20250514"],
+    extraction: ["claude-haiku-4-5", "claude-sonnet-4-20250514"],
   },
   nvidia: {
     answer: ["meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct"],
+    extraction: ["meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct"],
   },
 };

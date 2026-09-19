@@ -31,7 +31,7 @@ ROLE_ORDER = (
 # What the provider's API must be able to do for a model to serve the role at all.
 ROLE_CAPABILITY = {
     ModelRole.ANSWER: "chat",
-    ModelRole.EXTRACTION: "structuredOutput",
+    ModelRole.EXTRACTION: "chat",
     ModelRole.EMBEDDING: "embedding",
     ModelRole.TRANSCRIPTION: "transcription",
 }

@@ -11,6 +11,7 @@ from app.modules.context_engine.application.context_store import (
     ContextStoreUpdater,
 )
 from app.modules.context_engine.application.extraction import ExtractionPipeline
+from app.modules.context_engine.application.provider import ChatRequest, ChatResponse
 from app.modules.context_engine.infrastructure.models import ContextRecord, ContextStoreRecord
 from app.modules.ingestion.application.pipeline import IngestionError, ResolvedProvider
 from app.modules.ingestion.application.source_analysis import (
@@ -21,7 +22,7 @@ from app.modules.ingestion.infrastructure import tasks
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 from tests.seeds import SEEDS
 from tests.test_entity_resolution import FakeStore
-from tests.test_extraction_pipeline import FakeAdapter
+from tests.test_extraction_pipeline import ChatAdapter, FakeAdapter
 
 WORKSPACE = uuid4()
 OWNER = uuid4()
@@ -113,6 +114,60 @@ async def test_one_extraction_feeds_the_timeline_the_store_and_the_graph() -> No
     assert warnings == []
 
 
+async def test_invalid_chat_extraction_never_writes_store_or_graph() -> None:
+    repository, graph = FakeRepository(), FakeStore()
+    adapter = ChatAdapter(overrides={"classification": ["{}", "{}"]})
+
+    with pytest.raises(Exception, match="classification"):
+        await analyze(adapter, repository, graph)  # type: ignore[arg-type]
+
+    assert repository.record is None
+    assert repository.timeline == {}
+    assert graph.calls == []
+
+
+async def test_chat_extraction_also_validates_context_store_update() -> None:
+    seed = architecture_meeting()
+
+    class SourceChatAdapter(ChatAdapter):
+        async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+            if "ContextUpdateOutput" in request.messages[0].content:
+                return ChatResponse(
+                    text=json.dumps(seed.responses["context_update"]),
+                    model=request.model,
+                    provider=self.id,
+                )
+            return await super().chat(request, api_key)
+
+    adapter = SourceChatAdapter()
+    repository, graph = FakeRepository(), FakeStore()
+
+    await analyze(adapter, repository, graph)  # type: ignore[arg-type]
+
+    assert repository.record is not None
+    assert repository.record.current_state == "현재 상황"
+    assert repository.timeline[SOURCE]
+    assert graph.calls
+
+
+async def test_invalid_chat_context_update_never_writes_store_or_graph() -> None:
+    class InvalidUpdateAdapter(ChatAdapter):
+        async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+            if "ContextUpdateOutput" in request.messages[0].content:
+                return ChatResponse(text="{}", model=request.model, provider=self.id)
+            return await super().chat(request, api_key)
+
+    adapter = InvalidUpdateAdapter()
+    repository, graph = FakeRepository(), FakeStore()
+
+    with pytest.raises(Exception, match="context_update"):
+        await analyze(adapter, repository, graph)  # type: ignore[arg-type]
+
+    assert repository.record is None
+    assert repository.timeline == {}
+    assert graph.calls == []
+
+
 async def test_decisions_offered_for_replacement_come_from_the_context_store() -> None:
     adapter = FakeAdapter(architecture_meeting().responses)
 
@@ -183,9 +238,9 @@ class FakeSession:
         self.commits += 1
 
 
-class NoStructuredOutputKey:
+class NoChatKey:
     async def provider_with_model(self, session: Any, **kwargs: Any) -> Any:
-        raise IngestionError("structuredOutput을 지원하는 API key가 없습니다.")
+        raise IngestionError("chat을 지원하는 API key가 없습니다.")
 
 
 class WithKey:
@@ -200,13 +255,13 @@ class WithKey:
         return ResolvedProvider(self.adapter, "key", "chosen-extraction-model")
 
 
-async def test_analysis_is_skipped_without_a_structured_output_key() -> None:
-    service = SourceAnalysisService(NoStructuredOutputKey(), Settings(_env_file=None))  # type: ignore[arg-type]
+async def test_analysis_is_skipped_without_a_chat_key() -> None:
+    service = SourceAnalysisService(NoChatKey(), Settings(_env_file=None))  # type: ignore[arg-type]
 
     warnings = await service.run(FakeSession(), source=source(), text="본문")  # type: ignore[arg-type]
 
     assert len(warnings) == 1
-    assert "structuredOutput" in warnings[0]
+    assert "chat" in warnings[0]
 
 
 async def test_the_service_names_the_store_after_the_workspace_and_releases_its_lock() -> None:

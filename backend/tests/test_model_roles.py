@@ -77,8 +77,9 @@ def test_models_are_sorted_into_the_jobs_they_can_do(model: str, expected: set[s
     assert roles(model) == expected
 
 
-def test_a_chat_model_extracts_only_where_the_provider_supports_structured_output() -> None:
-    assert roles("claude-sonnet", CHAT_ONLY) == {"answer"}
+def test_chat_models_can_extract_without_native_structured_output() -> None:
+    assert roles("claude-sonnet", CHAT_ONLY) == {"answer", "extraction"}
+    assert roles("meta/llama-3.1-8b-instruct", CHAT_ONLY) == {"answer", "extraction"}
 
 
 def test_a_job_the_providers_api_cannot_do_has_no_models_whatever_they_are_called() -> None:
@@ -110,7 +111,7 @@ def test_options_are_grouped_by_job_and_a_job_nobody_offers_stays_empty() -> Non
     chat_only = options_by_role([(ANTHROPIC, infos("claude-sonnet", "claude-haiku"))])
     assert len(chat_only[ModelRole.ANSWER]) == 2
     assert chat_only[ModelRole.EMBEDDING] == [] and chat_only[ModelRole.TRANSCRIPTION] == []
-    assert chat_only[ModelRole.EXTRACTION] == []
+    assert len(chat_only[ModelRole.EXTRACTION]) == 2
 
 
 def test_two_keys_offer_a_job_in_key_priority_order_without_duplicates() -> None:
@@ -268,6 +269,31 @@ async def test_an_unchosen_job_never_sends_one_providers_model_name_to_another(
 
     assert resolved.adapter.id == "anthropic"
     assert resolved.model == "claude-haiku-4-5"  # anthropic's default, not an OpenAI name
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("anthropic", "claude-haiku-4-5"),
+        ("nvidia", "meta/llama-3.1-8b-instruct"),
+    ],
+)
+async def test_extraction_uses_the_chat_providers_own_key_and_model(
+    monkeypatch: pytest.MonkeyPatch, provider: str, model: str
+) -> None:
+    adapter = Adapter(provider, CHAT_ONLY)
+    monkeypatch.setattr(pipeline_module.provider_registry, "get", lambda _: adapter)
+
+    async def secret(session: Any, credential: Any) -> str:
+        return f"key-of-{credential.provider}"
+
+    monkeypatch.setattr(pipeline_module, "resolve_credential_secret", secret)
+    resolved = await resolve({}, [provider], ModelRole.EXTRACTION)
+    assert (resolved.adapter.id, resolved.model, resolved.api_key) == (
+        provider,
+        model,
+        f"key-of-{provider}",
+    )
 
 
 async def test_provider_fallback_override_takes_precedence(providers: None) -> None:

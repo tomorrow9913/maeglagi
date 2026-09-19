@@ -42,8 +42,11 @@ class Settings(BaseSettings):
             "embedding": "text-embedding-3-small",
             "transcription": "whisper-1",
         },
-        "anthropic": {"answer": "claude-haiku-4-5"},
-        "nvidia": {"answer": "meta/llama-3.1-8b-instruct"},
+        "anthropic": {"answer": "claude-haiku-4-5", "extraction": "claude-haiku-4-5"},
+        "nvidia": {
+            "answer": "meta/llama-3.1-8b-instruct",
+            "extraction": "meta/llama-3.1-8b-instruct",
+        },
     }
     # Optional per-provider runtime fallback overrides. This keeps deployments using
     # PROVIDER_FALLBACK_MODELS compatible with the catalog's provider defaults.

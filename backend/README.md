@@ -50,6 +50,12 @@ LiteLLM의 공개 가격 맵을 6시간 캐시해 입력·출력 토큰 단가 �
 모델을 숨기지 않고, 가격을 모르는 모델은 확인된 모델 뒤에 보여줍니다. API 키는 가격
 맵 제공처로 전송하지 않습니다.
 
+`extraction`은 대화 모델을 사용합니다. Provider가 native JSON schema 출력을 지원하면
+이를 먼저 요청하고, 지원하지 않는 모델은 채팅 응답을 엄격한 JSON 및 단계별 Pydantic
+스키마로 검증합니다. 형식 오류는 한 번만 수정 요청하며, 계속 유효하지 않으면 분석을
+중단하고 Context Store와 그래프에 쓰지 않습니다. Claude와 NVIDIA NIM의 provider
+capability 목록은 native `structuredOutput`을 표시하지 않습니다.
+
 ## Provider credential management
 
 `/api/v1/workspaces/{workspace_id}/provider-credentials`의 POST는 이름이 있는 추가 키를
