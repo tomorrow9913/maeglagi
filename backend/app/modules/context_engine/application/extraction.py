@@ -1,5 +1,5 @@
 import json
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -26,6 +26,17 @@ class ExtractionError(RuntimeError):
     def __init__(self, stage: str, message: str) -> None:
         super().__init__(f"{stage} 단계 실패: {message}")
         self.stage = stage
+
+
+def _with_refs(items: list[Any], stage: str, label: Any, warnings: list[str]) -> list[Any]:
+    """Contract: every extracted item carries at least one non-empty source_ref."""
+    kept = []
+    for item in items:
+        if any(ref.strip() for ref in item.source_refs):
+            kept.append(item)
+        else:
+            warnings.append(f"{stage}: source_ref 없는 항목을 버렸습니다: {label(item)}")
+    return kept
 
 
 class ExtractionPipeline:
@@ -95,7 +106,8 @@ class ExtractionPipeline:
             {**source, "classification": classified},
             EntityOutput,
         )
-        entity_dump = [item.model_dump(mode="json") for item in entities.entities]
+        entity_items = _with_refs(entities.entities, "entity", lambda i: i.name, warnings)
+        entity_dump = [item.model_dump(mode="json") for item in entity_items]
 
         events = await self._run(
             "event",
@@ -103,7 +115,8 @@ class ExtractionPipeline:
             {**source, "classification": classified, "entities": entity_dump},
             EventOutput,
         )
-        event_dump = [item.model_dump(mode="json") for item in events.events]
+        event_items = _with_refs(events.events, "event", lambda i: i.name, warnings)
+        event_dump = [item.model_dump(mode="json") for item in event_items]
 
         relations = await self._run(
             "relation",
@@ -111,9 +124,12 @@ class ExtractionPipeline:
             {**source, "entities": entity_dump, "events": event_dump},
             RelationOutput,
         )
-        known = {item.name for item in entities.entities} | {item.name for item in events.events}
+        known = {item.name for item in entity_items} | {item.name for item in event_items}
         valid_relations = []
-        for relation in relations.relations:
+        relation_items = _with_refs(
+            relations.relations, "relation", lambda i: f"{i.source}->{i.target}", warnings
+        )
+        for relation in relation_items:
             if relation.source in known and relation.target in known:
                 valid_relations.append(relation)
             else:
@@ -135,12 +151,14 @@ class ExtractionPipeline:
             ContextOutput,
         )
 
+        context_items = _with_refs(contexts.contexts, "context", lambda i: i.title, warnings)
+
         return ExtractionResult(
             classification=classification,
-            entities=entities.entities,
-            events=events.events,
+            entities=entity_items,
+            events=event_items,
             relations=valid_relations,
-            contexts=contexts.contexts,
+            contexts=context_items,
             warnings=warnings,
             usage=self.usage,
         )

@@ -28,7 +28,7 @@ class ExtractedEntity(StageOutput):
     name: str
     kind: EntityKind
     aliases: list[str]
-    evidence: str
+    source_refs: list[str]
 
 
 class EntityOutput(StageOutput):
@@ -41,7 +41,7 @@ class ExtractedEvent(StageOutput):
     description: str
     occurred_at: str | None
     due_at: str | None
-    evidence: str
+    source_refs: list[str]
 
 
 class EventOutput(StageOutput):
@@ -52,7 +52,7 @@ class ExtractedRelation(StageOutput):
     source: str
     target: str
     kind: RelationKind
-    evidence: str
+    source_refs: list[str]
 
 
 class RelationOutput(StageOutput):
@@ -64,7 +64,7 @@ class ExtractedContext(StageOutput):
     title: str
     body: str
     occurred_at: str | None
-    evidence: str
+    source_refs: list[str]
 
 
 class ContextOutput(StageOutput):

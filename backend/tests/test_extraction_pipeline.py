@@ -20,8 +20,18 @@ RESPONSES: dict[str, dict[str, Any]] = {
     "classification": {"source_type": "meeting", "language": "ko", "topics": ["출시 일정"]},
     "entity": {
         "entities": [
-            {"name": "김민수", "kind": "Person", "aliases": ["민수"], "evidence": "민수가 말했다"},
-            {"name": "맥락이", "kind": "Project", "aliases": [], "evidence": "맥락이 프로젝트"},
+            {
+                "name": "김민수",
+                "kind": "Person",
+                "aliases": ["민수"],
+                "source_refs": ["민수가 말했다"],
+            },
+            {
+                "name": "맥락이",
+                "kind": "Project",
+                "aliases": [],
+                "source_refs": ["맥락이 프로젝트"],
+            },
         ]
     },
     "event": {
@@ -32,7 +42,7 @@ RESPONSES: dict[str, dict[str, Any]] = {
                 "description": "9월 말 출시로 확정",
                 "occurred_at": "2026-09-14",
                 "due_at": None,
-                "evidence": "9월 말 출시로 하기로 했다",
+                "source_refs": ["9월 말 출시로 하기로 했다"],
             }
         ]
     },
@@ -42,13 +52,13 @@ RESPONSES: dict[str, dict[str, Any]] = {
                 "source": "김민수",
                 "target": "맥락이",
                 "kind": "WORKS_ON",
-                "evidence": "민수가 맥락이를 맡는다",
+                "source_refs": ["민수가 맥락이를 맡는다"],
             },
             {
                 "source": "김민수",
                 "target": "없는 개체",
                 "kind": "CREATED",
-                "evidence": "환각",
+                "source_refs": ["환각"],
             },
         ]
     },
@@ -59,7 +69,7 @@ RESPONSES: dict[str, dict[str, Any]] = {
                 "title": "출시 일정 확정",
                 "body": "9월 말 출시로 확정했다.",
                 "occurred_at": "2026-09-14",
-                "evidence": "9월 말 출시로 하기로 했다",
+                "source_refs": ["9월 말 출시로 하기로 했다"],
             }
         ]
     },
@@ -166,3 +176,16 @@ def test_provider_without_structured_output_is_rejected() -> None:
 
     with pytest.raises(ExtractionError):
         pipeline(adapter)
+
+
+async def test_items_without_source_refs_are_dropped_with_warning() -> None:
+    entity = RESPONSES["entity"]["entities"][0]
+    unsourced = {
+        **RESPONSES,
+        "entity": {"entities": [entity, {**entity, "name": "출처 없는 사람", "source_refs": []}]},
+    }
+
+    result = await pipeline(FakeAdapter(unsourced)).extract("본문")
+
+    assert [item.name for item in result.entities] == ["김민수"]
+    assert any("source_ref 없는 항목" in warning for warning in result.warnings)
