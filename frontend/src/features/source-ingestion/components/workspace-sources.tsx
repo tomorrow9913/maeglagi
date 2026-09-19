@@ -9,11 +9,12 @@ import { useLiveSources } from "../hooks/use-live-sources";
 import { SourceViewer } from "./source-viewer";
 import { SourceUploadDialog } from "./source-upload-dialog";
 import { MeetingReviewDialog } from "./meeting-review-dialog";
+import { sourcePresentation } from "../lib/source-presentation";
 
 export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
   const isDemo = useDemoMode();
   const workspacePath = useWorkspacePath();
-  const { sources: data, progress, error, isLoading, reload } = useLiveSources(workspaceId);
+  const { sources: data, progress, error, isLoading, reload } = useLiveSources(workspaceId, true);
   const [viewer, setViewer] = useState<string>();
   const [reviewSourceId, setReviewSourceId] = useState<string>();
   const [mode, setMode] = useState<"document" | "meeting" | null>(null);
@@ -40,7 +41,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
         aria-controls="workspace-source-panel"
         onClick={() => setMobileOpen((open) => !open)}
       >
-        <span>질문 근거 · 소스 {data ? `(${data.length})` : ""}</span>
+        <span>워크스페이스 소스 {data ? `(${data.length})` : ""}</span>
         <ChevronDown
           className={`size-4 transition-transform ${mobileOpen ? "rotate-180" : ""}`}
           aria-hidden
@@ -48,7 +49,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
       </button>
       <div id="workspace-source-panel" className={mobileOpen ? "mt-3 md:mt-0" : "hidden md:block"}>
         <div className="mb-3 flex items-center justify-between px-1">
-          <h2 className="text-sm font-semibold">질문 근거 · 소스</h2>
+          <h2 className="text-sm font-semibold">워크스페이스 소스</h2>
           <Link
             href={workspacePath(workspaceId, "sources")}
             className="text-xs text-muted-foreground underline-offset-2 hover:underline"
@@ -87,27 +88,25 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
           </Button>
         )}
         {!isLoading && !error && !data?.length && (
-          <p className="px-2 text-xs text-muted-foreground">질문의 근거가 될 소스를 추가하세요.</p>
+          <p className="px-2 text-xs text-muted-foreground">분석에 사용할 소스를 추가하세요.</p>
         )}
         <ul className="max-h-[45dvh] space-y-1 overflow-y-auto">
           {data?.map((source) => (
             <li key={source.id}>
               <button
                 type="button"
-                onClick={() => !isDemo && (source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed")) ? setReviewSourceId(source.id) : setViewer(source.id)}
+                onClick={() => !isDemo && sourcePresentation(source.status, source.kind).needsReview ? setReviewSourceId(source.id) : setViewer(source.id)}
                 className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <FileText className="mt-0.5 size-3 shrink-0" aria-hidden />
                 <span className="min-w-0">
                   <span className="line-clamp-2">{source.title}</span>
                   <span className="text-muted-foreground">
-                    {source.status === "succeeded"
-                      ? "분석 완료"
-                      : source.status === "failed"
-                        ? "처리 실패"
-                        : source.status === "awaiting_review"
-                          ? "대본 검토 필요 · 열기"
-                        : `처리 중${progress[source.id] !== undefined ? ` · ${Math.round(progress[source.id] * 100)}%` : ""}`}
+                    {source.status === "succeeded" ? "근거 준비됨"
+                      : source.status === "awaiting_agent" ? "에이전트 작업 대기 · 근거 준비 전"
+                      : source.status === "awaiting_review" ? "대본 검토 필요 · 근거 준비 전"
+                      : source.status === "failed" ? "처리 실패 · 근거 준비 전"
+                      : `${sourcePresentation(source.status, source.kind).label} · 근거 준비 전${progress[source.id] !== undefined ? ` · ${Math.round(progress[source.id] * 100)}%` : ""}`}
                   </span>
                 </span>
               </button>

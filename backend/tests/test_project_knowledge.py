@@ -269,13 +269,20 @@ async def test_export_uses_only_confirmed_review_text() -> None:
 
 async def test_playback_signs_only_an_owned_audio_source(monkeypatch: pytest.MonkeyPatch) -> None:
     session = Session()
+    from app.modules.workspaces.application import media_access
+
+    session.source.object_path = (
+        f"{session.source.owner_id}/{session.source.workspace_id}/{session.source.id}/recording.wav"
+    )
 
     class HttpResult:
         def raise_for_status(self) -> None:
             pass
 
         def json(self) -> dict[str, str]:
-            return {"signedURL": "/object/sign/private/path?token=short-lived"}
+            return {
+                "signedURL": f"/object/sign/private/{session.source.object_path}?token=short-lived"
+            }
 
     class Client:
         async def __aenter__(self) -> "Client":
@@ -285,7 +292,7 @@ async def test_playback_signs_only_an_owned_audio_source(monkeypatch: pytest.Mon
             pass
 
         async def post(self, url: str, *, json: Any, headers: Any) -> HttpResult:
-            assert url.endswith("/object/sign/private/path")
+            assert url.endswith(f"/object/sign/private/{session.source.object_path}")
             assert json == {"expiresIn": 300}
             assert headers["Authorization"] == "Bearer service-secret"
             return HttpResult()
@@ -299,7 +306,7 @@ async def test_playback_signs_only_an_owned_audio_source(monkeypatch: pytest.Mon
             supabase_service_role_key=SecretStr("service-secret"),
         ),
     )
-    monkeypatch.setattr(source_content.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(media_access.httpx, "AsyncClient", lambda **_kwargs: Client())
     result = await source_content.recording_playback_url(
         session.source.id,
         AuthUser(id=OWNER),

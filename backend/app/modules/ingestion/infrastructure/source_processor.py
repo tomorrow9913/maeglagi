@@ -13,6 +13,7 @@ from sqlmodel import select
 
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
+from app.modules.context_engine.application.extraction import ExtractionError
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.ingestion.application.document_parser import DocumentParser
 from app.modules.ingestion.application.pipeline import (
@@ -31,6 +32,9 @@ from app.modules.workspaces.infrastructure.models import Source
 
 _CAPABILITIES = frozenset({"chat", "embedding", "transcription", "structuredOutput"})
 _PROVIDERS = frozenset({"openai", "anthropic", "nvidia", "ollama"})
+_EXTRACTION_STAGES = frozenset(
+    {"classification", "entity", "event", "relation", "context", "context_update"}
+)
 _MISSING_TRANSCRIPTION_MESSAGE = "음성 변환을 지원하는 프로바이더 연결 및 모델 설정이 필요합니다."
 _GENERIC_FAILURE_MESSAGE = "소스 처리에 실패했습니다. 설정을 확인한 뒤 다시 시도해 주세요."
 
@@ -48,6 +52,7 @@ class SafeAttemptError(RuntimeError):
         http_status: int | None = None,
         capability: str | None = None,
         provider: str | None = None,
+        extraction_stage: str | None = None,
         terminal: bool = False,
     ) -> None:
         message = (
@@ -63,6 +68,7 @@ class SafeAttemptError(RuntimeError):
         self.http_status = http_status
         self.capability = capability
         self.provider = provider
+        self.extraction_stage = extraction_stage
         self.terminal = terminal
 
 
@@ -87,6 +93,14 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         None,
     )
     provider = None
+    extraction_stage = next(
+        (
+            item.stage
+            for item in chain
+            if isinstance(item, ExtractionError) and item.stage in _EXTRACTION_STAGES
+        ),
+        None,
+    )
     for item in chain:
         value = getattr(item, "provider", None)
         if isinstance(item, MissingCapabilityCredentialError) and item.providers:
@@ -103,6 +117,17 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         ),
         None,
     )
+    if status is None:
+        status = next(
+            (
+                item.http_status
+                for item in chain
+                if isinstance(item, ProviderError)
+                and isinstance(item.http_status, int)
+                and 400 <= item.http_status <= 599
+            ),
+            None,
+        )
     if missing_credential and capability is not None:
         code = "missing_capability_credential"
     elif status is not None:
@@ -125,7 +150,8 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         http_status=status,
         capability=capability if code == "missing_capability_credential" else None,
         provider=provider,
-        terminal=code == "missing_capability_credential",
+        extraction_stage=extraction_stage,
+        terminal=code == "missing_capability_credential" or status in {401, 403, 404},
     )
     # Preserve source locations for Sentry without retaining the original
     # exception, arguments, response body, or frame locals in the error object.
@@ -219,6 +245,8 @@ async def _process_source(source_id: UUID) -> None:
         source = result.first()
         if source is None:
             raise ValueError(f"Source not found: {source_id}")
+        if source.analysis_mode == "agent":
+            return
         if source.status in {SourceStatus.SUCCEEDED, SourceStatus.AWAITING_REVIEW}:
             return
         if source.kind == "meeting" and source.review_state not in {
@@ -368,11 +396,19 @@ async def process_source_attempt(source_id: UUID, *, final_attempt: bool) -> Exc
                 and isinstance(typed_capability, str)
                 and typed_capability in _CAPABILITIES
             )
+            safe_error = _safe_attempt_error(exc, "processing")
+            message = _GENERIC_FAILURE_MESSAGE
+            if safe_error.http_status == 404:
+                message = (
+                    "설정된 모델을 사용할 수 없습니다. 워크스페이스의 추출 모델을 선택해 주세요."
+                )
+            elif safe_error.http_status in {401, 403}:
+                message = "AI 연결 인증에 실패했습니다. 계정의 API 키와 접근 권한을 확인해 주세요."
             stage = await _update_source(
                 source_id,
                 status=(
                     SourceStatus.FAILED
-                    if final_attempt or missing_credential
+                    if final_attempt or safe_error.terminal
                     else SourceStatus.QUEUED
                 ),
                 stage=ProcessingStage.UPLOADED,
@@ -380,8 +416,9 @@ async def process_source_attempt(source_id: UUID, *, final_attempt: bool) -> Exc
                 error_message=(
                     _MISSING_TRANSCRIPTION_MESSAGE
                     if missing_credential and typed_capability == "transcription"
-                    else _GENERIC_FAILURE_MESSAGE
+                    else message
                 ),
             )
-            return _safe_attempt_error(exc, stage)
+            safe_error.stage = stage
+            return safe_error
     return None

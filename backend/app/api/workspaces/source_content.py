@@ -1,19 +1,17 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Annotated
-from urllib.parse import quote
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.workspaces.review import ReviewUtterance
 from app.auth import CurrentUser
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.modules.context_engine.infrastructure.models import Chunk
+from app.modules.agent_workflows.repositories import WorkflowRepository
+from app.modules.workspaces.application.media_access import MediaAccessError, signed_media_url
 from app.modules.workspaces.domain.source_state import ReviewState, SourceStatus
 from app.modules.workspaces.infrastructure.models import Source
 
@@ -72,30 +70,11 @@ async def recording_playback_url(
     source = await _owned_source(source_id, user, session)
     if not has_recording(source):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Recording not found")
-    settings = get_settings()
-    key = settings.supabase_service_role_key.get_secret_value()
-    if not key:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Playback unavailable")
-    path = quote(source.object_path, safe="/")
-    bucket = quote(settings.supabase_storage_bucket, safe="")
-    url = f"{settings.supabase_url.rstrip('/')}/storage/v1/object/sign/{bucket}/{path}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            result = await client.post(
-                url,
-                json={"expiresIn": 300},
-                headers={"apikey": key, "Authorization": f"Bearer {key}"},
-            )
-        result.raise_for_status()
-        signed = result.json().get("signedURL") or result.json().get("signedUrl")
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Playback unavailable") from exc
-    if not isinstance(signed, str) or not signed.startswith(f"/object/sign/{bucket}/{path}?"):
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Invalid playback URL")
-    return PlaybackUrlResponse(
-        url=f"{settings.supabase_url.rstrip('/')}/storage/v1{signed}",
-        expires_at=datetime.now(UTC) + timedelta(minutes=5),
-    )
+        signed = await signed_media_url(source, get_settings())
+    except MediaAccessError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    return PlaybackUrlResponse(url=signed.url, expires_at=signed.expires_at)
 
 
 @router.get("/{source_id}/export.md")
@@ -141,34 +120,24 @@ async def get_source_content(
     scroll to the exact passage. A source that has not been indexed yet has no chunks.
     """
     source = await _owned_source(source_id, user, session)
-    utterances = [ReviewUtterance.model_validate(item) for item in source.review_utterances]
-    edited_text = "\n\n".join(
-        f"{item.speaker_name}: {item.text}" for item in utterances if item.text
-    )
-    original_text = edited_text or (
-        source.transcript_text or source.raw_transcript_text
-        if source.kind == "meeting"
-        else source.content_text
-    )
-    found = await session.exec(
-        select(Chunk)
-        .where(Chunk.source_id == source.id, Chunk.owner_id == user.id)
-        .order_by(Chunk.position)
-    )
+    content = await WorkflowRepository(session).source_content_for_source(source)
     return SourceContentResponse(
         source_id=source.id,
         title=source.title,
         kind=source.kind,
         has_recording=has_recording(source),
-        original_text=original_text,
-        utterances=utterances,
+        original_text=content.text,
+        utterances=[
+            ReviewUtterance.model_validate(item.model_dump(by_alias=True))
+            for item in content.utterances
+        ],
         chunks=[
             SourceChunkResponse(
                 id=chunk.id,
-                text=chunk.content,
+                text=chunk.text,
                 start_seconds=chunk.start_seconds,
                 end_seconds=chunk.end_seconds,
             )
-            for chunk in found.all()
+            for chunk in content.chunks
         ],
     )

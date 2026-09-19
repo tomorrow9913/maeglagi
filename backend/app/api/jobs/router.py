@@ -23,6 +23,7 @@ async def get_job(job_id: UUID, user: CurrentUser, session: Session) -> JobRespo
         source_id=source.id,
         source_kind=source.kind,
         transcript_source=source.transcript_source,
+        analysis_mode=source.analysis_mode,
         status=source.status,
         progress=source.progress,
         stage=source.processing_stage,

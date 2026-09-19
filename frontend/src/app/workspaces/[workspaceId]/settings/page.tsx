@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
@@ -15,11 +16,7 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
   const { workspaceId } = use(params);
   const api = useApi();
   const { data, error, isLoading, reload } = useAsync(
-    (signal) =>
-      Promise.all([
-        api.listAccountCredentials(signal),
-        api.listProviders(signal),
-      ]),
+    (signal) => Promise.all([api.listAccountCredentials(signal), api.listProviders(signal)]),
     [workspaceId],
   );
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>();
@@ -28,7 +25,9 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
   const providers: AiProvider[] = data
     ? withOllamaProvider(data[1]).map((item) => ({
         ...item,
-        configured: credentials.some((credential) => credential.provider === item.id && credential.status === "active"),
+        configured: credentials.some(
+          (credential) => credential.provider === item.id && credential.status === "active",
+        ),
       }))
     : [];
 
@@ -49,7 +48,23 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
 
   return (
     <>
-      <PageHeader title="설정" description="계정의 AI 연결과 이 워크스페이스의 모델 선택을 관리합니다." />
+      <PageHeader
+        title="설정"
+        description="서비스 AI 연결과 이 워크스페이스의 모델 선택을 관리합니다."
+      />
+      <section className="mb-5 rounded-xl border border-border bg-card p-5">
+        <h2 className="text-sm font-semibold">내 에이전트로 작업하기</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          AI 공급자 API key 없이 계정 MCP 연결로 에이전트가 소스와 맥락에 접근할 수 있습니다. MCP
+          토큰은 워크스페이스별 설정이 아닌 계정 설정에서 관리합니다.
+        </p>
+        <Link
+          href="/account/mcp"
+          className="mt-3 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          계정 MCP 연결 열기 →
+        </Link>
+      </section>
       {isLoading && !data ? (
         <ListSkeleton count={1} className="h-40" />
       ) : error ? (

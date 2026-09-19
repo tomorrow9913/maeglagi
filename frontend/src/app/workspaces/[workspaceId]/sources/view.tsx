@@ -19,6 +19,7 @@ import { useLiveSources } from "@/features/source-ingestion/hooks/use-live-sourc
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
 import { useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { ProcessingJob } from "@/lib/api";
+import { sourcePresentation } from "@/features/source-ingestion/lib/source-presentation";
 
 export default function SourcesPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -73,6 +74,7 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
 
   const onSettled = useCallback(
     (job: ProcessingJob) => {
+      if (job.status === "awaiting_agent") { toast.info("소스가 저장됐습니다. 에이전트 분석을 기다립니다."); return; }
       if (job.status === "awaiting_review") { toast.info("회의 대본 검토가 준비됐습니다.", { action: { label: "검토 열기", onClick: () => setReviewSourceId(job.sourceId) } }); return; }
       if (job.status === "failed") {
         toast.error("소스 처리에 실패했습니다.");
@@ -95,6 +97,8 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       <PageHeader title="소스" description={isDemo ? "공개 데모의 회의와 문서를 읽기 전용으로 살펴봅니다." : "회의 녹음과 문서를 올리고 처리 상태를 확인합니다."} />
+
+      {!isDemo && <p className="mb-4 text-xs text-muted-foreground">이 화면의 업로드는 서비스 AI 연결로 자동 처리합니다. 내 에이전트로 처리하려면 <a href="/account/mcp" className="text-primary underline-offset-2 hover:underline">계정 MCP 연결</a>을 사용하세요.</p>}
 
       {!isDemo && <Tabs defaultValue="document">
         <TabsList>
@@ -128,7 +132,7 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
         ) : error && !sources ? (
           <ErrorState error={error} onRetry={reload} />
         ) : sources && sources.length > 0 ? (
-          <SourceList sources={sources} progress={progress} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (!isDemo && (source?.status === "awaiting_review" || (source?.kind === "meeting" && source.status === "failed"))) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
+          <SourceList sources={sources} progress={progress} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (!isDemo && source && sourcePresentation(source.status, source.kind).needsReview) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
         ) : (
           <EmptyState
             title="아직 올라온 소스가 없습니다"

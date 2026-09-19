@@ -8,6 +8,7 @@ class SourceStatus(StrEnum):
     ENQUEUE_PENDING = "enqueue_pending"
     PROCESSING = "processing"
     AWAITING_REVIEW = "awaiting_review"
+    AWAITING_AGENT = "awaiting_agent"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
@@ -22,6 +23,7 @@ class ProcessingStage(StrEnum):
     UPLOADED = "uploaded"
     TRANSCRIBING = "transcribing"
     AWAITING_REVIEW = "awaiting_review"
+    AWAITING_AGENT = "awaiting_agent"
     CONFIRMED = "confirmed"
     ANALYZING = "analyzing"
     GRAPHING = "graphing"

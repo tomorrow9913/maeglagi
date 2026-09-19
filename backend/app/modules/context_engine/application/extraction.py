@@ -3,6 +3,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from app.core.config import get_settings
 from app.modules.context_engine.application import extraction_prompts as prompts
 from app.modules.context_engine.application.provider import (
     ChatMessage,
@@ -118,6 +119,11 @@ class ExtractionPipeline:
             ChatMessage(role="system", content=f"{messages[0].content}\n\n{instructions}"),
             messages[1],
         ]
+        provider_options = (
+            {"reasoning_effort": get_settings().nvidia_glm_extraction_reasoning_effort}
+            if self.adapter.id == "nvidia" and self.model == "z-ai/glm-5.3-flash"
+            else {}
+        )
         for attempt in range(2):
             response = await self.adapter.chat(
                 ChatRequest(
@@ -125,6 +131,7 @@ class ExtractionPipeline:
                     model=self.model,
                     temperature=self.temperature,
                     max_tokens=4096,
+                    provider_options=provider_options,
                 ),
                 self.api_key,
             )

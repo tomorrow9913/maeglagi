@@ -8,7 +8,7 @@ export function isDemoPath(pathname: string): boolean {
 }
 
 export function requiresWorkspaceAuth(pathname: string): boolean {
-  return pathname === "/workspaces" || pathname.startsWith("/workspaces/");
+  return pathname === "/workspaces" || pathname.startsWith("/workspaces/") || pathname === "/account" || pathname.startsWith("/account/");
 }
 
 export function selectRouteApi<T>(isDemo: boolean, workspaceApi: T, seededApi: T): T {
