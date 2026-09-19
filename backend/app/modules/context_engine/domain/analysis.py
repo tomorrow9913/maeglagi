@@ -16,6 +16,7 @@ class AnalysisItem(BaseModel):
 
 class DecisionItem(AnalysisItem):
     decided_at: str | None
+    supersedes: str | None = None
 
 
 class ActionItem(AnalysisItem):

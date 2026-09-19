@@ -53,6 +53,9 @@ EVENT_PROMPT = (
     "  · Event: 특정 시점에 실제 발생해 프로젝트 상태를 바꾼 사실\n"
     "  기준에 못 미치면 추출하지 않습니다.\n"
     "- occurred_at은 사건이 일어난 시점, due_at은 마감이 있는 할 일의 기한입니다.\n"
+    "- Decision이 이전 결정을 명시적으로 뒤집거나 대체한다고 원문이 밝힐 때만 supersedes에 "
+    "대체되는 결정의 이름을 넣습니다. 입력의 known_decisions나 이번 자료의 다른 Decision "
+    "이름과 정확히 같아야 하며, 그렇지 않거나 명시가 없으면 null입니다.\n"
     "- 이미 추출된 엔티티와 같은 개체라면 name을 그대로 재사용합니다.\n"
     "- 엔티티 간 관계와 요약은 추출하지 않습니다.\n" + COMMON_RULES
 )
@@ -62,7 +65,9 @@ RELATION_PROMPT = (
     f"허용되는 kind: {_values(RelationKind)}\n"
     "- source와 target은 제공된 엔티티·이벤트의 name과 정확히 일치해야 합니다.\n"
     "- 목록에 없는 개체를 새로 만들지 않습니다.\n"
-    "- 원문이 뒷받침하지 않는 관계는 넣지 않습니다.\n" + COMMON_RULES
+    "- 원문이 뒷받침하지 않는 관계는 넣지 않습니다.\n"
+    "- valid_from은 관계가 시작됐다고 원문이 밝힌 시점, valid_to는 관계가 끝났다고 원문이 "
+    "명시한 경우에만 씁니다. 종료를 추측하지 않으며 명시가 없으면 null입니다.\n" + COMMON_RULES
 )
 
 CONTEXT_PROMPT = (

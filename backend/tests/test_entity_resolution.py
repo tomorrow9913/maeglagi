@@ -36,8 +36,21 @@ def entity(
     )
 
 
-def relation(source: str, target: str, kind: RelationKind) -> ExtractedRelation:
-    return ExtractedRelation(source=source, target=target, kind=kind, source_refs=["근거"])
+def relation(
+    source: str,
+    target: str,
+    kind: RelationKind,
+    valid_from: str | None = None,
+    valid_to: str | None = None,
+) -> ExtractedRelation:
+    return ExtractedRelation(
+        source=source,
+        target=target,
+        kind=kind,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        source_refs=["근거"],
+    )
 
 
 def extraction(
@@ -152,6 +165,7 @@ def test_events_are_resolved_as_entities_and_can_be_relation_endpoints() -> None
                     description="",
                     occurred_at="2026-09-14",
                     due_at=None,
+                    supersedes=None,
                     source_refs=["근거"],
                 )
             ],
@@ -176,13 +190,30 @@ def test_relation_to_unknown_entity_is_dropped_with_warning() -> None:
 
 
 class FakeStore:
-    def __init__(self, existing: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        existing: list[dict[str, Any]] | None = None,
+        relations: list[dict[str, Any]] | None = None,
+        superseded: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.existing = existing or []
+        self.relations = relations or []
+        self.superseded = superseded or []
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def execute(self, query: str, parameters: dict[str, Any] | None = None) -> Any:
         self.calls.append((query, parameters or {}))
-        return self.existing if "RETURN row.id AS row_id" in query else []
+        if "RETURN row.id AS row_id" in query:
+            return self.existing
+        if "AS valid_from" in query:
+            return self.relations
+        if "SET old.superseded_by" in query:
+            return self.superseded
+        return []
+
+    def rows(self, marker: str) -> list[dict[str, Any]]:
+        """Rows of the first query containing `marker`."""
+        return next(params["rows"] for query, params in self.calls if marker in query)
 
 
 def writer(store: FakeStore) -> GraphWriter:
@@ -201,9 +232,9 @@ async def test_writer_upserts_entities_then_relations_by_kind() -> None:
     await writer(store).write(graph)
 
     queries = [query for query, _ in store.calls]
-    assert "MERGE (e:Entity {id: row.id})" in queries[1]
-    assert "MERGE (a)-[r:WORKS_ON]->(b)" in queries[2]
-    rows = store.calls[1][1]["rows"]
+    assert any("MERGE (e:Entity {id: row.id})" in query for query in queries)
+    assert any("MERGE (a)-[r:WORKS_ON {id: row.id}]->(b)" in query for query in queries)
+    rows = store.rows("MERGE (e:Entity {id: row.id})")
     assert {row["name"] for row in rows} == {"김민수", "맥락이"}
     assert all(row["source_ids"] == [str(SOURCE)] for row in rows)
 
@@ -244,12 +275,14 @@ async def test_writer_reuses_a_node_created_by_another_source() -> None:
 
     await writer(store).write(graph)
 
-    person = next(row for row in store.calls[1][1]["rows"] if row["kind"] == "Person")
+    person = next(
+        row for row in store.rows("MERGE (e:Entity {id: row.id})") if row["kind"] == "Person"
+    )
     assert person["id"] == str(existing_id)
     assert person["name"] == "김민수"
     assert set(person["source_ids"]) == {other_source, str(SOURCE)}
     project_id = next(item.id for item in graph.entities if item.kind == "Project")
-    edge = store.calls[2][1]["rows"][0]
+    edge = store.rows("MERGE (a)-[r:WORKS_ON")[0]
     assert edge["source_entity_id"] == str(existing_id)
     assert edge["target_entity_id"] == str(project_id)
 
@@ -372,7 +405,7 @@ async def test_writer_does_not_merge_into_a_same_name_node_with_another_email() 
 
     await writer(store).write(graph)
 
-    assert store.calls[1][1]["rows"][0]["id"] == str(person.id)
+    assert store.rows("MERGE (e:Entity {id: row.id})")[0]["id"] == str(person.id)
 
 
 async def test_writer_merges_by_email_across_sources_even_if_the_name_differs() -> None:
@@ -383,7 +416,7 @@ async def test_writer_merges_by_email_across_sources_even_if_the_name_differs() 
 
     await writer(store).write(graph)
 
-    row = store.calls[1][1]["rows"][0]
+    row = store.rows("MERGE (e:Entity {id: row.id})")[0]
     assert row["id"] == str(node)
     assert row["identifiers"] == [A]
 
@@ -400,7 +433,7 @@ async def test_writer_reports_an_ambiguous_bare_name_instead_of_guessing() -> No
 
     warnings = await writer(store).write(graph)
 
-    assert store.calls[1][1]["rows"][0]["id"] == str(person.id)
+    assert store.rows("MERGE (e:Entity {id: row.id})")[0]["id"] == str(person.id)
     assert len(warnings) == 1
 
 
@@ -414,6 +447,6 @@ async def test_two_different_emails_cannot_both_fold_into_one_bare_existing_node
 
     await writer(store).write(graph)
 
-    ids = [row["id"] for row in store.calls[1][1]["rows"]]
+    ids = [row["id"] for row in store.rows("MERGE (e:Entity {id: row.id})")]
     assert len(set(ids)) == 2
     assert str(node) in ids

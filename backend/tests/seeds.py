@@ -41,6 +41,7 @@ def event(
     refs: list[str],
     occurred_at: str | None = None,
     due_at: str | None = None,
+    supersedes: str | None = None,
 ) -> dict:
     return {
         "name": name,
@@ -48,12 +49,27 @@ def event(
         "description": description,
         "occurred_at": occurred_at,
         "due_at": due_at,
+        "supersedes": supersedes,
         "source_refs": refs,
     }
 
 
-def relation(source: str, target: str, kind: str, refs: list[str]) -> dict:
-    return {"source": source, "target": target, "kind": kind, "source_refs": refs}
+def relation(
+    source: str,
+    target: str,
+    kind: str,
+    refs: list[str],
+    valid_from: str | None = None,
+    valid_to: str | None = None,
+) -> dict:
+    return {
+        "source": source,
+        "target": target,
+        "kind": kind,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "source_refs": refs,
+    }
 
 
 def context(kind: str, title: str, body: str, refs: list[str], at: str | None = None) -> dict:
