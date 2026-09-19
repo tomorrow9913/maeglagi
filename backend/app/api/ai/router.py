@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from app.api.ai.schemas import (
     ProviderStructuredOutputRequest,
 )
 from app.auth import CurrentUser
+from app.core.config import Settings, get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
 from app.core.database import get_session
 from app.modules.context_engine.application.provider import (
@@ -83,7 +85,10 @@ async def _provider_with_credential(
 
 @router.get("/providers", response_model=list[ProviderCatalogItem])
 async def list_available_providers(
-    workspace_id: UUID, user: CurrentUser, session: Session
+    workspace_id: UUID,
+    user: CurrentUser,
+    session: Session,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> list[ProviderCatalogItem]:
     credentials = await _workspace_credentials(workspace_id, user, session)
     by_provider = {credential.provider: credential for credential in credentials}
@@ -94,7 +99,13 @@ async def list_available_providers(
         if credential is not None:
             try:
                 api_key = await resolve_credential_secret(session, credential)
-                models = await adapter.list_models(api_key)
+                infos = await adapter.list_model_infos(api_key)
+                today = date.today()
+                models = sorted(
+                    info.id
+                    for info in infos
+                    if info.shutdown_date is None or info.shutdown_date > today
+                )
             except (ProviderError, CredentialUnavailableError):
                 models = []
         items.append(
@@ -104,6 +115,7 @@ async def list_available_providers(
                 capabilities=list(adapter.capabilities),
                 configured=credential is not None,
                 models=models,
+                default_models=settings.provider_default_models.get(adapter.id, {}),
             )
         )
     return items

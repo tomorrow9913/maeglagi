@@ -1,7 +1,17 @@
 from collections.abc import AsyncIterator
+from datetime import date, datetime
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
+
+
+class ModelInfo(BaseModel):
+    """What a provider tells us about one model. Providers do not report prices."""
+
+    id: str
+    created: datetime | None = None
+    # Set by providers that announce retirement (OpenAI does). A retired model is not offered.
+    shutdown_date: date | None = None
 
 
 class ChatMessage(BaseModel):
@@ -90,6 +100,8 @@ class ProviderAdapter(Protocol):
     async def validate_credential(self, api_key: str) -> tuple[bool, str]: ...
 
     async def list_models(self, api_key: str) -> list[str]: ...
+
+    async def list_model_infos(self, api_key: str) -> list[ModelInfo]: ...
 
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse: ...
 

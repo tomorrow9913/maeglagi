@@ -6,11 +6,12 @@ fact about the models its key offers, not about the provider's name.
 """
 
 import re
+from datetime import date
 from enum import StrEnum
 
 from pydantic import BaseModel
 
-from app.modules.context_engine.application.provider import ProviderAdapter
+from app.modules.context_engine.application.provider import ModelInfo, ProviderAdapter
 
 
 class ModelRole(StrEnum):
@@ -72,28 +73,34 @@ def recommendation_rank(model_id: str) -> tuple[bool, bool, str]:
 
 
 def options_by_role(
-    listings: list[tuple[ProviderAdapter, list[str]]],
+    listings: list[tuple[ProviderAdapter, list[ModelInfo]]],
     prices: dict[tuple[str, str], float] | None = None,
+    *,
+    defaults: dict[str, dict[str, str]] | None = None,
+    today: date | None = None,
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Order known prices low-to-high; unknown prices follow in stable name order."""
+    """Exclude retired models, put offered defaults first, then sort other models by price."""
+    today = today or date.today()
     options: dict[ModelRole, list[ModelOption]] = {role: [] for role in ROLE_ORDER}
-    for adapter, models in listings:
-        for model in sorted(set(models), key=recommendation_rank):
-            for role in ROLE_ORDER:
-                if role in roles_for_model(model, adapter.capabilities):
-                    option = ModelOption(provider=adapter.id, model=model)
-                    if option not in options[role]:
-                        options[role].append(option)
-    if prices:
+    for adapter, infos in listings:
+        live = {i.id for i in infos if i.shutdown_date is None or i.shutdown_date > today}
+        preferred = (defaults or {}).get(adapter.id, {})
         for role in ROLE_ORDER:
-            options[role].sort(
+            offered = [
+                ModelOption(provider=adapter.id, model=model)
+                for model in live
+                if role in roles_for_model(model, adapter.capabilities)
+            ]
+            offered.sort(
                 key=lambda option: (
-                    (option.provider, option.model) not in prices,
-                    prices.get((option.provider, option.model), float("inf")),
+                    preferred.get(role.value) != option.model,
+                    bool(prices) and (adapter.id, option.model) not in prices,
+                    prices.get((adapter.id, option.model), float("inf")) if prices else 0,
                     recommendation_rank(option.model),
-                    option.provider,
                 )
             )
+            # Each key's models stay behind all earlier keys, including the same provider.
+            options[role].extend(option for option in offered if option not in options[role])
     return options
 
 

@@ -18,6 +18,7 @@ from app.modules.context_engine.application.model_roles import (
     ModelRole,
     options_by_role,
 )
+from app.modules.context_engine.application.provider import ModelInfo
 from app.modules.workspaces.infrastructure.models import Workspace
 
 # `app.api.workspaces.router` is shadowed by the package's `router` attribute, so load the module.
@@ -38,11 +39,14 @@ OPTIONS = options_by_role(
         (
             OPENAI,
             [
-                "gpt-4o-mini",
-                "gpt-4o",
-                "text-embedding-3-small",
-                "text-embedding-3-large",
-                "whisper-1",
+                ModelInfo(id=model)
+                for model in (
+                    "gpt-4o-mini",
+                    "gpt-4o",
+                    "text-embedding-3-small",
+                    "text-embedding-3-large",
+                    "whisper-1",
+                )
             ],
         )
     ]
@@ -294,12 +298,33 @@ def test_resending_the_same_embedding_model_after_indexing_is_fine(env: Env) -> 
     assert put_models(TestClient(app), {"embedding": EMBED_SMALL}).status_code == 200
 
 
-def test_a_locked_workspace_that_never_chose_may_record_the_deployment_default_only(
+def test_a_locked_workspace_that_never_chose_may_record_the_legacy_provider_and_model_only(
     env: Env,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     env.indexed = True  # embedded earlier with the deployment default: text-embedding-3-small
 
+    async def legacy_provider(*args: Any, **kwargs: Any) -> Any:
+        from app.modules.ingestion.application.pipeline import ResolvedProvider
+
+        return ResolvedProvider(OPENAI, "old-key", "text-embedding-3-small")
+
+    monkeypatch.setattr(models_module.IngestionPipeline, "provider_with_model", legacy_provider)
+
+    async def options_with_other_provider(*args: Any) -> Any:
+        return {
+            **OPTIONS,
+            ModelRole.EMBEDDING: [
+                *OPTIONS[ModelRole.EMBEDDING],
+                ModelOption(provider="other", model="text-embedding-3-small"),
+            ],
+        }
+
+    monkeypatch.setattr(models_module, "options_for_workspace", options_with_other_provider)
+
     assert put_models(TestClient(app), {"embedding": EMBED_LARGE}).status_code == 409
+    wrong_provider = {"embedding": {**EMBED_SMALL, "provider": "other"}}
+    assert put_models(TestClient(app), wrong_provider).status_code == 409
     assert put_models(TestClient(app), {"embedding": EMBED_SMALL}).status_code == 200
 
 
