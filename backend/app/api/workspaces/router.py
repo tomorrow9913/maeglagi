@@ -12,7 +12,9 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.jobs.schemas import JobResponse
+from app.api.workspaces.context import router as context_router
 from app.api.workspaces.credentials import router as credentials_router
+from app.api.workspaces.graph import router as graph_router
 from app.api.workspaces.schemas import (
     CreateWorkspaceRequest,
     SimilarChunkResponse,
@@ -33,6 +35,8 @@ from app.modules.workspaces.infrastructure.models import ProviderCredential, Sou
 
 router = APIRouter()
 router.include_router(credentials_router)
+router.include_router(context_router)
+router.include_router(graph_router)
 workspaces = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
 

@@ -83,6 +83,7 @@ def responses(
     relations: list[dict],
     contexts: list[dict],
     planning: dict | None = None,
+    context_update: dict | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
         "classification": {"source_type": source_type, "language": "ko", "topics": ["캐시"]},
@@ -90,6 +91,13 @@ def responses(
         "event": {"events": events},
         "relation": {"relations": relations},
         "context": {"contexts": contexts},
+        "context_update": context_update
+        or {
+            "summary": "프로젝트 요약",
+            "current_state": "현재 상황",
+            "resolved_issues": [],
+            "completed_actions": [],
+        },
     }
     if planning is not None:
         out["planning"] = planning

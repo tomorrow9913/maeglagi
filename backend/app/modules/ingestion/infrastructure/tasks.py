@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.database import session_factory
 from app.modules.ingestion.application.document_parser import DocumentParser
 from app.modules.ingestion.application.pipeline import IngestionPipeline
+from app.modules.ingestion.application.source_analysis import SourceAnalysisService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
 from app.modules.workspaces.infrastructure.models import Source
 
@@ -65,6 +66,7 @@ async def _process_source(source_id: UUID) -> None:
             await session.commit()
             content = await _download_source(source)
             parsed_text = DocumentParser().parse(content, filename=source.title)
+            graph_text = parsed_text
             source.content_text = parsed_text
             source.processing_stage = "analyzing"
             source.progress = 0.5
@@ -88,6 +90,7 @@ async def _process_source(source_id: UUID) -> None:
                 content_type=source.content_type,
             )
             source.transcript_text = transcription.text
+            graph_text = transcription.text
             source.duration_seconds = transcription.duration_seconds
             source.processing_stage = "analyzing"
             source.progress = 0.5
@@ -108,6 +111,7 @@ async def _process_source(source_id: UUID) -> None:
             ]
             await pipeline.index_source(session, source=source, segments=segments)
         else:
+            graph_text = source.transcript_text or ""
             source.processing_stage = "analyzing"
             source.progress = 0.5
             await session.commit()
@@ -122,6 +126,12 @@ async def _process_source(source_id: UUID) -> None:
                     )
                 ],
             )
+
+        source.processing_stage = "graphing"
+        source.progress = 0.7
+        session.add(source)
+        await session.commit()
+        await SourceAnalysisService().run(session, source=source, text=graph_text)
 
         source.status = "processing"
         source.processing_stage = "graphing"

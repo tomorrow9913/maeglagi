@@ -23,18 +23,18 @@ from app.modules.context_engine.domain.ontology import (
 _EVENT_KINDS = {"Meeting", "Event", "Decision", "Task", "Issue"}
 
 
-def _squash(text: str) -> str:
+def squash(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
-def _unverified_refs(text: str, groups: list[tuple[str, list[str]]]) -> list[str]:
+def unverified_refs(text: str, groups: list[tuple[str, list[str]]]) -> list[str]:
     """Contract: source_refs quote the original. Flag quotes that are not in the text."""
-    haystack = _squash(text)
+    haystack = squash(text)
     return [
         f"원문에서 찾지 못한 근거: {label}"
         for label, refs in groups
         for ref in refs
-        if _squash(ref) and _squash(ref) not in haystack
+        if squash(ref) and squash(ref) not in haystack
     ]
 
 
@@ -49,7 +49,7 @@ def _summary(result: ExtractionResult) -> str:
     return ""
 
 
-def _assignee(result: ExtractionResult, task: str) -> str | None:
+def assignee_of(result: ExtractionResult, task: str) -> str | None:
     people = {item.name for item in result.entities if item.kind is EntityKind.PERSON}
     for relation in result.relations:
         if relation.kind is not RelationKind.ASSIGNED_TO:
@@ -79,7 +79,7 @@ def _tasks(result: ExtractionResult) -> list[ActionItem]:
         ActionItem(
             title=item.name,
             description=item.description,
-            assignee=_assignee(result, item.name),
+            assignee=assignee_of(result, item.name),
             due_at=item.due_at,
             source_refs=item.source_refs,
         )
@@ -137,7 +137,7 @@ class MeetingAnalyzer:
             if meeting
             else []
         )
-        warnings += _unverified_refs(transcript, _source_ref_groups(result))
+        warnings += unverified_refs(transcript, _source_ref_groups(result))
         return MeetingAnalysis(
             meeting_title=meeting.name if meeting else title,
             occurred_at=meeting.occurred_at if meeting else None,
@@ -179,7 +179,7 @@ class DocumentAnalyzer:
                 extra.append(("planning", brief.source_refs))
             else:
                 warnings.append("planning: source_ref 없는 기획서 요약을 버렸습니다.")
-        warnings += _unverified_refs(text, _source_ref_groups(result, extra))
+        warnings += unverified_refs(text, _source_ref_groups(result, extra))
         return DocumentAnalysis(
             title=title,
             source_type=source_type,

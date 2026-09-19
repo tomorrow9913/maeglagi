@@ -37,6 +37,7 @@ class ContextKind(StrEnum):
     EVENT = "event"
     DECISION = "decision"
     TASK = "task"
+    ISSUE = "issue"
     FACT = "fact"
     SUMMARY = "summary"
 
