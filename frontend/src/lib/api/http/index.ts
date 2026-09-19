@@ -44,6 +44,8 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
+  listProviders: (signal) => apiFetch<AiProvider[]>("/ai/providers", { signal }),
+
   listWorkspaceProviders: (workspaceId, signal) =>
     apiFetch<AiProvider[]>(`/workspaces/${workspaceId}/ai/providers`, { signal }),
 

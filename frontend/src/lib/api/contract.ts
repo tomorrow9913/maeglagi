@@ -28,6 +28,11 @@ export interface MaeglagiApi {
   listWorkspaces(signal?: AbortSignal): Promise<Workspace[]>;
   getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<Workspace>;
   createWorkspace(input: CreateWorkspaceInput, signal?: AbortSignal): Promise<Workspace>;
+  /**
+   * 서버가 지원하는 provider 목록. workspace가 아직 없는 최초 생성 화면에서 씁니다.
+   * `configured`와 `models`는 workspace마다 다른 값이라 항상 비어 있습니다.
+   */
+  listProviders(signal?: AbortSignal): Promise<AiProvider[]>;
   /** 백엔드 registry 기준으로 workspace에서 사용할 수 있는 provider를 조회합니다. */
   listWorkspaceProviders(workspaceId: string, signal?: AbortSignal): Promise<AiProvider[]>;
 

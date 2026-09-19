@@ -201,6 +201,14 @@ export const mockApi: MaeglagiApi = {
     return { ...workspace };
   },
 
+  async listProviders(signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return BOOTSTRAP_AI_PROVIDERS.map<AiProvider>((provider) => ({
+      ...provider,
+      capabilities: [...provider.capabilities],
+    }));
+  },
+
   async listWorkspaceProviders(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId)) {
