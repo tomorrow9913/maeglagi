@@ -20,7 +20,7 @@ from app.modules.context_engine.infrastructure.provider_adapters import (
     OpenAICompatibleAdapter,
     ProviderError,
 )
-from app.modules.ingestion.application.pipeline import IngestionError
+from app.modules.ingestion.application.pipeline import IngestionError, ResolvedProvider
 from app.modules.retrieval.application.answer import (
     EMPTY_ANSWER,
     NO_EVIDENCE,
@@ -204,17 +204,31 @@ def chunk(source: Source, text: str, start: float | None = None) -> Chunk:
     )  # fmt: skip
 
 
+VECTOR = [0.25, 0.5]
+
+
+class Embedder:
+    """An `embed` that returns a fixed vector and counts how often it was asked."""
+
+    def __init__(self) -> None:
+        self.questions: list[str] = []
+
+    async def __call__(self, question: str) -> list[float]:
+        self.questions.append(question)
+        return VECTOR
+
+
 class Recorder:
     """A `search` that answers from a table and remembers how it was called."""
 
     def __init__(self, unscoped: list[Chunk], scoped: list[Chunk] | None = None) -> None:
         self.unscoped, self.scoped = unscoped, scoped or []
-        self.calls: list[tuple[str, list[UUID] | None, int]] = []
+        self.calls: list[tuple[list[float], list[UUID] | None, int]] = []
 
     async def __call__(
-        self, query: str, source_ids: list[UUID] | None, limit: int
+        self, embedding: list[float], source_ids: list[UUID] | None, limit: int
     ) -> list[tuple[Chunk, float]]:
-        self.calls.append((query, source_ids, limit))
+        self.calls.append((embedding, source_ids, limit))
         return [(c, 0.1) for c in (self.unscoped if source_ids is None else self.scoped)]
 
 
@@ -252,7 +266,9 @@ class FakeGraph:
 
 async def test_vector_hits_become_numbered_evidence_with_their_origin() -> None:
     first, second = chunk(SOURCE_A, "p95가 1.8초입니다.", 754.0), chunk(SOURCE_B, "목표는 500ms")
-    retriever = HybridRetriever(search=Recorder([first, second]), load_sources=load_sources)
+    retriever = HybridRetriever(
+        embed=Embedder(), search=Recorder([first, second]), load_sources=load_sources
+    )
 
     result = await retriever.retrieve(WORKSPACE, "지연은?")
 
@@ -267,7 +283,9 @@ async def test_vector_hits_become_numbered_evidence_with_their_origin() -> None:
 async def test_the_graph_widens_the_search_to_the_sources_it_points_at() -> None:
     from_vector, from_graph = chunk(SOURCE_A, "벡터"), chunk(SOURCE_B, "그래프")
     search = Recorder([from_vector], scoped=[from_graph, from_vector])
-    retriever = HybridRetriever(search=search, load_sources=load_sources, graph=FakeGraph())  # type: ignore[arg-type]
+    retriever = HybridRetriever(
+        embed=Embedder(), search=search, load_sources=load_sources, graph=FakeGraph()
+    )  # type: ignore[arg-type]
 
     result = await retriever.retrieve(WORKSPACE, "박지훈은 무엇을 결정했나요?")
 
@@ -283,7 +301,7 @@ async def test_the_graph_widens_the_search_to_the_sources_it_points_at() -> None
 async def test_a_graph_failure_falls_back_to_vector_search() -> None:
     search = Recorder([chunk(SOURCE_A, "벡터")])
     retriever = HybridRetriever(
-        search=search, load_sources=load_sources, graph=FakeGraph(fail=True)
+        embed=Embedder(), search=search, load_sources=load_sources, graph=FakeGraph(fail=True)
     )  # type: ignore[arg-type]
 
     result = await retriever.retrieve(WORKSPACE, "박지훈은?")
@@ -298,7 +316,9 @@ async def test_a_chunk_whose_source_is_gone_is_dropped_and_numbering_stays_conti
         position=0, content="고아", start_seconds=None,
     )  # fmt: skip
     retriever = HybridRetriever(
-        search=Recorder([orphan, chunk(SOURCE_A, "살아 있음")]), load_sources=load_sources
+        embed=Embedder(),
+        search=Recorder([orphan, chunk(SOURCE_A, "살아 있음")]),
+        load_sources=load_sources,
     )
 
     result = await retriever.retrieve(WORKSPACE, "q")
@@ -308,7 +328,9 @@ async def test_a_chunk_whose_source_is_gone_is_dropped_and_numbering_stays_conti
 
 async def test_the_number_of_evidence_items_is_capped() -> None:
     many = [chunk(SOURCE_A, f"t{i}") for i in range(20)]
-    retriever = HybridRetriever(search=Recorder(many), load_sources=load_sources, max_evidence=5)
+    retriever = HybridRetriever(
+        embed=Embedder(), search=Recorder(many), load_sources=load_sources, max_evidence=5
+    )
 
     assert len((await retriever.retrieve(WORKSPACE, "q")).evidence) == 5
 
@@ -507,14 +529,23 @@ class FakeIngestion:
     def __init__(self, settings: Any = None) -> None:
         pass
 
-    async def workspace_provider(self, session: Any, **kwargs: Any) -> Any:
+    embed_calls: list[str] = []
+    searches: list[dict[str, Any]] = []
+    answer_model = "chosen-answer-model"
+
+    async def provider_with_model(self, session: Any, **kwargs: Any) -> Any:
         if self.no_chat_key:
             raise IngestionError("chat을 지원하는 API key가 없습니다.")
-        return self.adapter, "sk-test"
+        return ResolvedProvider(self.adapter, "sk-test", self.answer_model)
 
-    async def search(self, session: Any, **kwargs: Any) -> list[tuple[Chunk, float]]:
+    async def embed_query(self, session: Any, **kwargs: Any) -> list[float]:
         if self.no_embedding_key:
             raise IngestionError("embedding을 지원하는 API key가 없습니다.")
+        self.embed_calls.append(kwargs["query"])
+        return VECTOR
+
+    async def search_by_embedding(self, session: Any, **kwargs: Any) -> list[tuple[Chunk, float]]:
+        self.searches.append(kwargs)
         return [(c, 0.1) for c in self.chunks]
 
 
@@ -522,6 +553,7 @@ class FakeIngestion:
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     FakeIngestion.chunks = [chunk(SOURCE_A, "Redis 캐시 적용 후 p95가 320ms", 754.0)]
     FakeIngestion.no_chat_key = FakeIngestion.no_embedding_key = False
+    FakeIngestion.embed_calls, FakeIngestion.searches = [], []
     FakeIngestion.adapter = ScriptedAdapter(
         ["Redis를 도입해 p95가 ", "320ms로 내려갔습니다[1][4]."]
     )
@@ -641,3 +673,30 @@ def test_a_blank_or_oversized_question_is_rejected(client: TestClient, question:
 def test_the_route_is_registered() -> None:
     assert "/api/v1/workspaces/{workspace_id}/ask" in app.openapi()["paths"]
     assert ask_module.router.prefix == "/workspaces"
+
+
+async def test_the_question_is_embedded_once_and_both_searches_reuse_it() -> None:
+    embed = Embedder()
+    search = Recorder([chunk(SOURCE_A, "벡터")], scoped=[chunk(SOURCE_B, "그래프")])
+    retriever = HybridRetriever(
+        embed=embed,
+        search=search,
+        load_sources=load_sources,
+        graph=FakeGraph(),  # type: ignore[arg-type]
+    )
+
+    await retriever.retrieve(WORKSPACE, "박지훈은 무엇을 했나요?")
+
+    assert embed.questions == ["박지훈은 무엇을 했나요?"]  # embedded once, not once per search
+    assert len(search.calls) == 2  # the plain search and the graph-scoped one
+    assert [call[0] for call in search.calls] == [VECTOR, VECTOR]
+
+
+def test_the_endpoint_embeds_once_and_answers_with_the_model_the_workspace_chose(
+    client: TestClient,
+) -> None:
+    FakeIngestion.answer_model = "the-model-the-user-picked"
+    ask(client)
+
+    assert FakeIngestion.embed_calls == ["Redis를 왜 도입했나요?"]
+    assert FakeIngestion.adapter.requests[0].model == "the-model-the-user-picked"

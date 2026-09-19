@@ -27,6 +27,11 @@ from app.auth import CurrentUser, bearer
 from app.core.config import get_settings
 from app.core.credentials import store_credential_secret
 from app.core.database import get_session
+from app.modules.context_engine.application.model_catalog import (
+    options_for_key,
+    with_recommended_defaults,
+)
+from app.modules.context_engine.application.model_roles import invalid_selections
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
@@ -109,7 +114,18 @@ async def create_workspace(
     valid, message = await validate_provider_credential(body.llm_provider, body.llm_api_key)
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
-    workspace = Workspace(owner_id=user.id, name=body.name.strip())
+    options = await options_for_key(body.llm_provider, body.llm_api_key)
+    problems = invalid_selections(body.models or {}, options)
+    if problems:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " ".join(problems))
+    workspace = Workspace(
+        owner_id=user.id,
+        name=body.name.strip(),
+        # What the user chose wins; whatever they left out gets the key's recommended model.
+        model_settings=with_recommended_defaults(
+            {role: choice.model_dump() for role, choice in (body.models or {}).items()}, options
+        ),
+    )
     session.add(workspace)
     credential = ProviderCredential(
         workspace_id=workspace.id,
