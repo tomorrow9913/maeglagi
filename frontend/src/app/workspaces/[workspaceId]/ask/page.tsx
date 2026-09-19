@@ -1,9 +1,11 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowUpRight, Send, Square } from "lucide-react";
+import { ArrowUpRight, Send, Square, Plus, FileUp, Mic } from "lucide-react";
 
+import { DropdownMenu } from "radix-ui";
+import { SourceUploadDialog } from "@/features/source-ingestion/components/source-upload-dialog";
+import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,12 +17,12 @@ import { useAsk } from "@/features/ask/hooks/use-ask";
 import { useAsync } from "@/hooks/use-async";
 import { api } from "@/lib/api";
 import type { AnswerSource } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 export default function AskPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
-  const router = useRouter();
+  const [uploadMode, setUploadMode] = useState<"document" | "meeting" | null>(null);
+  const [sourceViewer, setSourceViewer] = useState<AnswerSource>();
 
   const [draft, setDraft] = useState("");
   const [isModelSaving, setIsModelSaving] = useState(false);
@@ -65,13 +67,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
     [ask, isStreaming],
   );
 
-  const openSource = useCallback(
-    (source: AnswerSource) => {
-      const query = new URLSearchParams({ source: source.sourceId, chunk: source.chunkId });
-      router.push(`${workspacePath(workspaceId, "sources")}?${query.toString()}`);
-    },
-    [router, workspaceId],
-  );
+  const openSource = useCallback((source: AnswerSource) => setSourceViewer(source), []);
 
   return (
     <div className="flex min-h-[calc(100dvh-8rem)] flex-col">
@@ -157,13 +153,53 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
             submit(draft);
           }}
         >
-          <Input
-            value={draft}
-            placeholder="이 워크스페이스에 대해 질문해 보세요"
-            disabled={isStreaming || isModelSaving}
-            onChange={(event) => setDraft(event.target.value)}
-            aria-label="질문"
-          />
+          <div className="relative min-w-0 flex-1">
+            <Input
+              className="pr-10"
+              value={draft}
+              placeholder="이 워크스페이스에 대해 질문해 보세요"
+              disabled={isStreaming || isModelSaving}
+              onChange={(event) => setDraft(event.target.value)}
+              aria-label="질문"
+            />
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="absolute top-1 right-1"
+                  aria-label="소스 추가"
+                  title="파일 업로드 또는 회의 녹음"
+                >
+                  <Plus aria-hidden />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="end"
+                  side="top"
+                  sideOffset={8}
+                  className="z-50 min-w-44 rounded-lg border bg-popover p-1 text-sm shadow-md"
+                >
+                  <DropdownMenu.Item
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 outline-none focus:bg-accent"
+                    onSelect={() => setUploadMode("document")}
+                  >
+                    <FileUp className="size-4" />
+                    파일 업로드
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 outline-none focus:bg-accent"
+                    onSelect={() => setUploadMode("meeting")}
+                  >
+                    <Mic className="size-4" />
+                    회의 녹음 · 받아쓰기
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
           {isStreaming ? (
             <Button type="button" variant="outline" onClick={stop}>
               <Square className="size-4" aria-hidden />
@@ -183,6 +219,17 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
           onSavingChange={onModelSavingChange}
         />
       </div>
+      <SourceUploadDialog
+        key={workspaceId}
+        workspaceId={workspaceId}
+        mode={uploadMode}
+        onClose={() => setUploadMode(null)}
+      />
+      <SourceViewer
+        sourceId={sourceViewer?.sourceId}
+        highlightChunkId={sourceViewer?.chunkId}
+        onClose={() => setSourceViewer(undefined)}
+      />
     </div>
   );
 }

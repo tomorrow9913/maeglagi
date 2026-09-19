@@ -1,10 +1,11 @@
 "use client";
 
-import { use, type ReactNode } from "react";
+import { use, useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronsUpDown } from "lucide-react";
 
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
+import { WorkspaceSources } from "@/features/source-ingestion/components/workspace-sources";
 import { WorkspaceNav } from "@/components/layout/workspace-nav";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,13 +30,18 @@ export default function WorkspaceLayout({
     [workspaceId],
   );
 
+  useEffect(() => {
+    window.addEventListener("maeglagi:sources-changed", reload);
+    return () => window.removeEventListener("maeglagi:sources-changed", reload);
+  }, [reload]);
+
   const isMissing = error instanceof ApiError && error.status === 404;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 gap-8 px-5 py-8">
-      <aside className="hidden w-48 shrink-0 md:block">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-5 py-8 md:flex-row md:gap-8">
+      <aside className="w-full shrink-0 md:w-56">
         {/* 어느 워크스페이스를 보고 있는지 항상 보이게 두고, 누르면 목록에서 바꿉니다. */}
-        {isLoading ? (
+        {isLoading && !data ? (
           <Skeleton className="mb-4 h-14" />
         ) : data ? (
           <Link
@@ -51,9 +57,12 @@ export default function WorkspaceLayout({
           </Link>
         ) : null}
         <WorkspaceNav workspaceId={workspaceId} />
+        <div className="hidden md:block">
+          <WorkspaceSources key={workspaceId} workspaceId={workspaceId} />
+        </div>
       </aside>
       <main className="min-w-0 flex-1">
-        {isLoading ? (
+        {isLoading && !data ? (
           <ListSkeleton count={3} className="h-28" />
         ) : isMissing ? (
           <EmptyState
@@ -65,7 +74,7 @@ export default function WorkspaceLayout({
               </Button>
             }
           />
-        ) : error ? (
+        ) : error && !data ? (
           <ErrorState error={error} onRetry={reload} />
         ) : data ? (
           children

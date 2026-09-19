@@ -10,7 +10,7 @@ export function WorkspaceNav({ workspaceId }: { workspaceId: string }) {
   const segment = useSelectedLayoutSegment();
 
   return (
-    <nav aria-label="워크스페이스 메뉴" className="flex flex-col gap-1">
+    <nav aria-label="워크스페이스 메뉴" className="flex flex-wrap gap-1 md:flex-col">
       {workspaceNavItems.map((item) => {
         const Icon = item.icon;
         const isActive = segment === item.segment;

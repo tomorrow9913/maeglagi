@@ -11,6 +11,7 @@ import type {
   ModelSelections,
   ProcessingJob,
   Source,
+  SourceContent,
   Workspace,
   WorkspaceModels,
   WorkspaceSecrets,
@@ -58,8 +59,9 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * 화면에서 확인할 수 있을 만큼만 상태를 들고 있습니다.
  */
 const state = {
-  workspaces: [...seedWorkspaces],
-  sources: [...seedSources],
+  workspaces: seedWorkspaces.map((workspace) => ({ ...workspace })),
+  sources: seedSources.map((source) => ({ ...source })),
+  transcripts: new Map<string, SourceContent>(),
   jobs: new Map<string, ProcessingJob & { startedAt: number }>(),
   /** 키 원문은 저장하지 않고, 서버가 내려줄 힌트만 흉내 냅니다. */
   secrets: new Map<string, WorkspaceSecrets[]>([
@@ -230,6 +232,7 @@ function registerUpload(workspaceId: string, source: Source): ProcessingJob {
     id: nextId("job"),
     sourceId: source.id,
     sourceKind: source.kind,
+    transcriptSource: source.transcriptSource,
     status: "queued",
     progress: 0,
     stage: "uploaded",
@@ -422,7 +425,8 @@ export const mockApi: MaeglagiApi = {
 
   async getSourceContent(sourceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const content = sourceContents.find((item) => item.sourceId === sourceId);
+    const content =
+      state.transcripts.get(sourceId) ?? sourceContents.find((item) => item.sourceId === sourceId);
     if (!content) throw new ApiError(404, "원문을 찾을 수 없습니다.");
     return structuredClone(content);
   },
@@ -469,6 +473,15 @@ export const mockApi: MaeglagiApi = {
       createdAt: new Date().toISOString(),
       durationSeconds: input.durationSeconds,
       transcriptSource: "browser",
+    });
+    state.transcripts.set(job.sourceId, {
+      sourceId: job.sourceId,
+      title: input.title?.trim() || "회의 대본",
+      kind: "meeting",
+      chunks: input.text
+        .trim()
+        .split(/\n\n+/)
+        .map((text, index) => ({ id: `${job.sourceId}-chunk-${index}`, text })),
     });
     job.transcriptSource = "browser";
     return job;
