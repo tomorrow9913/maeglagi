@@ -14,6 +14,12 @@ export const BOOTSTRAP_AI_PROVIDERS: readonly AiProvider[] = [
     capabilities: ["chat", "embedding", "structuredOutput", "transcription", "models"],
     configured: false,
     models: [],
+    defaultModels: {
+      answer: "gpt-4o-mini",
+      extraction: "gpt-4o-mini",
+      embedding: "text-embedding-3-small",
+      transcription: "whisper-1",
+    },
   },
   {
     id: "anthropic",
@@ -21,6 +27,7 @@ export const BOOTSTRAP_AI_PROVIDERS: readonly AiProvider[] = [
     capabilities: ["chat", "models"],
     configured: false,
     models: [],
+    defaultModels: { answer: "claude-haiku-4-5" },
   },
   {
     id: "nvidia",
@@ -28,6 +35,7 @@ export const BOOTSTRAP_AI_PROVIDERS: readonly AiProvider[] = [
     capabilities: ["chat", "models"],
     configured: false,
     models: [],
+    defaultModels: { answer: "meta/llama-3.1-8b-instruct" },
   },
 ] as const;
 

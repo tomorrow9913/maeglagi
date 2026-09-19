@@ -34,6 +34,11 @@ export type AiProvider = {
   capabilities: string[];
   configured: boolean;
   models: string[];
+  /**
+   * 이 공급자가 용도마다 미리 골라 두는 모델. 키를 넣기 전에도 공급자를 고르는 즉시 보여줄 수
+   * 있습니다. 기본 모델이 없는 용도(예: 임베딩이 없는 공급자)는 비어 있습니다.
+   */
+  defaultModels?: Partial<Record<ModelRole, string>>;
 };
 
 /** 모델이 쓰이는 용도. 서버가 내려주는 순서와 같습니다. */

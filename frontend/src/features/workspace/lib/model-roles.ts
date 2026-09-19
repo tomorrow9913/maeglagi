@@ -38,11 +38,20 @@ export function optionKey(option: ModelOption): string {
   return `${option.provider}/${option.model}`;
 }
 
-/** 저장된 선택이 있으면 그것을, 없으면 서버가 추천한 첫 옵션을 미리 고릅니다. */
-export function initialSelections(roles: RoleModels[]): ModelSelections {
+/**
+ * 저장된 선택이 있으면 그것을, 없으면 그 공급자의 기본 모델을 미리 고릅니다. 기본 모델을 이 키가
+ * 제공하지 않으면(또는 기본값이 없으면) 서버가 정렬해 준 첫 옵션으로 물러섭니다.
+ */
+export function initialSelections(
+  roles: RoleModels[],
+  defaults: Record<string, Partial<Record<ModelRole, string>> | undefined> = {},
+): ModelSelections {
   const selections: ModelSelections = {};
   for (const entry of roles) {
-    const chosen = entry.selected ?? entry.options[0];
+    const preferred = entry.options.find(
+      (option) => defaults[option.provider]?.[entry.role] === option.model,
+    );
+    const chosen = entry.selected ?? preferred ?? entry.options[0];
     if (chosen) selections[entry.role] = chosen;
   }
   return selections;

@@ -22,6 +22,7 @@ import type { LlmProvider, Workspace } from "@/lib/api";
 import { useKeyModels } from "../hooks/use-key-models";
 import { ApiKeyField } from "./api-key-field";
 import { KeyModelSection } from "./key-model-section";
+import { ProviderDefaults } from "./provider-defaults";
 import { ProviderSelect } from "./provider-select";
 
 /**
@@ -46,7 +47,8 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
   const [validatedKey, setValidatedKey] = useState<string>();
   const isKeyValid = Boolean(validatedKey);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const keyModels = useKeyModels(provider, validatedKey);
+  const selectedProvider = providers.find((item) => item.id === provider);
+  const keyModels = useKeyModels(provider, validatedKey, selectedProvider?.defaultModels);
 
   const reset = () => {
     setName("");
@@ -133,6 +135,8 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
               providers={providers}
               disabled={isSubmitting}
             />
+            {/* 키를 넣기 전이라도 공급자를 고르는 즉시 그 공급자의 기본 모델을 보여줍니다. */}
+            {!isKeyValid ? <ProviderDefaults provider={selectedProvider} className="pt-1" /> : null}
           </div>
 
           <div className="space-y-1.5">
