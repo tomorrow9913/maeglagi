@@ -1,19 +1,46 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from urllib.parse import quote
 from uuid import UUID
 
 import httpx
 from celery import Task
+from sqlalchemy import text
 from sqlmodel import select
 
 from app.core.celery import celery_app
 from app.core.config import get_settings
-from app.core.database import session_factory
+from app.core.database import engine, session_factory
 from app.modules.ingestion.application.document_parser import DocumentParser
 from app.modules.ingestion.application.pipeline import IngestionPipeline
 from app.modules.ingestion.application.source_analysis import SourceAnalysisService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
+from app.modules.workspaces.domain.source_state import (
+    ProcessingStage,
+    ReviewState,
+    SourceStatus,
+)
 from app.modules.workspaces.infrastructure.models import Source
+
+
+@asynccontextmanager
+async def _source_execution_lock(source_id: UUID) -> AsyncIterator[None]:
+    """Hold a blocking transaction advisory lock across every source-write commit.
+
+    This dedicated transaction pins a backend connection even through a transaction
+    pooler. Source writes use other sessions. A duplicate waits and then rechecks
+    persisted state; a worker death rolls the transaction back and releases the lock.
+    """
+    key = int.from_bytes(source_id.bytes[:8], "big", signed=True)
+    async with engine.connect() as connection:
+        await connection.execute(text("SET LOCAL idle_in_transaction_session_timeout = 0"))
+        await connection.execute(text("SET LOCAL statement_timeout = 0"))
+        await connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+        try:
+            yield
+        finally:
+            await connection.rollback()
 
 
 async def _download_source(source: Source) -> bytes:
@@ -35,8 +62,8 @@ async def _download_source(source: Source) -> bytes:
 async def _update_source(
     source_id: UUID,
     *,
-    status: str,
-    stage: str,
+    status: SourceStatus,
+    stage: ProcessingStage,
     progress: float,
     error_message: str | None = None,
 ) -> None:
@@ -44,10 +71,18 @@ async def _update_source(
         source = await session.get(Source, source_id)
         if source is None:
             return
-        if source.status == "succeeded" or source.review_state == "awaiting_review":
+        if (
+            source.status == SourceStatus.SUCCEEDED
+            or source.review_state == ReviewState.AWAITING_REVIEW
+        ):
             return
         source.status = status
-        source.processing_stage = "confirmed" if source.review_state == "confirmed" else stage
+        if source.review_state == ReviewState.CONFIRMED:
+            source.processing_stage = ProcessingStage.CONFIRMED
+        elif source.review_state == ReviewState.TRANSCRIBING:
+            source.processing_stage = ProcessingStage.TRANSCRIBING
+        else:
+            source.processing_stage = stage
         source.progress = progress
         source.error_message = error_message
         session.add(source)
@@ -60,23 +95,26 @@ async def _process_source(source_id: UUID) -> None:
         source = result.first()
         if source is None:
             raise ValueError(f"Source not found: {source_id}")
-        if source.status in {"succeeded", "processing", "awaiting_review"}:
+        if source.status in {SourceStatus.SUCCEEDED, SourceStatus.AWAITING_REVIEW}:
             return
-        if source.kind == "meeting" and source.review_state not in {"transcribing", "confirmed"}:
+        if source.kind == "meeting" and source.review_state not in {
+            ReviewState.TRANSCRIBING,
+            ReviewState.CONFIRMED,
+        }:
             return
-        source.status = "processing"
+        source.status = SourceStatus.PROCESSING
         source.error_message = None
         pipeline = IngestionPipeline()
 
         if source.kind == "document":
-            source.processing_stage = "uploaded"
+            source.processing_stage = ProcessingStage.UPLOADED
             source.progress = 0.2
             await session.commit()
             content = await _download_source(source)
             parsed_text = DocumentParser().parse(content, filename=source.title)
             graph_text = parsed_text
             source.content_text = parsed_text
-            source.processing_stage = "analyzing"
+            source.processing_stage = ProcessingStage.ANALYZING
             source.progress = 0.5
             session.add(source)
             await session.commit()
@@ -85,8 +123,8 @@ async def _process_source(source_id: UUID) -> None:
                 source=source,
                 segments=[DocumentSection(text=parsed_text)],
             )
-        elif source.review_state == "transcribing":
-            source.processing_stage = "transcribing"
+        elif source.review_state == ReviewState.TRANSCRIBING:
+            source.processing_stage = ProcessingStage.TRANSCRIBING
             source.progress = 0.2
             await session.commit()
             content = await _download_source(source)
@@ -121,18 +159,18 @@ async def _process_source(source_id: UUID) -> None:
             ]
             if not source.review_utterances:
                 source.review_utterances = list(source.raw_utterances)
-            source.review_state = "awaiting_review"
-            source.status = "awaiting_review"
-            source.processing_stage = "awaiting_review"
+            source.review_state = ReviewState.AWAITING_REVIEW
+            source.status = SourceStatus.AWAITING_REVIEW
+            source.processing_stage = ProcessingStage.AWAITING_REVIEW
             source.progress = 0.45
             session.add(source)
             await session.commit()
             return
         else:
             graph_text = source.transcript_text or ""
-            if source.review_state != "confirmed":
+            if source.review_state != ReviewState.CONFIRMED:
                 return
-            source.processing_stage = "analyzing"
+            source.processing_stage = ProcessingStage.ANALYZING
             source.progress = 0.5
             await session.commit()
             segments = [
@@ -151,22 +189,40 @@ async def _process_source(source_id: UUID) -> None:
                 segments=segments,
             )
 
-        source.processing_stage = "graphing"
+        source.processing_stage = ProcessingStage.GRAPHING
         source.progress = 0.7
         session.add(source)
         await session.commit()
         await SourceAnalysisService().run(session, source=source, text=graph_text)
 
-        source.status = "processing"
-        source.processing_stage = "graphing"
+        source.status = SourceStatus.PROCESSING
+        source.processing_stage = ProcessingStage.GRAPHING
         source.progress = 0.9
         session.add(source)
         await session.commit()
-        source.status = "succeeded"
-        source.processing_stage = "completed"
+        source.status = SourceStatus.SUCCEEDED
+        source.processing_stage = ProcessingStage.COMPLETED
         source.progress = 1
         session.add(source)
         await session.commit()
+
+
+async def _run_source_attempt(source_id: UUID, *, final_attempt: bool) -> Exception | None:
+    async with _source_execution_lock(source_id):
+        try:
+            await _process_source(source_id)
+        except Exception as exc:
+            # Commit retry/failure before releasing the lock so a duplicate
+            # cannot start while this attempt still appears to be processing.
+            await _update_source(
+                source_id,
+                status=SourceStatus.FAILED if final_attempt else SourceStatus.QUEUED,
+                stage=ProcessingStage.UPLOADED,
+                progress=0,
+                error_message=str(exc),
+            )
+            return exc
+    return None
 
 
 @celery_app.task(
@@ -180,19 +236,15 @@ async def _process_source(source_id: UUID) -> None:
 )
 def process_source(self: Task, source_id: str) -> None:
     identifier = UUID(source_id)
+    final_attempt = self.request.retries >= self.max_retries
     try:
-        asyncio.run(_process_source(identifier))
+        error = asyncio.run(_run_source_attempt(identifier, final_attempt=final_attempt))
     except Exception as exc:
-        final_attempt = self.request.retries >= self.max_retries
-        asyncio.run(
-            _update_source(
-                identifier,
-                status="failed" if final_attempt else "queued",
-                stage="uploaded",
-                progress=0,
-                error_message=str(exc),
-            )
-        )
+        # The lock/DB connection failed; leave source state untouched and keep
+        # retrying infrastructure recovery. The normal three-attempt provider
+        # bound below must not acknowledge a persisted `processing` source.
+        raise self.retry(exc=exc, countdown=30, max_retries=2_147_483_647) from exc
+    if error is not None:
         if final_attempt:
-            raise
-        raise self.retry(exc=exc) from exc
+            raise error
+        raise self.retry(exc=error) from error

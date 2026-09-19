@@ -17,6 +17,8 @@ from app.api.workspaces.review import (
     ConfirmRequest,
     ReviewPatch,
     confirm_review,
+    retry_transcription,
+    review_payload,
     save_review,
 )
 from app.auth.dependencies import get_current_user
@@ -347,6 +349,76 @@ async def test_publish_happens_before_source_lock_is_released(
     assert session.source.status == "queued"
 
 
+async def test_failed_server_stt_retries_same_audio_and_keeps_live_draft(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.source.transcript_source = "server"
+    session.source.review_state = "transcribing"
+    session.source.status = "failed"
+    session.source.processing_stage = "transcribing"
+    session.source.error_message = "Provider unavailable"
+    session.source.review_utterances = [utterance(text="사용자 수정본")]
+    original_path = session.source.object_path
+    failed_review = review_payload(session.source)
+    assert (failed_review.status, failed_review.stage, failed_review.error_message) == (
+        "failed",
+        "transcribing",
+        "Provider unavailable",
+    )
+    published: list[str] = []
+    monkeypatch.setattr(
+        review_module.process_source,
+        "apply_async",
+        lambda **kwargs: published.append(kwargs["task_id"]),
+    )
+    user = AuthUser(id=OWNER)
+
+    first = await retry_transcription(WORKSPACE, session.source.id, user, session)  # type: ignore[arg-type]
+    second = await retry_transcription(WORKSPACE, session.source.id, user, session)  # type: ignore[arg-type]
+
+    assert first.status == second.status == "queued"
+    assert published == [str(session.source.id)]
+    assert session.source.object_path == original_path
+    assert session.source.review_utterances[0]["text"] == "사용자 수정본"
+    assert session.source.review_state == "transcribing"
+    assert session.source.confirmed_snapshot is None
+    failed_review = review_payload(session.source)
+    assert failed_review.status == "queued"
+    assert failed_review.stage == "transcribing"
+    assert failed_review.error_message is None
+
+
+async def test_stt_retry_rejects_confirmed_meeting_and_foreign_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.source.transcript_source = "server"
+    session.source.review_state = "confirmed"
+    session.source.status = "failed"
+    monkeypatch.setattr(
+        review_module.process_source,
+        "apply_async",
+        lambda **kwargs: pytest.fail("confirmed meeting was enqueued"),
+    )
+    with pytest.raises(HTTPException) as confirmed:
+        await retry_transcription(
+            WORKSPACE,
+            session.source.id,
+            AuthUser(id=OWNER),
+            session,  # type: ignore[arg-type]
+        )
+    assert confirmed.value.status_code == 409
+    with pytest.raises(HTTPException) as foreign:
+        await retry_transcription(
+            WORKSPACE,
+            session.source.id,
+            AuthUser(id=OTHER),
+            session,  # type: ignore[arg-type]
+        )
+    assert foreign.value.status_code == 404
+
+
 def test_http_contract_uses_camel_case_and_review_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     session = FakeSession()
     app = create_app()
@@ -396,5 +468,46 @@ def test_http_contract_uses_camel_case_and_review_gate(monkeypatch: pytest.Monke
         assert confirmed.json()["status"] == "queued"
         assert client.get(review_url).json()["reviewState"] == "confirmed"
         assert client.get(review_url).json()["confirmedSnapshot"]["project"]["ownerRole"] == "리드"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_http_failed_stt_review_exposes_error_and_retries_same_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.source.transcript_source = "server"
+    session.source.review_state = "transcribing"
+    session.source.status = "failed"
+    session.source.processing_stage = "transcribing"
+    session.source.error_message = "Provider unavailable"
+    app = create_app()
+
+    async def session_dependency() -> Any:
+        yield session
+
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(id=OWNER)
+    app.dependency_overrides[get_session] = session_dependency
+    published: list[str] = []
+    monkeypatch.setattr(
+        review_module.process_source,
+        "apply_async",
+        lambda **kwargs: published.append(kwargs["task_id"]),
+    )
+    client = TestClient(app)
+    review_url = f"/api/v1/workspaces/{WORKSPACE}/sources/{session.source.id}/review"
+    try:
+        review = client.get(review_url)
+        assert review.status_code == 200
+        assert (review.json()["status"], review.json()["stage"], review.json()["errorMessage"]) == (
+            "failed",
+            "transcribing",
+            "Provider unavailable",
+        )
+        first = client.post(f"{review_url}/retry-transcription")
+        second = client.post(f"{review_url}/retry-transcription")
+        assert first.status_code == second.status_code == 202
+        assert first.json()["sourceId"] == second.json()["sourceId"] == str(session.source.id)
+        assert published == [str(session.source.id)]
     finally:
         app.dependency_overrides.clear()

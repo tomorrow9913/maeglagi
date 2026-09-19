@@ -116,6 +116,7 @@ export interface MaeglagiApi {
   ): Promise<ProcessingJob>;
   getJob(jobId: string, signal?: AbortSignal): Promise<ProcessingJob>;
   getMeetingReview(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<MeetingReview>;
+  retryMeetingTranscription(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<ProcessingJob>;
   saveMeetingReview(workspaceId: string, sourceId: string, input: { revision: number; projectId: string | null; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
   confirmMeetingReview(workspaceId: string, sourceId: string, revision: number, signal?: AbortSignal): Promise<ProcessingJob>;
 

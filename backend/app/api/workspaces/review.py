@@ -15,6 +15,11 @@ from app.api.workspaces.directory import active_person, active_project, owned_wo
 from app.auth import CurrentUser
 from app.core.database import get_session
 from app.modules.ingestion.infrastructure.tasks import process_source
+from app.modules.workspaces.domain.source_state import (
+    ProcessingStage,
+    ReviewState,
+    SourceStatus,
+)
 from app.modules.workspaces.infrastructure.models import Source, WorkspacePerson, WorkspaceProject
 
 router = APIRouter(prefix="/{workspace_id}/sources/{source_id}/review")
@@ -80,7 +85,10 @@ class ReviewResponse(BaseModel):
     source_id: UUID = Field(serialization_alias="sourceId")
     title: str
     transcript_source: str | None = Field(serialization_alias="transcriptSource")
-    review_state: str = Field(serialization_alias="reviewState")
+    review_state: ReviewState = Field(serialization_alias="reviewState")
+    status: SourceStatus
+    stage: ProcessingStage
+    error_message: str | None = Field(serialization_alias="errorMessage")
     revision: int
     project_id: UUID | None = Field(serialization_alias="projectId")
     utterances: list[ReviewUtterance]
@@ -102,7 +110,14 @@ def review_payload(source: Source) -> ReviewResponse:
         title=source.title,
         transcript_source=source.transcript_source,
         review_state=source.review_state
-        or ("confirmed" if source.status == "succeeded" else "awaiting_review"),
+        or (
+            ReviewState.CONFIRMED
+            if source.status == SourceStatus.SUCCEEDED
+            else ReviewState.AWAITING_REVIEW
+        ),
+        status=source.status,
+        stage=source.processing_stage,
+        error_message=source.error_message,
         revision=source.review_revision,
         project_id=source.project_id,
         utterances=[ReviewUtterance.model_validate(item) for item in source.review_utterances],
@@ -210,7 +225,7 @@ async def save_review(
     workspace_id: UUID, source_id: UUID, body: ReviewPatch, user: CurrentUser, session: Session
 ) -> ReviewResponse:
     source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
-    if source.review_state != "awaiting_review":
+    if source.review_state != ReviewState.AWAITING_REVIEW:
         raise HTTPException(status.HTTP_409_CONFLICT, "Meeting is not awaiting review")
     if source.review_revision != body.revision:
         raise HTTPException(status.HTTP_409_CONFLICT, "Stale review revision")
@@ -233,10 +248,10 @@ async def confirm_review(
     source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
     if source.review_revision != body.revision:
         raise HTTPException(status.HTTP_409_CONFLICT, "Stale review revision")
-    if source.review_state == "confirmed":
-        if source.status not in {"failed", "enqueue_pending"}:
+    if source.review_state == ReviewState.CONFIRMED:
+        if source.status not in {SourceStatus.FAILED, SourceStatus.ENQUEUE_PENDING}:
             return job_payload(source)
-    elif source.review_state == "awaiting_review":
+    elif source.review_state == ReviewState.AWAITING_REVIEW:
         utterances = [ReviewUtterance.model_validate(item) for item in source.review_utterances]
         validate_unique_utterances(utterances)
         usable = [item for item in utterances if item.text]
@@ -270,11 +285,11 @@ async def confirm_review(
         source.transcript_text = "\n\n".join(f"{item.speaker_name}: {item.text}" for item in usable)
         source.confirmed_snapshot = _snapshot(project, people, project_owner)
         source.confirmed_at = datetime.now(UTC)
-        source.review_state = "confirmed"
+        source.review_state = ReviewState.CONFIRMED
     else:
         raise HTTPException(status.HTTP_409_CONFLICT, "Meeting is not awaiting review")
-    source.status = "enqueue_pending"
-    source.processing_stage = "confirmed"
+    source.status = SourceStatus.ENQUEUE_PENDING
+    source.processing_stage = ProcessingStage.CONFIRMED
     source.error_message = None
     session.add(source)
     # Keep the source row locked through broker publication. Another confirmation
@@ -283,14 +298,52 @@ async def confirm_review(
     try:
         process_source.apply_async(args=[str(source.id)], task_id=str(source.id))
     except (OperationalError, ConnectionError) as exc:
-        source.status = "failed"
+        source.status = SourceStatus.FAILED
         source.error_message = "Processing queue unavailable"
         session.add(source)
         await session.commit()
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Processing queue unavailable"
         ) from exc
-    source.status = "queued"
+    source.status = SourceStatus.QUEUED
+    session.add(source)
+    await session.commit()
+    return job_payload(source)
+
+
+@router.post(
+    "/retry-transcription", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED
+)
+async def retry_transcription(
+    workspace_id: UUID, source_id: UUID, user: CurrentUser, session: Session
+) -> JobResponse:
+    source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
+    if source.transcript_source != "server" or source.review_state != ReviewState.TRANSCRIBING:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Meeting cannot be retranscribed")
+    if source.status in {
+        SourceStatus.QUEUED,
+        SourceStatus.ENQUEUE_PENDING,
+        SourceStatus.PROCESSING,
+    }:
+        return job_payload(source)
+    if source.status != SourceStatus.FAILED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Transcription has not failed")
+    source.status = SourceStatus.ENQUEUE_PENDING
+    source.processing_stage = ProcessingStage.TRANSCRIBING
+    source.error_message = None
+    session.add(source)
+    await session.flush()
+    try:
+        process_source.apply_async(args=[str(source.id)], task_id=str(source.id))
+    except (OperationalError, ConnectionError) as exc:
+        source.status = SourceStatus.FAILED
+        source.error_message = "Processing queue unavailable"
+        session.add(source)
+        await session.commit()
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Processing queue unavailable"
+        ) from exc
+    source.status = SourceStatus.QUEUED
     session.add(source)
     await session.commit()
     return job_payload(source)

@@ -54,6 +54,11 @@ from app.modules.ingestion.application.upload_validation import (
     validate_recording,
 )
 from app.modules.ingestion.infrastructure.tasks import process_source
+from app.modules.workspaces.domain.source_state import (
+    ProcessingStage,
+    ReviewState,
+    SourceStatus,
+)
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
 router = APIRouter()
@@ -91,7 +96,7 @@ async def _enqueue_source(source: Source, session: AsyncSession) -> None:
     try:
         process_source.apply_async(args=[str(source.id)], task_id=str(source.id))
     except (OperationalError, ConnectionError) as exc:
-        source.status = "failed"
+        source.status = SourceStatus.FAILED
         source.error_message = "Processing queue unavailable"
         session.add(source)
         await session.commit()
@@ -196,8 +201,8 @@ async def upload_document(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
-    source.status = "queued"
-    source.processing_stage = "uploaded"
+    source.status = SourceStatus.QUEUED
+    source.processing_stage = ProcessingStage.UPLOADED
     await session.commit()
     await _enqueue_source(source, session)
     return _job_response(source)
@@ -227,13 +232,13 @@ async def upload_recording(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid live draft") from exc
     source, _ = await _upload_source(workspace_id, audio, "meeting", user, session, credentials)
     source.transcript_source = "server"
-    source.review_state = "transcribing"
+    source.review_state = ReviewState.TRANSCRIBING
     source.project_id = project_id
     source.review_utterances = (
         [item.model_dump(by_alias=True, mode="json") for item in draft.utterances] if draft else []
     )
-    source.status = "queued"
-    source.processing_stage = "uploaded"
+    source.status = SourceStatus.QUEUED
+    source.processing_stage = ProcessingStage.UPLOADED
     source.progress = 0
     await session.commit()
     await _enqueue_source(source, session)
@@ -290,9 +295,9 @@ async def create_transcript_source(
         duration_seconds=body.duration_seconds,
         transcript_text=text_value,
         review_utterances=[item.model_dump(by_alias=True, mode="json") for item in utterances],
-        review_state="awaiting_review",
-        status="awaiting_review",
-        processing_stage="awaiting_review",
+        review_state=ReviewState.AWAITING_REVIEW,
+        status=SourceStatus.AWAITING_REVIEW,
+        processing_stage=ProcessingStage.AWAITING_REVIEW,
         progress=0.45,
     )
     source.object_path = f"{user.id}/{workspace.id}/{source.id}/transcript.txt"

@@ -1,5 +1,7 @@
+import asyncio
 import copy
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -434,6 +436,40 @@ async def test_server_stt_stops_at_review_and_keeps_live_edits(wired: Any) -> No
     assert RecordingAnalysis.calls == []
 
 
+async def test_final_stt_failure_is_retryable_without_downstream_writes(
+    wired: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = source()
+    record.transcript_source = "server"
+    record.review_state = "transcribing"
+    record.review_utterances = [
+        {"id": "live-1", "speakerName": "지훈", "text": "사람이 수정한 문장"}
+    ]
+    wired(record, b"audio")
+
+    async def fail_transcription(self: Any, session: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("transcription provider unavailable")
+
+    @asynccontextmanager
+    async def held_lock(source_id: UUID) -> Any:
+        yield
+
+    monkeypatch.setattr(StubIngestion, "transcribe", fail_transcription)
+    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+
+    error = await tasks._run_source_attempt(record.id, final_attempt=True)
+
+    assert isinstance(error, RuntimeError)
+    assert (record.status, record.review_state, record.processing_stage) == (
+        "failed",
+        "transcribing",
+        "transcribing",
+    )
+    assert record.review_utterances[0]["text"] == "사람이 수정한 문장"
+    assert StubIngestion.index_calls == 0
+    assert RecordingAnalysis.calls == []
+
+
 async def test_duplicate_confirmed_job_does_not_index_twice(wired: Any) -> None:
     record = source()
     record.transcript_source = "browser"
@@ -447,6 +483,87 @@ async def test_duplicate_confirmed_job_does_not_index_twice(wired: Any) -> None:
 
     assert StubIngestion.index_calls == 1
     assert len(RecordingAnalysis.calls) == 1
+
+
+async def test_redelivered_processing_job_resumes_after_worker_loss(wired: Any) -> None:
+    record = source()
+    record.transcript_source = "browser"
+    record.review_state = "confirmed"
+    record.status = "processing"  # The dead worker committed this before it died.
+    record.transcript_text = "민수: 수정본"
+    record.review_utterances = [{"id": "1", "speakerName": "민수", "text": "수정본"}]
+    wired(record)
+
+    await tasks._process_source(record.id)
+
+    assert record.status == "succeeded"
+    assert StubIngestion.index_calls == 1
+    assert len(RecordingAnalysis.calls) == 1
+
+
+async def test_concurrent_attempts_wait_then_recheck_succeeded_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock = asyncio.Lock()
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+    status = "processing"
+
+    @asynccontextmanager
+    async def held_lock(source_id: UUID) -> Any:
+        async with lock:
+            yield
+
+    async def process(source_id: UUID) -> None:
+        nonlocal calls, status
+        if status == "succeeded":
+            return
+        calls += 1
+        entered.set()
+        await release.wait()
+        status = "succeeded"
+
+    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(tasks, "_process_source", process)
+    identifier = uuid4()
+    first = asyncio.create_task(tasks._run_source_attempt(identifier, final_attempt=False))
+    await entered.wait()
+    second = asyncio.create_task(tasks._run_source_attempt(identifier, final_attempt=False))
+    await asyncio.sleep(0)
+    assert calls == 1
+    release.set()
+    assert await asyncio.gather(first, second) == [None, None]
+    assert calls == 1
+
+
+async def test_advisory_lock_keeps_a_dedicated_transaction_until_attempt_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[str] = []
+
+    class Connection:
+        async def __aenter__(self) -> "Connection":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            pass
+
+        async def execute(self, statement: Any, parameters: Any = None) -> None:
+            statements.append(str(statement))
+
+        async def rollback(self) -> None:
+            statements.append("ROLLBACK")
+
+    class Engine:
+        def connect(self) -> Connection:
+            return Connection()
+
+    monkeypatch.setattr(tasks, "engine", Engine())
+    async with tasks._source_execution_lock(uuid4()):
+        assert any("pg_advisory_xact_lock" in statement for statement in statements)
+        assert "ROLLBACK" not in statements
+    assert statements[-1] == "ROLLBACK"
+    assert not any("pg_try_advisory_lock" in statement for statement in statements)
 
 
 async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:

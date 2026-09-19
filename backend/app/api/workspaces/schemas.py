@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.context_engine.application.model_roles import ModelOption
+from app.modules.workspaces.domain.source_state import ReviewState, SourceStatus
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -33,12 +34,12 @@ class SourceResponse(BaseModel):
     workspace_id: UUID = Field(serialization_alias="workspaceId")
     kind: str
     title: str
-    status: str
+    status: SourceStatus
     created_at: datetime = Field(serialization_alias="createdAt")
     size_bytes: int | None = Field(default=None, serialization_alias="sizeBytes")
     duration_seconds: float | None = Field(default=None, serialization_alias="durationSeconds")
     transcript_source: str | None = Field(default=None, serialization_alias="transcriptSource")
-    review_state: str | None = Field(default=None, serialization_alias="reviewState")
+    review_state: ReviewState | None = Field(default=None, serialization_alias="reviewState")
     review_revision: int = Field(default=0, serialization_alias="reviewRevision")
     project_id: UUID | None = Field(default=None, serialization_alias="projectId")
 

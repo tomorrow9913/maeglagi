@@ -194,13 +194,16 @@ const nextId = (prefix: string) => `${prefix}-${++sequence}`;
 
 /** 경과 시간으로 진행률과 단계를 계산합니다. */
 function advanceJob(job: ProcessingJob & { startedAt: number }): ProcessingJob {
-  if (job.status === "awaiting_review") {
+  if (job.status === "awaiting_review" || job.status === "failed") {
     const { startedAt: _startedAt, ...rest } = job;
     return { ...rest };
   }
   const review = state.reviews.get(job.sourceId);
   if (review?.reviewState === "transcribing" && Date.now() - job.startedAt >= JOB_DURATION_MS / 2) {
     review.reviewState = "awaiting_review";
+    review.status = "awaiting_review";
+    review.stage = "awaiting_review";
+    review.errorMessage = null;
     review.rawTranscriptText = "화자 1: 회의 녹음의 서버 음성 인식 초안입니다. 내용을 확인해 주세요.";
     review.rawUtterances = [{ id: nextId("utterance"), personId: null, speakerName: "화자 1", text: "회의 녹음의 서버 음성 인식 초안입니다. 내용을 확인해 주세요.", startSeconds: 0 }];
     if (!review.utterances.length) review.utterances = structuredClone(review.rawUtterances);
@@ -536,7 +539,7 @@ export const mockApi: MaeglagiApi = {
       projectId: projectId ?? null,
     });
     job.transcriptSource = "server";
-    state.reviews.set(job.sourceId, { sourceId: job.sourceId, title: state.sources.find((item) => item.id === job.sourceId)?.title ?? "회의 녹음", transcriptSource: "server", reviewState: "transcribing", revision: 0, projectId: projectId ?? null, utterances: structuredClone(liveDraft?.utterances ?? []), rawTranscriptText: null, rawUtterances: [], confirmedAt: null, confirmedSnapshot: null });
+    state.reviews.set(job.sourceId, { sourceId: job.sourceId, title: state.sources.find((item) => item.id === job.sourceId)?.title ?? "회의 녹음", transcriptSource: "server", reviewState: "transcribing", status: "queued", stage: "transcribing", errorMessage: null, revision: 0, projectId: projectId ?? null, utterances: structuredClone(liveDraft?.utterances ?? []), rawTranscriptText: null, rawUtterances: [], confirmedAt: null, confirmedSnapshot: null });
     return job;
   },
 
@@ -555,7 +558,7 @@ export const mockApi: MaeglagiApi = {
       transcriptSource: "browser",
       projectId: input.projectId ?? null,
     });
-    state.reviews.set(job.sourceId, { sourceId: job.sourceId, title: input.title?.trim() || "회의 대본", transcriptSource: "browser", reviewState: "awaiting_review", revision: 0, projectId: input.projectId ?? null, utterances: structuredClone(input.utterances?.length ? input.utterances : [{ id: nextId("utterance"), personId: null, speakerName: "화자 1", text: input.text }]), rawTranscriptText: input.text, rawUtterances: structuredClone(input.utterances ?? []), confirmedAt: null, confirmedSnapshot: null });
+    state.reviews.set(job.sourceId, { sourceId: job.sourceId, title: input.title?.trim() || "회의 대본", transcriptSource: "browser", reviewState: "awaiting_review", status: "awaiting_review", stage: "awaiting_review", errorMessage: null, revision: 0, projectId: input.projectId ?? null, utterances: structuredClone(input.utterances?.length ? input.utterances : [{ id: nextId("utterance"), personId: null, speakerName: "화자 1", text: input.text }]), rawTranscriptText: input.text, rawUtterances: structuredClone(input.utterances ?? []), confirmedAt: null, confirmedSnapshot: null });
     const storedJob = state.jobs.get(job.id)!;
     storedJob.status = "awaiting_review";
     storedJob.stage = "awaiting_review";
@@ -577,7 +580,30 @@ export const mockApi: MaeglagiApi = {
     await delay(MOCK_LATENCY_MS, signal);
     const review = state.reviews.get(sourceId);
     if (!review || !state.sources.some((item) => item.id === sourceId && item.workspaceId === workspaceId)) throw new ApiError(404, "검토 대본을 찾을 수 없습니다.");
-    return structuredClone(review);
+    const job = state.jobs.get(sourceId);
+    const currentJob = job ? advanceJob(job) : undefined;
+    return { ...structuredClone(review), status: currentJob?.status ?? review.status, stage: currentJob?.stage ?? review.stage, errorMessage: currentJob?.errorMessage ?? review.errorMessage };
+  },
+  async retryMeetingTranscription(workspaceId, sourceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const review = state.reviews.get(sourceId);
+    const job = state.jobs.get(sourceId);
+    const source = state.sources.find((item) => item.id === sourceId && item.workspaceId === workspaceId);
+    if (!review || !job || !source || source.kind !== "meeting" || review.transcriptSource !== "server") throw new ApiError(404, "검토 대본을 찾을 수 없습니다.");
+    if (review.reviewState !== "transcribing") throw new ApiError(409, "이미 검토 단계로 이동한 대본입니다.");
+    if (job.status === "queued" || job.status === "enqueue_pending" || job.status === "processing") return advanceJob(job);
+    if (job.status !== "failed") throw new ApiError(409, "다시 시도할 수 없는 상태입니다.");
+    job.status = "queued";
+    job.stage = "transcribing";
+    job.progress = 0;
+    job.errorMessage = undefined;
+    job.startedAt = Date.now();
+    source.status = "queued";
+    review.status = "queued";
+    review.stage = "transcribing";
+    review.errorMessage = null;
+    const { startedAt: _startedAt, ...response } = job;
+    return { ...response };
   },
   async saveMeetingReview(workspaceId, sourceId, input, signal) {
     await delay(MOCK_LATENCY_MS, signal);
@@ -592,6 +618,8 @@ export const mockApi: MaeglagiApi = {
     review.projectId = input.projectId;
     review.utterances = structuredClone(input.utterances);
     review.revision += 1;
+    review.status = "awaiting_review";
+    review.stage = "awaiting_review";
     return structuredClone(review);
   },
   async confirmMeetingReview(workspaceId, sourceId, revision, signal) {
@@ -603,6 +631,8 @@ export const mockApi: MaeglagiApi = {
     if (review.reviewState === "confirmed") return advanceJob(job);
     if (!review.projectId || !state.projects.some((item) => item.id === review.projectId && item.workspaceId === workspaceId && !item.archivedAt) || !review.utterances.some((item) => item.text.trim())) throw new ApiError(422, "활성 프로젝트와 발언을 확인해 주세요.");
     review.reviewState = "confirmed";
+    review.status = "processing";
+    review.stage = "analyzing";
     review.confirmedAt = new Date().toISOString();
     review.confirmedSnapshot = { project: structuredClone(state.projects.find((item) => item.id === review.projectId)), people: structuredClone(state.people.filter((person) => review.utterances.some((item) => item.personId === person.id))) };
     state.transcripts.set(sourceId, { sourceId, title: review.title, kind: "meeting", chunks: review.utterances.filter((item) => item.text.trim()).map((item, index) => ({ id: `${sourceId}-chunk-${index}`, text: `${item.speakerName}: ${item.text}`, startSeconds: item.startSeconds, endSeconds: item.endSeconds })) });

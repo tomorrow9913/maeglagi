@@ -205,6 +205,9 @@ export type MeetingReview = {
   title: string;
   transcriptSource: "server" | "browser";
   reviewState: "transcribing" | "awaiting_review" | "confirmed";
+  status: ProcessingStatus;
+  stage: ProcessingStage;
+  errorMessage: string | null;
   revision: number;
   projectId: string | null;
   utterances: MeetingUtterance[];

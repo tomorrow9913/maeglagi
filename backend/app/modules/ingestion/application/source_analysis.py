@@ -23,6 +23,7 @@ from app.modules.context_engine.infrastructure.context_store_repository import (
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 from app.modules.retrieval.infrastructure.graph_writer import GraphWriter
+from app.modules.workspaces.domain.source_state import ReviewState
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,10 @@ class SourceAnalysisService:
         self.repository_factory = repository_factory or SqlContextStoreRepository
 
     async def run(self, session: AsyncSession, *, source: Source, text: str) -> list[str]:
-        if source.kind == "meeting" and source.review_state in {"transcribing", "awaiting_review"}:
+        if source.kind == "meeting" and source.review_state in {
+            ReviewState.TRANSCRIBING,
+            ReviewState.AWAITING_REVIEW,
+        }:
             return self._skip(source, "대본 확인이 끝나지 않았습니다.")
         try:
             adapter, api_key, model = await self.ingestion.provider_with_model(
