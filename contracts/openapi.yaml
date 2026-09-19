@@ -77,10 +77,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [provider, apiKey]
+              required: [provider]
               properties:
                 provider: { type: string }
-                apiKey: { type: string }
+                credentialId: { type: string, format: uuid, description: Preview a saved account credential }
+                apiKey: { type: string, writeOnly: true, description: Optional for Ollama }
+                baseUrl: { type: string, description: Required for Ollama }
       responses:
         "200":
           description: One entry per job, always in the order answer, extraction, embedding, transcription
@@ -88,6 +90,69 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WorkspaceModels" }
         "422": { description: The key is not valid }
+  /api/v1/provider-credentials:
+    get:
+      operationId: listAccountProviderCredentials
+      summary: List the signed-in account's saved provider connections
+      responses:
+        "200":
+          description: Credential metadata without secrets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderCredential" } }
+    post:
+      operationId: addAccountProviderCredential
+      summary: Save a provider connection for reuse in workspaces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CredentialInput" }
+      responses:
+        "201":
+          description: Saved credential metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+  /api/v1/provider-credentials/{credentialId}:
+    parameters:
+      - { name: credentialId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateAccountProviderCredential
+      summary: Update a saved account credential by ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                apiKey: { type: string, writeOnly: true }
+                baseUrl: { type: string }
+      responses:
+        "200":
+          description: Updated metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+    delete:
+      operationId: deleteAccountProviderCredential
+      summary: Remove an account credential unused by workspace model choices
+      responses:
+        "204": { description: Removed }
+        "409": { description: Credential is selected by a workspace }
+  /api/v1/provider-credentials/{credentialId}/default:
+    parameters:
+      - { name: credentialId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: chooseAccountDefaultProviderCredential
+      summary: Mark an account credential as the default
+      responses:
+        "200":
+          description: Updated metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
   /api/v1/workspaces/{workspaceId}/provider-credentials:
     parameters:
       - { name: workspaceId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -125,16 +190,16 @@ paths:
       - { name: credentialId, in: path, required: true, schema: { type: string, format: uuid } }
     put:
       operationId: rotateProviderCredential
-      summary: Rotate one key by ID without changing its default status or model choices
+      summary: Update one credential's key or Ollama address without changing model choices
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [apiKey]
               properties:
-                apiKey: { type: string, minLength: 1 }
+                apiKey: { type: string, writeOnly: true, description: Omission preserves Ollama secret; empty clears it }
+                baseUrl: { type: string, description: Omission preserves Ollama address }
       responses:
         "200":
           description: Updated credential metadata
@@ -242,18 +307,20 @@ components:
   schemas:
     CredentialInput:
       type: object
-      required: [provider, apiKey]
+      required: [provider]
       properties:
         provider: { type: string }
-        apiKey: { type: string, minLength: 1, writeOnly: true }
+        apiKey: { type: string, writeOnly: true, description: Optional for Ollama }
+        baseUrl: { type: string, description: Required for new Ollama connections }
         label: { type: string, minLength: 1, maxLength: 80, default: "기본" }
     ProviderCredential:
       type: object
-      required: [id, provider, label, keyHint, status, isDefault, updatedAt]
+      required: [id, provider, label, baseUrl, keyHint, status, isDefault, updatedAt]
       properties:
         id: { type: string, format: uuid }
         provider: { type: string }
         label: { type: string }
+        baseUrl: { type: [string, "null"] }
         keyHint: { type: string }
         status: { type: string }
         isDefault: { type: boolean }
@@ -264,6 +331,7 @@ components:
       properties:
         provider: { type: string }
         model: { type: string }
+        credentialId: { type: string, format: uuid, description: Identifies the saved account connection for workspace options }
     RoleModels:
       type: object
       required: [role, options, selected, locked]

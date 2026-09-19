@@ -80,17 +80,18 @@ def local_server(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
         raise AssertionError(path)
 
     transport = httpx.MockTransport(handler)
-    actual_client = httpx.AsyncClient
-    monkeypatch.setattr(
-        httpx, "AsyncClient", lambda **kwargs: actual_client(transport=transport, **kwargs)
-    )
+
+    async def mock_client(self, api_key: str, *, timeout: float = 10.0):
+        return httpx.AsyncClient(transport=transport, timeout=timeout)
+
+    monkeypatch.setattr(OllamaAdapter, "_client", mock_client)
     return requests
 
 
 @pytest.mark.asyncio
 async def test_local_model_capabilities_and_1536_probe(local_server: list[httpx.Request]) -> None:
     adapter = OllamaAdapter("http://ollama:11434")
-    assert await adapter.validate_credential("") == (True, "Ollama 로컬 서버에 연결되었습니다.")
+    assert await adapter.validate_credential("") == (True, "Ollama 서버에 연결되었습니다.")
     infos = await adapter.list_model_infos("")
     options = options_by_role([(adapter, infos)])
 
@@ -180,12 +181,10 @@ async def test_malformed_show_and_chat_json_become_provider_errors(
             return httpx.Response(200, text="invalid JSON")
         raise AssertionError("User payload must not be sent after malformed model metadata")
 
-    actual_client = httpx.AsyncClient
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **kwargs: actual_client(transport=httpx.MockTransport(handler), **kwargs),
-    )
+    async def mock_client(self, api_key: str, *, timeout: float = 10.0):
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=timeout)
+
+    monkeypatch.setattr(OllamaAdapter, "_client", mock_client)
     adapter = OllamaAdapter("http://ollama:11434")
     assert await adapter.list_model_infos("") == []
     with pytest.raises(ProviderError, match="정보"):
@@ -200,11 +199,10 @@ async def test_malformed_show_and_chat_json_become_provider_errors(
             return httpx.Response(200, text="invalid JSON")
         raise AssertionError(request.url.path)
 
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **kwargs: actual_client(transport=httpx.MockTransport(malformed_chat), **kwargs),
-    )
+    async def malformed_client(self, api_key: str, *, timeout: float = 10.0):
+        return httpx.AsyncClient(transport=httpx.MockTransport(malformed_chat), timeout=timeout)
+
+    monkeypatch.setattr(OllamaAdapter, "_client", malformed_client)
     with pytest.raises(ProviderError):
         await adapter.chat(ChatRequest(model="local:latest", messages=[]), "")
 

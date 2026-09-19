@@ -161,31 +161,36 @@ class Source(SQLModel, table=True):
 class ProviderCredential(SQLModel, table=True):
     __tablename__ = "provider_credentials"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "provider", "label", name="uq_provider_credential_label"),
+        UniqueConstraint(
+            "owner_id", "provider", "label", name="uq_provider_credential_owner_label"
+        ),
         CheckConstraint(
             "provider = 'ollama' or vault_secret_id is not null or encrypted_secret is not null",
             name="ck_provider_credentials_has_secret",
         ),
         Index("provider_credentials_workspace_id_idx", "workspace_id"),
+        Index("provider_credentials_owner_id_idx", "owner_id"),
         Index(
             "provider_credentials_one_default_idx",
-            "workspace_id",
+            "owner_id",
             unique=True,
             postgresql_where=text("is_default"),
         ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    workspace_id: UUID = Field(
-        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True),
     )
     owner_id: UUID
     provider: str = Field(max_length=40)
     label: str = Field(default="기본", max_length=80)
     vault_secret_id: UUID | None = Field(default=None)
+    base_url: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     # Compatibility for pre-Vault credentials. New writes leave this empty.
     encrypted_secret: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
-    key_hint: str = Field(max_length=8)
+    key_hint: str = Field(max_length=16)
     status: str = Field(default="active", max_length=20)
     is_default: bool = Field(default=False)
     created_at: datetime = Field(

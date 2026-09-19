@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from app.core.api_key_format import api_key_format_error
 from app.modules.context_engine.application.provider import (
     ChatRequest,
     ChatResponse,
@@ -97,9 +98,13 @@ class OpenAICompatibleAdapter:
         self.capabilities = tuple(capabilities)
 
     def _headers(self, api_key: str) -> dict[str, str]:
+        if error := api_key_format_error(api_key):
+            raise ProviderError(error)
         return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     async def validate_credential(self, api_key: str) -> tuple[bool, str]:
+        if error := api_key_format_error(api_key):
+            return False, error
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(
@@ -209,7 +214,7 @@ class OpenAICompatibleAdapter:
         async with httpx.AsyncClient(timeout=180) as client:
             response = await client.post(
                 f"{self.base_url}/audio/transcriptions",
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={"Authorization": self._headers(api_key)["Authorization"]},
                 data=data,
                 files={"file": (request.filename, request.audio, request.content_type)},
             )
@@ -353,6 +358,8 @@ class AnthropicAdapter:
     base_url = "https://api.anthropic.com/v1"
 
     def _headers(self, api_key: str) -> dict[str, str]:
+        if error := api_key_format_error(api_key):
+            raise ProviderError(error)
         return {
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
@@ -360,6 +367,8 @@ class AnthropicAdapter:
         }
 
     async def validate_credential(self, api_key: str) -> tuple[bool, str]:
+        if error := api_key_format_error(api_key):
+            return False, error
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(

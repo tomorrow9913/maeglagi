@@ -13,8 +13,13 @@ from sqlmodel import select
 
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
+from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.ingestion.application.document_parser import DocumentParser
-from app.modules.ingestion.application.pipeline import IngestionPipeline
+from app.modules.ingestion.application.pipeline import (
+    IngestionError,
+    IngestionPipeline,
+    MissingCapabilityCredentialError,
+)
 from app.modules.ingestion.application.source_analysis import SourceAnalysisService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
 from app.modules.workspaces.domain.source_state import (
@@ -23,6 +28,109 @@ from app.modules.workspaces.domain.source_state import (
     SourceStatus,
 )
 from app.modules.workspaces.infrastructure.models import Source
+
+_CAPABILITIES = frozenset({"chat", "embedding", "transcription", "structuredOutput"})
+_PROVIDERS = frozenset({"openai", "anthropic", "nvidia", "ollama"})
+_MISSING_TRANSCRIPTION_MESSAGE = "음성 변환을 지원하는 프로바이더 연결 및 모델 설정이 필요합니다."
+_GENERIC_FAILURE_MESSAGE = "소스 처리에 실패했습니다. 설정을 확인한 뒤 다시 시도해 주세요."
+
+
+class SafeAttemptError(RuntimeError):
+    """Retry-compatible failure carrying only vetted diagnostic fields."""
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        stage: str,
+        error_type: str,
+        cause_type: str | None = None,
+        http_status: int | None = None,
+        capability: str | None = None,
+        provider: str | None = None,
+        terminal: bool = False,
+    ) -> None:
+        message = (
+            _MISSING_TRANSCRIPTION_MESSAGE
+            if code == "missing_capability_credential" and capability == "transcription"
+            else _GENERIC_FAILURE_MESSAGE
+        )
+        super().__init__(message)
+        self.code = code
+        self.stage = stage
+        self.error_type = error_type
+        self.cause_type = cause_type
+        self.http_status = http_status
+        self.capability = capability
+        self.provider = provider
+        self.terminal = terminal
+
+
+def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
+    chain: list[Exception] = []
+    current: BaseException | None = exc
+    while (
+        isinstance(current, Exception)
+        and all(current is not item for item in chain)
+        and len(chain) < 8
+    ):
+        chain.append(current)
+        current = current.__cause__
+    cause = chain[-1]
+    capability = next(
+        (
+            value
+            for item in chain
+            if isinstance(value := getattr(item, "capability", None), str)
+            and value in _CAPABILITIES
+        ),
+        None,
+    )
+    provider = None
+    for item in chain:
+        value = getattr(item, "provider", None)
+        if isinstance(item, MissingCapabilityCredentialError) and item.providers:
+            value = item.providers[0] if len(item.providers) == 1 else None
+        if isinstance(value, str) and value in _PROVIDERS:
+            provider = value
+            break
+    missing_credential = any(isinstance(item, MissingCapabilityCredentialError) for item in chain)
+    status = next(
+        (
+            item.response.status_code
+            for item in chain
+            if isinstance(item, httpx.HTTPStatusError)
+            and 100 <= item.response.status_code <= 599
+        ),
+        None,
+    )
+    if missing_credential and capability is not None:
+        code = "missing_capability_credential"
+    elif status is not None:
+        code = "http_status"
+    elif any(isinstance(item, httpx.TimeoutException) for item in chain):
+        code = "http_timeout"
+    elif any(isinstance(item, httpx.ConnectError) for item in chain):
+        code = "http_connect"
+    elif any(isinstance(item, ProviderError) for item in chain):
+        code = "provider_error"
+    elif isinstance(exc, IngestionError):
+        code = "ingestion_error"
+    else:
+        code = "processing_error"
+    result = SafeAttemptError(
+        code=code,
+        stage=stage,
+        error_type=type(exc).__name__,
+        cause_type=type(cause).__name__ if cause is not exc else None,
+        http_status=status,
+        capability=capability if code == "missing_capability_credential" else None,
+        provider=provider,
+        terminal=code == "missing_capability_credential",
+    )
+    # Preserve source locations for Sentry without retaining the original
+    # exception, arguments, response body, or frame locals in the error object.
+    return result.with_traceback(exc.__traceback__)
 
 
 @asynccontextmanager
@@ -81,16 +189,17 @@ async def _update_source(
     stage: ProcessingStage,
     progress: float,
     error_message: str | None = None,
-) -> None:
+) -> str:
     async with session_factory() as session:
         source = await session.get(Source, source_id)
         if source is None:
-            return
+            return "unknown"
         if (
             source.status == SourceStatus.SUCCEEDED
             or source.review_state == ReviewState.AWAITING_REVIEW
         ):
-            return
+            return str(source.processing_stage)
+        previous_stage = str(source.processing_stage)
         source.status = status
         if source.review_state == ReviewState.CONFIRMED:
             source.processing_stage = ProcessingStage.CONFIRMED
@@ -102,6 +211,7 @@ async def _update_source(
         source.error_message = error_message
         session.add(source)
         await session.commit()
+        return previous_stage
 
 
 async def _process_source(source_id: UUID) -> None:
@@ -253,12 +363,26 @@ async def process_source_attempt(source_id: UUID, *, final_attempt: bool) -> Exc
         except Exception as exc:
             # Commit retry/failure before releasing the lock so a duplicate
             # cannot start while this attempt still appears to be processing.
-            await _update_source(
+            typed_capability = getattr(exc, "capability", None)
+            missing_credential = (
+                isinstance(exc, MissingCapabilityCredentialError)
+                and isinstance(typed_capability, str)
+                and typed_capability in _CAPABILITIES
+            )
+            stage = await _update_source(
                 source_id,
-                status=SourceStatus.FAILED if final_attempt else SourceStatus.QUEUED,
+                status=(
+                    SourceStatus.FAILED
+                    if final_attempt or missing_credential
+                    else SourceStatus.QUEUED
+                ),
                 stage=ProcessingStage.UPLOADED,
                 progress=0,
-                error_message=str(exc),
+                error_message=(
+                    _MISSING_TRANSCRIPTION_MESSAGE
+                    if missing_credential and typed_capability == "transcription"
+                    else _GENERIC_FAILURE_MESSAGE
+                ),
             )
-            return exc
+            return _safe_attempt_error(exc, stage)
     return None

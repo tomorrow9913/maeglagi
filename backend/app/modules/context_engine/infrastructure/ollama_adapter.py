@@ -1,13 +1,13 @@
-"""Native Ollama API adapter for an administrator configured local server."""
+"""Native Ollama API adapter for one validated workspace connection."""
 
 import json
 import math
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
+from app.core.ollama_endpoint import make_ollama_client, normalize_ollama_url
 from app.modules.context_engine.application.provider import (
     ChatRequest,
     ChatResponse,
@@ -28,18 +28,28 @@ from app.modules.context_engine.infrastructure.provider_adapters import (
 
 class OllamaAdapter:
     id = "ollama"
-    display_name = "Ollama (local)"
+    display_name = "Ollama"
     capabilities = ("chat", "embedding", "structuredOutput", "models")
 
-    def __init__(self, base_url: str) -> None:
-        parsed = urlparse(base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("OLLAMA_BASE_URL must be an HTTP server address")
-        if parsed.hostname in {"ollama.com", "www.ollama.com"}:
-            raise ValueError("OLLAMA_BASE_URL must point to a local Ollama server")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("OLLAMA_BASE_URL must not include credentials or parameters")
-        self.base_url = base_url.rstrip("/")
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        allowed_private_hosts: list[str] | tuple[str, ...] = (),
+        allow_private_network: bool = False,
+    ) -> None:
+        self.base_url = normalize_ollama_url(base_url)
+        self.allowed_private_hosts = allowed_private_hosts
+        self.allow_private_network = allow_private_network
+
+    async def _client(self, api_key: str, *, timeout: float = 10.0) -> httpx.AsyncClient:
+        return await make_ollama_client(
+            self.base_url,
+            api_key,
+            allowed_private_hosts=self.allowed_private_hosts,
+            allow_private_network=self.allow_private_network,
+            timeout=timeout,
+        )
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}/api/{path}"
@@ -96,18 +106,20 @@ class OllamaAdapter:
             raise ProviderError("원격 Ollama 모델은 사용할 수 없습니다.")
 
     async def validate_credential(self, api_key: str) -> tuple[bool, str]:
-        if api_key:
-            return False, "Ollama 로컬 연결에는 API key를 입력하지 않습니다."
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with await self._client(api_key) as client:
                 await self._tags(client)
-        except ProviderError:
-            return False, "Ollama 서버에 연결하지 못했습니다. 관리자 설정을 확인해 주세요."
-        return True, "Ollama 로컬 서버에 연결되었습니다."
+        except (ProviderError, ValueError, httpx.HTTPError):
+            return False, "Ollama 서버 주소 또는 연결을 확인해 주세요."
+        return True, "Ollama 서버에 연결되었습니다."
 
     async def list_model_infos(self, api_key: str) -> list[ModelInfo]:
         infos: list[ModelInfo] = []
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=120)) as client:
+        try:
+            client = await self._client(api_key, timeout=120)
+        except ValueError as exc:
+            raise ProviderError("Ollama 서버 주소를 사용할 수 없습니다.") from exc
+        async with client:
             for name in await self._tags(client):
                 try:
                     details = await self._show(client, name)
@@ -158,9 +170,11 @@ class OllamaAdapter:
             payload["format"] = request.json_schema
         return payload
 
-    async def _post_chat(self, request: ChatRequest | StructuredOutputRequest) -> dict[str, Any]:
+    async def _post_chat(
+        self, request: ChatRequest | StructuredOutputRequest, api_key: str
+    ) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=120)) as client:
+            async with await self._client(api_key, timeout=120) as client:
                 await self._require_local_model(client, request.model)
                 response = await client.post(
                     self._url("chat"), json=self._chat_payload(request, stream=False)
@@ -181,7 +195,7 @@ class OllamaAdapter:
         return body
 
     async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
-        body = await self._post_chat(request)
+        body = await self._post_chat(request, api_key)
         content = body["message"].get("content")
         if not isinstance(content, str):
             raise ProviderError("Ollama 응답이 유효하지 않습니다.")
@@ -200,7 +214,7 @@ class OllamaAdapter:
     async def structured_output(
         self, request: StructuredOutputRequest, api_key: str
     ) -> StructuredOutputResponse:
-        body = await self._post_chat(request)
+        body = await self._post_chat(request, api_key)
         content = body["message"].get("content")
         try:
             data = json.loads(content)
@@ -243,7 +257,11 @@ class OllamaAdapter:
     async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse:
         if request.dimensions not in (None, 1536):
             raise ProviderError("Ollama 임베딩은 1536차원만 사용할 수 있습니다.")
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=120)) as client:
+        try:
+            client = await self._client(api_key, timeout=120)
+        except ValueError as exc:
+            raise ProviderError("Ollama 서버 주소를 사용할 수 없습니다.") from exc
+        async with client:
             await self._require_local_model(client, request.model)
             vectors = await self._embed(client, request.model, request.input, 1536)
         expected = 1 if isinstance(request.input, str) else len(request.input)
@@ -258,7 +276,7 @@ class OllamaAdapter:
 
     async def stream(self, request: ChatRequest, api_key: str) -> AsyncIterator[str]:
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=120)) as client:
+            async with await self._client(api_key, timeout=120) as client:
                 await self._require_local_model(client, request.model)
                 async with client.stream(
                     "POST", self._url("chat"), json=self._chat_payload(request, stream=True)
@@ -289,5 +307,5 @@ class OllamaAdapter:
                         if chunk.get("done") is True:
                             return
                     raise ProviderError("Ollama 응답 스트림이 완료 전에 종료됐습니다.")
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             raise ProviderError("Ollama 서버에 연결하지 못했습니다.") from exc

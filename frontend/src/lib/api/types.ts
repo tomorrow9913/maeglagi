@@ -132,6 +132,10 @@ export type SourceContent = {
   title: string;
   kind: SourceKind;
   hasRecording?: boolean;
+  /** 저장된 원문. 검토 중인 수정본과 확인된 대본은 인덱싱 전에도 제공됩니다. */
+  originalText: string | null;
+  /** 회의 원문의 발언. 청크 ID와 무관하며 원본 녹음의 시각을 보존합니다. */
+  utterances: MeetingUtterance[];
   /** 청크 단위 본문. 근거 하이라이트가 chunkId로 위치를 찾습니다. */
   chunks: {
     id: string;

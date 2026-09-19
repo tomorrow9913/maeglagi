@@ -93,10 +93,14 @@ Alembic revision입니다. 배포 전 `make migrate`를 실행하고, 모델 변
 
 워크스페이스는 OpenAI·Anthropic·NVIDIA NIM 등 provider별 키를 여러 개 보관할 수 있습니다.
 각 credential은 `(workspace, provider, label)`로 구분하고 하나를 기본 키로 지정합니다.
-기존 프론트의 단일 키 UI는 기본 credential을 읽고 교체하는 호환 API를 사용합니다.
+API 키와 Ollama 연결은 계정에 저장하고, 역할별 모델 선택은 워크스페이스에 저장합니다.
+새 워크스페이스는 저장된 연결 ID를 선택하므로 키를 다시 입력하지 않아도 됩니다.
 
-- `POST /api/v1/llm-keys/validate` — provider에 실제 요청을 보내 키 검증
-- `GET /api/v1/workspaces/{id}/provider-credentials` — 등록된 키 메타데이터 목록
+- `GET|POST /api/v1/provider-credentials` — 계정 연결 목록·등록
+- `PUT|DELETE /api/v1/provider-credentials/{id}` — 계정 연결 수정·삭제
+- `POST /api/v1/llm-keys/validate` — 키 형식 검사 후 provider 연결 검증
+- `POST /api/v1/llm-keys/models` — 새 키 또는 저장된 `credentialId`의 모델 목록
+- `GET /api/v1/workspaces/{id}/provider-credentials` — 계정 연결 목록을 반환하는 호환 API
 - `GET|PUT /api/v1/workspaces/{id}/llm-key` — 기존 프론트용 기본 키 호환 API
 - `GET /api/v1/workspaces/{id}/ai/providers` — 구현된 provider, capability, 사용 가능한 모델 목록
 - `POST /api/v1/workspaces/{id}/ai/chat` — 공통 요청을 provider adapter로 위임
@@ -107,15 +111,28 @@ Vault 도입 전에 암호화해 저장한 credential을 읽는 호환 경로에
 provider 호출은 공통 adapter 계약으로 정규화하되 provider 고유 옵션과 응답 메타데이터는
 확장 필드에 보존합니다. 새 provider는 registry에 adapter를 등록해야만 API 목록에 노출됩니다.
 
+기존 credential ID와 Vault secret은 계정 전환 시 유지합니다. 워크스페이스를 삭제해도
+계정 연결은 보존하며, 다른 워크스페이스가 사용하는 연결은 바로 삭제할 수 없습니다.
+
 ### Self-hosted Ollama
 
-Ollama는 API와 Celery worker의 서버 환경에 `OLLAMA_BASE_URL`을 설정한 경우에만
-provider 목록에 나타납니다. 예를 들어 Ollama가 같은 Docker 네트워크의 서비스라면
-`http://ollama:11434`처럼 **백엔드 컨테이너에서 접근 가능한 주소**를 두 서비스에
-동일하게 설정합니다. 브라우저의 `localhost`나 사용자가 입력한 URL로 연결하지 않습니다.
-Ollama가 백엔드와 같은 호스트에서 직접 실행되는 경우에만 백엔드에서 접근 가능한
-`http://localhost:11434`를 사용합니다. 연결에는 사용자 API key가 필요하지 않으며
-Ollama는 Supabase Vault에 비밀을 저장하지 않습니다.
+Ollama는 환경변수와 관계없이 provider 목록에 표시됩니다. 계정의 API 연결
+설정에서 서버 주소와 선택적 인증 키를 등록합니다. 주소는 계정별 DB에,
+키는 Supabase Vault에 암호화 저장하며 API 응답에는 키 원문을 반환하지 않습니다.
+등록한 연결은 같은 계정의 워크스페이스에서 재사용하고, 모델 선택은 워크스페이스별로
+저장합니다. 여러 Ollama 서버를 등록하면 모델 선택 시 연결 ID까지 보존해 선택한 서버로 요청합니다.
+
+SaaS(`DEPLOYMENT_MODE=saas`, 서버 기본값)는 사용자가 운영하는 공개 HTTPS 서버에
+연결합니다. 온프레미스 Compose는 `self_hosted`를 기본으로 사용하여 내부망과 Docker
+서버를 등록할 수 있습니다. 같은 Compose의 Ollama는 `http://ollama:11434`, 호스트에서
+실행 중인 Ollama는 `http://host.docker.internal:11434`를 입력합니다. 주소는 브라우저가
+아닌 **API와 분석 worker에서 접근 가능한 주소**여야 합니다. SaaS에 사용자의 PC
+`localhost`를 입력해 연결할 수는 없으며, 외부 접속용 HTTPS 주소가 필요합니다.
+
+서버가 주소 정책을 적용하고 DNS 확인 결과로 실제 연결 대상을 고정합니다. 리다이렉트,
+URL 내 인증정보, 클라우드 메타데이터·링크 로컬 주소는 허용하지 않습니다. SaaS의
+사설망 예외는 운영자의 `OLLAMA_ALLOWED_PRIVATE_HOSTS` 설정으로만 부여합니다.
+`OLLAMA_BASE_URL`은 저장 주소가 없는 기존 연결의 호환용 기본값입니다.
 
 로컬 전용 배포에서는 Ollama 서비스에 `OLLAMA_NO_CLOUD=1`을 설정하고 재시작하세요.
 Ollama의 로컬 서버도 로그인하면 cloud 모델을 프록시할 수 있어, 애플리케이션은

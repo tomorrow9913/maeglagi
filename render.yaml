@@ -12,6 +12,8 @@ services:
     envVars:
       - key: APP_ENV
         value: production
+      - key: DEPLOYMENT_MODE
+        value: saas
       - key: APP_SECRET_KEY
         generateValue: true
       - key: DATABASE_URL

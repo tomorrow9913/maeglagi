@@ -55,6 +55,7 @@ def test_catalog_uses_the_same_shape_as_the_workspace_catalog(client: TestClient
         "capabilities",
         "configured",
         "authMode",
+        "requiresBaseUrl",
         "models",
         "defaultModels",
     }
@@ -152,6 +153,7 @@ def test_workspace_catalog_includes_defaults_and_excludes_retired_models(
                 "capabilities": ["chat", "models"],
                 "configured": True,
                 "authMode": "apiKey",
+                "requiresBaseUrl": False,
                 "models": ["gpt-live"],
                 "defaultModels": {"answer": "gpt-live"},
             }

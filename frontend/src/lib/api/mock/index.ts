@@ -70,7 +70,6 @@ const state = {
     associationRevision: 0,
     hasRecording: false,
   })) as Source[],
-  transcripts: new Map<string, SourceContent>(),
   recordings: new Map<string, Blob>(),
   jobs: new Map<string, ProcessingJob & { startedAt: number }>(),
   people: [
@@ -606,10 +605,21 @@ export const mockApi: MaeglagiApi = {
 
   async getSourceContent(sourceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const content =
-      state.transcripts.get(sourceId) ?? sourceContents.find((item) => item.sourceId === sourceId);
-    if (!content) throw new ApiError(404, "원문을 찾을 수 없습니다.");
-    return { ...structuredClone(content), hasRecording: state.recordings.has(sourceId) };
+    const source = state.sources.find((item) => item.id === sourceId);
+    if (!source) throw new ApiError(404, "원문을 찾을 수 없습니다.");
+    const content = sourceContents.find((item) => item.sourceId === sourceId);
+    const review = state.reviews.get(sourceId);
+    const utterances = review?.utterances ?? content?.utterances ?? [];
+    const editedText = utterances.filter((item) => item.text.trim()).map((item) => `${item.speakerName}: ${item.text}`).join("\n\n");
+    return structuredClone({
+      sourceId,
+      title: source.title,
+      kind: source.kind,
+      hasRecording: state.recordings.has(sourceId),
+      originalText: editedText || review?.rawTranscriptText || content?.originalText || null,
+      utterances,
+      chunks: content?.chunks ?? [],
+    } satisfies SourceContent);
   },
   async getSourcePlaybackUrl(sourceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
@@ -794,7 +804,6 @@ export const mockApi: MaeglagiApi = {
     review.stage = "analyzing";
     review.confirmedAt = new Date().toISOString();
     review.confirmedSnapshot = { projects: structuredClone(state.projects.filter((item) => (review.projectIds ?? []).includes(item.id))), people: structuredClone(state.people.filter((person) => review.utterances.some((item) => item.personId === person.id))) };
-    state.transcripts.set(sourceId, { sourceId, title: review.title, kind: "meeting", chunks: review.utterances.filter((item) => item.text.trim()).map((item, index) => ({ id: `${sourceId}-chunk-${index}`, text: `${item.speakerName}: ${item.text}`, startSeconds: item.startSeconds, endSeconds: item.endSeconds })) });
     job.status = "processing";
     job.stage = "analyzing";
     job.progress = 0;

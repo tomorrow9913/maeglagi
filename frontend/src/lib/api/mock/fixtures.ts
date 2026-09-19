@@ -57,6 +57,8 @@ export const sourceContents: SourceContent[] = [
     sourceId: "src-kickoff",
     title: "9/8 제품 킥오프 회의",
     kind: "meeting",
+    originalText: null,
+    utterances: [],
     chunks: [
       {
         id: "src-kickoff#1",
@@ -82,6 +84,8 @@ export const sourceContents: SourceContent[] = [
     sourceId: "src-prd",
     title: "맥락이 PRD v0.2.pdf",
     kind: "document",
+    originalText: null,
+    utterances: [],
     chunks: [
       {
         id: "src-prd#1",
@@ -97,6 +101,8 @@ export const sourceContents: SourceContent[] = [
     sourceId: "src-tech-review",
     title: "9/11 기술 검토 회의",
     kind: "meeting",
+    originalText: null,
+    utterances: [],
     chunks: [
       {
         id: "src-tech-review#1",
