@@ -15,10 +15,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { api, BOOTSTRAP_AI_PROVIDERS, DEFAULT_BOOTSTRAP_PROVIDER } from "@/lib/api";
+import { useAsync } from "@/hooks/use-async";
+import { api, BOOTSTRAP_AI_PROVIDERS, pickDefaultProvider } from "@/lib/api";
 import type { LlmProvider, Workspace } from "@/lib/api";
 
 import { ApiKeyField } from "./api-key-field";
+import { ProviderCapabilities } from "./provider-capabilities";
 import { ProviderSelect } from "./provider-select";
 
 /**
@@ -30,14 +32,21 @@ import { ProviderSelect } from "./provider-select";
 export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Workspace) => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
-  const [provider, setProvider] = useState<LlmProvider>(DEFAULT_BOOTSTRAP_PROVIDER);
+  // 서버가 지원하는 provider를 받아 보여줍니다. 받지 못하면 대비 목록으로 물러섭니다.
+  const { data: catalog } = useAsync((signal) => api.listProviders(signal), []);
+  const providers = catalog && catalog.length > 0 ? catalog : BOOTSTRAP_AI_PROVIDERS;
+  const [chosen, setChosen] = useState<LlmProvider>();
+  const provider =
+    chosen && providers.some((item) => item.id === chosen)
+      ? chosen
+      : pickDefaultProvider(providers);
   const [apiKey, setApiKey] = useState("");
   const [isKeyValid, setIsKeyValid] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const reset = () => {
     setName("");
-    setProvider(DEFAULT_BOOTSTRAP_PROVIDER);
+    setChosen(undefined);
     setApiKey("");
     setIsKeyValid(false);
   };
@@ -111,9 +120,13 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
             <ProviderSelect
               id="workspace-provider"
               value={provider}
-              onChange={setProvider}
-              providers={BOOTSTRAP_AI_PROVIDERS}
+              onChange={setChosen}
+              providers={providers}
               disabled={isSubmitting}
+            />
+            <ProviderCapabilities
+              provider={providers.find((item) => item.id === provider)}
+              className="pt-1"
             />
           </div>
 

@@ -53,6 +53,9 @@ EVENT_PROMPT = (
     "  · Event: 특정 시점에 실제 발생해 프로젝트 상태를 바꾼 사실\n"
     "  기준에 못 미치면 추출하지 않습니다.\n"
     "- occurred_at은 사건이 일어난 시점, due_at은 마감이 있는 할 일의 기한입니다.\n"
+    "- Decision이 이전 결정을 명시적으로 뒤집거나 대체한다고 원문이 밝힐 때만 supersedes에 "
+    "대체되는 결정의 이름을 넣습니다. 입력의 known_decisions나 이번 자료의 다른 Decision "
+    "이름과 정확히 같아야 하며, 그렇지 않거나 명시가 없으면 null입니다.\n"
     "- 이미 추출된 엔티티와 같은 개체라면 name을 그대로 재사용합니다.\n"
     "- 엔티티 간 관계와 요약은 추출하지 않습니다.\n" + COMMON_RULES
 )
@@ -62,7 +65,9 @@ RELATION_PROMPT = (
     f"허용되는 kind: {_values(RelationKind)}\n"
     "- source와 target은 제공된 엔티티·이벤트의 name과 정확히 일치해야 합니다.\n"
     "- 목록에 없는 개체를 새로 만들지 않습니다.\n"
-    "- 원문이 뒷받침하지 않는 관계는 넣지 않습니다.\n" + COMMON_RULES
+    "- 원문이 뒷받침하지 않는 관계는 넣지 않습니다.\n"
+    "- valid_from은 관계가 시작됐다고 원문이 밝힌 시점, valid_to는 관계가 끝났다고 원문이 "
+    "명시한 경우에만 씁니다. 종료를 추측하지 않으며 명시가 없으면 null입니다.\n" + COMMON_RULES
 )
 
 CONTEXT_PROMPT = (
@@ -81,4 +86,19 @@ PLANNING_PROMPT = (
     "- schedule: 마일스톤과 날짜(milestone, date)\n"
     "- related_systems: 연동하거나 영향을 받는 시스템·기술 이름\n"
     "찾지 못한 값은 null 또는 빈 목록으로 둡니다. 채우려고 추측하지 않습니다.\n" + COMMON_RULES
+)
+
+CONTEXT_UPDATE_PROMPT = (
+    "당신은 프로젝트 맥락 갱신기입니다. 새 자료가 들어왔을 때 프로젝트의 현재 상황을 갱신합니다.\n"
+    "입력의 existing은 갱신 전 상태(summary, current_state, 열린 이슈·결정·할 일)이고, "
+    "new_source는 새 자료에서 뽑은 결과입니다.\n"
+    "- summary: 프로젝트가 무엇이고 어디까지 왔는지 두세 문장. 이전 요약을 바탕으로 새 자료가 "
+    "바꾼 것만 고칩니다.\n"
+    "- current_state: 지금 시점의 상황을 세 문장 이내로. 이미 대체된 결정을 현재 방침처럼 "
+    "쓰지 않습니다.\n"
+    "- resolved_issues: 새 자료가 해결됐다고 명시한 열린 이슈만, existing 또는 new_source의 "
+    "이슈 title과 정확히 같게 적습니다. 해결됐다는 문장을 source_refs에 그대로 옮깁니다.\n"
+    "- completed_actions: 새 자료가 끝났다고 명시한 할 일만 같은 방식으로 적습니다.\n"
+    "이슈나 할 일을 지우는 것은 원문이 끝났다고 말할 때뿐이며, 추측으로 닫지 않습니다. "
+    "원문에 없는 내용은 만들지 않습니다."
 )

@@ -90,7 +90,13 @@ class ExtractionPipeline:
             self.usage[key] = self.usage.get(key, 0) + value
         return parsed
 
-    async def extract(self, text: str, *, title: str | None = None) -> ExtractionResult:
+    async def extract(
+        self,
+        text: str,
+        *,
+        title: str | None = None,
+        known_decisions: list[str] | None = None,
+    ) -> ExtractionResult:
         self.usage = {}
         warnings: list[str] = []
         source = {"title": title, "text": text}
@@ -112,7 +118,12 @@ class ExtractionPipeline:
         events = await self.run_stage(
             "event",
             prompts.EVENT_PROMPT,
-            {**source, "classification": classified, "entities": entity_dump},
+            {
+                **source,
+                "classification": classified,
+                "entities": entity_dump,
+                "known_decisions": known_decisions or [],
+            },
             EventOutput,
         )
         event_items = _with_refs(events.events, "event", lambda i: i.name, warnings)

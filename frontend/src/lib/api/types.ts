@@ -134,6 +134,36 @@ export type ContextItem = {
   supersededBy?: string;
 };
 
+/** Context Store의 한 항목. 근거가 된 원문 인용을 함께 가집니다. */
+export type ContextStoreItem = {
+  title: string;
+  description: string;
+  /** 이 항목을 뒷받침하는 원문 문장 */
+  sourceRefs: string[];
+  sourceId: string | null;
+  /** 결정일 (결정에만 있습니다) */
+  decidedAt: string | null;
+  /** 담당자와 기한 (할 일에만 있습니다) */
+  assignee: string | null;
+  dueAt: string | null;
+};
+
+/**
+ * 프로젝트의 현재 상황. Graph가 업무 세계의 구조라면 Context Store는 지금의 상태를 담당합니다.
+ * 새 소스가 분석될 때마다 갱신되고, 대체된 결정과 해결된 이슈는 여기서 빠집니다.
+ */
+export type ContextStore = {
+  subject: string;
+  summary: string;
+  currentState: string;
+  openIssues: ContextStoreItem[];
+  /** 아직 유효한 결정만 담습니다. 대체된 결정은 타임라인에서 볼 수 있습니다. */
+  decisions: ContextStoreItem[];
+  nextActions: ContextStoreItem[];
+  sourceIds: string[];
+  updatedAt: string;
+};
+
 export type ContextTimelineQuery = {
   kinds?: ContextKind[];
   /** 근거 소스의 종류로 거릅니다. 비우면 전체입니다. */
@@ -151,6 +181,10 @@ export type GraphNode = {
   degree: number;
   /** 이 엔티티가 등장한 근거 소스. 상세 패널에서 원문으로 이동합니다. */
   sources: ContextItemSource[];
+  /** 온톨로지의 정확한 종류(Meeting, Issue 등). `type`은 화면이 그리는 다섯 종류로 줄인 값입니다. */
+  kind?: string;
+  /** 이후 결정이 이 결정을 명시적으로 대체했다면 대체한 결정의 id */
+  supersededBy?: string | null;
 };
 
 export type GraphEdge = {
@@ -158,6 +192,17 @@ export type GraphEdge = {
   source: string;
   target: string;
   type: RelationType;
+  /** 온톨로지의 정확한 관계(WORKS_ON 등) */
+  kind?: string;
+  /** 관계의 유효 기간. 비어 있으면 시작을 모르거나 종료가 확인되지 않은 관계입니다. */
+  validFrom?: string | null;
+  validTo?: string | null;
+};
+
+/** 그래프를 볼 기준 시점. 비우면 지금 유효한 관계만 보여줍니다. */
+export type KnowledgeGraphQuery = {
+  /** ISO-8601 날짜 또는 시각. 이 시점에 유효했던 관계만 돌려줍니다. */
+  at?: string;
 };
 
 export type KnowledgeGraph = {

@@ -80,3 +80,42 @@ class ContextRecord(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+class ContextStoreRecord(SQLModel, table=True):
+    """The current situation of a project (workspace): what holds now, not how it is structured.
+
+    The graph keeps the structure of the work; this keeps the state. One row per workspace.
+    The list columns hold the `ContextStoreState` items as JSON.
+    """
+
+    __tablename__ = "context_stores"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", name="uq_context_stores_workspace"),
+        Index("context_stores_owner_id_idx", "owner_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    owner_id: UUID
+    subject: str = Field(max_length=255)
+    summary: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    current_state: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    open_issues: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
+    )
+    decisions: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
+    )
+    next_actions: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
+    )
+    source_ids: list[str] = Field(
+        default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

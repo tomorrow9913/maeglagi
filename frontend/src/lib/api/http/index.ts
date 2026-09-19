@@ -5,6 +5,7 @@ import type {
   AiProvider,
   ApiKeyValidation,
   ContextItem,
+  ContextStore,
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
@@ -42,6 +43,8 @@ export const httpApi: MaeglagiApi = {
       body: JSON.stringify(input),
       signal,
     }),
+
+  listProviders: (signal) => apiFetch<AiProvider[]>("/ai/providers", { signal }),
 
   listWorkspaceProviders: (workspaceId, signal) =>
     apiFetch<AiProvider[]>(`/workspaces/${workspaceId}/ai/providers`, { signal }),
@@ -95,8 +98,20 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
-  getKnowledgeGraph: (workspaceId, signal) =>
-    apiFetch<KnowledgeGraph>(`/workspaces/${workspaceId}/graph`, { signal }),
+  getContextStore: (workspaceId, signal) =>
+    apiFetch<ContextStore | null>(`/workspaces/${workspaceId}/context-store`, { signal }),
+
+  getKnowledgeGraph: (workspaceId, query, signal) => {
+    const params = new URLSearchParams();
+    if (query?.at) params.set("at", query.at);
+    const search = params.toString();
+    return apiFetch<KnowledgeGraph>(
+      `/workspaces/${workspaceId}/graph${search ? `?${search}` : ""}`,
+      {
+        signal,
+      },
+    );
+  },
 
   ask(workspaceId, question, signal) {
     return apiStream(`/workspaces/${workspaceId}/ask`, {

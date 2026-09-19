@@ -60,6 +60,17 @@ class IngestionPipeline:
                 continue
         raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
 
+    async def provider_for(
+        self, session: AsyncSession, *, source: Source, capability: str
+    ) -> tuple[ProviderAdapter, str]:
+        """The workspace owner's default API key that supports `capability`."""
+        return await self._provider(
+            session,
+            workspace_id=source.workspace_id,
+            owner_id=source.owner_id,
+            capability=capability,
+        )
+
     async def transcribe(
         self,
         session: AsyncSession,

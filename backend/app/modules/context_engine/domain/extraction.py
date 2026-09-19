@@ -43,6 +43,8 @@ class ExtractedEvent(StageOutput):
     description: str
     occurred_at: str | None
     due_at: str | None
+    # For a Decision: name of the earlier decision this one explicitly replaces, else null.
+    supersedes: str | None
     source_refs: list[str]
 
 
@@ -54,6 +56,8 @@ class ExtractedRelation(StageOutput):
     source: str
     target: str
     kind: RelationKind
+    valid_from: str | None
+    valid_to: str | None
     source_refs: list[str]
 
 

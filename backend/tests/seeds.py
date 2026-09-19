@@ -41,6 +41,7 @@ def event(
     refs: list[str],
     occurred_at: str | None = None,
     due_at: str | None = None,
+    supersedes: str | None = None,
 ) -> dict:
     return {
         "name": name,
@@ -48,12 +49,27 @@ def event(
         "description": description,
         "occurred_at": occurred_at,
         "due_at": due_at,
+        "supersedes": supersedes,
         "source_refs": refs,
     }
 
 
-def relation(source: str, target: str, kind: str, refs: list[str]) -> dict:
-    return {"source": source, "target": target, "kind": kind, "source_refs": refs}
+def relation(
+    source: str,
+    target: str,
+    kind: str,
+    refs: list[str],
+    valid_from: str | None = None,
+    valid_to: str | None = None,
+) -> dict:
+    return {
+        "source": source,
+        "target": target,
+        "kind": kind,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "source_refs": refs,
+    }
 
 
 def context(kind: str, title: str, body: str, refs: list[str], at: str | None = None) -> dict:
@@ -67,6 +83,7 @@ def responses(
     relations: list[dict],
     contexts: list[dict],
     planning: dict | None = None,
+    context_update: dict | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
         "classification": {"source_type": source_type, "language": "ko", "topics": ["캐시"]},
@@ -74,6 +91,13 @@ def responses(
         "event": {"events": events},
         "relation": {"relations": relations},
         "context": {"contexts": contexts},
+        "context_update": context_update
+        or {
+            "summary": "프로젝트 요약",
+            "current_state": "현재 상황",
+            "resolved_issues": [],
+            "completed_actions": [],
+        },
     }
     if planning is not None:
         out["planning"] = planning
