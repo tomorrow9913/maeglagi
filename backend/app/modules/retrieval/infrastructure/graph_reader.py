@@ -12,7 +12,7 @@ MATCH (e:Entity {workspace_id: $workspace_id})
 RETURN e.id AS id, e.kind AS kind, e.name AS name,
        coalesce(e.source_ids, []) AS source_ids, e.superseded_by AS superseded_by,
        coalesce(e.identifiers, []) AS identifiers
-ORDER BY e.name
+ORDER BY e.name, e.id
 """
 
 # Relations without a stated start or end count as open, so legacy edges stay visible.
@@ -23,7 +23,7 @@ WHERE type(r) IN $kinds
   AND (r.valid_to IS NULL OR r.valid_to >= datetime($at))
 RETURN r.id AS id, a.id AS source, b.id AS target, type(r) AS kind,
        toString(r.valid_from) AS valid_from, toString(r.valid_to) AS valid_to
-ORDER BY a.name, kind, b.name
+ORDER BY a.name, a.id, kind, b.name, b.id, r.id, elementId(r)
 """
 
 

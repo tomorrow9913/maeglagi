@@ -45,6 +45,7 @@ async def _client(app, token):
 @pytest.mark.asyncio
 async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(monkeypatch):
     owner_id = uuid4()
+    source_calls = []
     app = _app(monkeypatch, {"good": owner_id})
 
     class FakeService:
@@ -56,6 +57,10 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
 
         async def media_download_url(self, *, owner_id, workspace_id, source_id):
             return {"url": "https://storage.example/signed?token=short-lived", "expiresAt": "soon"}
+
+        async def create_text_source(self, **kwargs):
+            source_calls.append(kwargs)
+            return {"id": str(uuid4())}
 
     async def call(_settings, operation):
         return await operation(FakeService())
@@ -92,6 +97,8 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
         assert tools["submit_analysis"].annotations.destructive_hint is True
         assert tools["submit_analysis"].annotations.idempotent_hint is True
         assert "llm_api_key" not in tools["create_workspace"].input_schema["properties"]
+        projects_schema = tools["create_text_source"].input_schema["properties"]["project_ids"]
+        assert projects_schema["anyOf"][0]["maxItems"] == 50
         listed = await client.call_tool("list_workspaces")
         assert listed.structured_content == {"result": [{"id": str(owner_id), "name": "mine"}]}
         created = await client.call_tool("create_workspace", {"name": "Agent project"})
@@ -106,6 +113,36 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
             "media_download_url", {"workspace_id": str(uuid4()), "source_id": str(uuid4())}
         )
         assert media.structured_content["url"].startswith("https://storage.example/signed")
+        workspace_id, project_id = uuid4(), uuid4()
+        source_args = {
+            "workspace_id": str(workspace_id),
+            "title": "Meeting notes",
+            "text": "Approved the plan.",
+        }
+        associated = await client.call_tool(
+            "create_text_source", {**source_args, "project_ids": [str(project_id)]}
+        )
+        assert associated.is_error is False
+        assert source_calls[-1] == {
+            "owner_id": owner_id,
+            "workspace_id": workspace_id,
+            "title": "Meeting notes",
+            "text": "Approved the plan.",
+            "kind": "document",
+            "project_ids": [project_id],
+        }
+        unassociated = await client.call_tool("create_text_source", source_args)
+        assert unassociated.is_error is False
+        assert source_calls[-1]["project_ids"] is None
+        invalid = await client.call_tool(
+            "create_text_source", {**source_args, "project_ids": ["not-a-uuid"]}
+        )
+        assert invalid.is_error is True
+        too_many = await client.call_tool(
+            "create_text_source", {**source_args, "project_ids": [str(uuid4())] * 51}
+        )
+        assert too_many.is_error is True
+        assert len(source_calls) == 2
         resources = await client.list_resources()
         assert any(str(item.uri) == "maeglagi://ontology/schema" for item in resources.resources)
         schema = await client.read_resource("maeglagi://ontology/schema")

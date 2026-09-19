@@ -74,8 +74,12 @@ def register(server: MCPServer, settings: Settings) -> None:
         text: Annotated[str, Field(min_length=1, max_length=120_000)],
         ctx: Context,
         kind: Literal["document", "meeting"] = "document",
+        project_ids: Annotated[
+            list[UUID] | None,
+            Field(max_length=50, description="Project IDs to associate within this workspace."),
+        ] = None,
     ) -> dict[str, Any]:
-        """Save agent-produced text or a meeting transcript draft without server AI."""
+        """Save text or a meeting draft without server AI; optionally associate projects."""
         owner_id = current_user(ctx).id
         return await workflow_call(
             settings,
@@ -85,6 +89,7 @@ def register(server: MCPServer, settings: Settings) -> None:
                 title=title,
                 text=text,
                 kind=kind,
+                project_ids=project_ids,
             ),
         )
 
