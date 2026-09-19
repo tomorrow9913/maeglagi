@@ -224,6 +224,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
         />
       </div>
       <SourceViewer
+        workspaceId={workspaceId}
         sourceId={sourceViewer?.sourceId}
         highlightChunkId={sourceViewer?.chunkId}
         onClose={() => setSourceViewer(undefined)}

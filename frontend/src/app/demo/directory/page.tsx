@@ -1,6 +1,8 @@
+"use client";
+
 import DirectoryPage from "@/app/workspaces/[workspaceId]/directory/page";
-import { DEMO_WORKSPACE_ID } from "@/lib/api";
+import { useDemoWorkspaceId } from "@/lib/api/context";
 
 export default function DemoDirectoryPage() {
-  return <DirectoryPage params={Promise.resolve({ workspaceId: DEMO_WORKSPACE_ID })} />;
+  return <DirectoryPage params={Promise.resolve({ workspaceId: useDemoWorkspaceId() })} />;
 }

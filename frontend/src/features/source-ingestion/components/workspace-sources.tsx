@@ -5,13 +5,14 @@ import Link from "next/link";
 import { ChevronDown, FileText, FileUp, Mic, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAsync } from "@/hooks/use-async";
-import { useApi, useWorkspacePath } from "@/lib/api/context";
+import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import { SourceViewer } from "./source-viewer";
 import { SourceUploadDialog } from "./source-upload-dialog";
 import { MeetingReviewDialog } from "./meeting-review-dialog";
 
 export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
   const api = useApi();
+  const isDemo = useDemoMode();
   const workspacePath = useWorkspacePath();
   const { data, error, isLoading, reload } = useAsync(
     (signal) => api.listSources(workspaceId, signal),
@@ -67,7 +68,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             전체 보기
           </Link>
         </div>
-        <div className="mb-3 grid grid-cols-2 gap-1.5">
+        {!isDemo && <div className="mb-3 grid grid-cols-2 gap-1.5">
           <Button
             type="button"
             size="sm"
@@ -88,7 +89,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             <Mic className="size-3.5" aria-hidden />
             회의 추가
           </Button>
-        </div>
+        </div>}
         {isLoading && <p className="px-2 text-xs text-muted-foreground">불러오는 중…</p>}
         {error && (
           <Button size="sm" variant="ghost" onClick={reload}>
@@ -104,7 +105,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             <li key={source.id}>
               <button
                 type="button"
-                onClick={() => source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed") ? setReviewSourceId(source.id) : setViewer(source.id)}
+                onClick={() => !isDemo && (source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed")) ? setReviewSourceId(source.id) : setViewer(source.id)}
                 className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <FileText className="mt-0.5 size-3 shrink-0" aria-hidden />
@@ -125,9 +126,9 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
           ))}
         </ul>
       </div>
-      <SourceViewer sourceId={viewer} onClose={() => setViewer(undefined)} />
-      <SourceUploadDialog workspaceId={workspaceId} mode={mode} onClose={() => setMode(null)} />
-      <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onConfirmed={() => { reload(); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} />
+      <SourceViewer workspaceId={workspaceId} sourceId={viewer} onClose={() => setViewer(undefined)} />
+      {!isDemo && <SourceUploadDialog workspaceId={workspaceId} mode={mode} onClose={() => setMode(null)} />}
+      {!isDemo && <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onConfirmed={() => { reload(); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} />}
     </section>
   );
 }

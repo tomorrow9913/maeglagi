@@ -25,6 +25,20 @@ secret UUID만 기록합니다. Celery 작업 메시지는 `source_id`만 전달
 유지하며, 갱신하면 Vault로 옮깁니다. 운영 연결에는 `anon` 또는 `authenticated`가
 아닌 제한된 서버용 DB 역할을 사용해야 합니다.
 
+## Ollama local provider
+
+API와 Celery worker 양쪽에 `OLLAMA_BASE_URL`을 지정하면 Ollama provider가 켜집니다.
+비워 두면 목록에 나타나지 않습니다. 주소는 백엔드 프로세스 기준이며 Docker에서는
+같은 네트워크의 서비스 이름(`http://ollama:11434`)을 사용하세요. Ollama 서버의
+`OLLAMA_NO_CLOUD=1`을 켜고 재시작해야 로컬 전용 실행을 보장할 수 있습니다.
+애플리케이션도 `:cloud` 모델을 거절합니다. 로컬 Ollama 연결에는 API key가 없고
+Vault secret을 만들지 않습니다.
+
+모델 목록은 `/api/tags`와 `/api/show`로 확인하고, 임베딩 모델은 `/api/embed`에서
+1536차원 probe가 성공할 때만 선택지로 제시합니다. `Vector(1536)`과 다른 출력은
+오류로 처리하며 자동 변환하지 않습니다. 현재 Ollama adapter는 transcription을 제공하지 않으며,
+이 연결은 Supabase Auth/PostgreSQL/Storage를 대체하지 않습니다.
+
 ## Background worker
 
 로컬 Valkey/Redis를 실행하고 API와 worker에 같은 `CELERY_BROKER_URL`을 설정합니다.

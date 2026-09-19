@@ -49,12 +49,14 @@ export function NodeDetailSheet({
   onClose,
   onSelectNode,
   onOpenSource,
+  onOpenDirectory,
 }: {
   graph: KnowledgeGraph;
   node: GraphNode | undefined;
   onClose: () => void;
   onSelectNode: (nodeId: string) => void;
   onOpenSource: (source: ContextItemSource) => void;
+  onOpenDirectory: (node: GraphNode) => void;
 }) {
   const connections = node ? connectionsOf(graph, node.id) : [];
 
@@ -71,6 +73,8 @@ export function NodeDetailSheet({
             </SheetHeader>
 
             <div className="space-y-6 overflow-y-auto px-4 pb-6">
+              {node.material && node.sourceId && <Button variant="outline" size="sm" onClick={() => onOpenSource({ id: node.sourceId!, kind: node.kind === "Meeting" ? "meeting" : "document", title: node.label })}>자료 원문 열기</Button>}
+              {node.directoryId && (node.directoryKind === "Person" || node.directoryKind === "Project") && <Button variant="outline" size="sm" onClick={() => onOpenDirectory(node)}>디렉터리에서 편집</Button>}
               <section>
                 <h3 className="mb-2 text-xs font-medium text-muted-foreground">속성</h3>
                 <dl className="space-y-1.5 text-sm">

@@ -12,6 +12,8 @@ class ModelInfo(BaseModel):
     created: datetime | None = None
     # Set by providers that announce retirement (OpenAI does). A retired model is not offered.
     shutdown_date: date | None = None
+    # Providers with authoritative per-model capabilities can supply eligible job names.
+    roles: tuple[str, ...] | None = None
 
 
 class ChatMessage(BaseModel):

@@ -17,7 +17,7 @@ import { UploadQueue } from "@/features/source-ingestion/components/upload-queue
 import { useJobPolling } from "@/features/source-ingestion/hooks/use-job-polling";
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
 import { useAsync } from "@/hooks/use-async";
-import { useApi, useWorkspacePath } from "@/lib/api/context";
+import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { ProcessingJob } from "@/lib/api";
 
 export default function SourcesPage({ params }: { params: Promise<{ workspaceId: string }> }) {
@@ -32,6 +32,7 @@ export default function SourcesPage({ params }: { params: Promise<{ workspaceId:
 
 function SourcesView({ workspaceId }: { workspaceId: string }) {
   const api = useApi();
+  const isDemo = useDemoMode();
   const router = useRouter();
   const workspacePath = useWorkspacePath();
   const [meetingBusy, setMeetingBusy] = useState(false);
@@ -54,9 +55,10 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
     setViewer({ sourceId, chunkId: searchParams.get("chunk") ?? undefined });
   }, [searchParams]);
   useEffect(() => {
+    if (isDemo) return;
     const sourceId = searchParams.get("review");
     if (sourceId) setReviewSourceId(sourceId);
-  }, [searchParams]);
+  }, [isDemo, searchParams]);
 
   const closeViewer = useCallback(() => {
     setViewer(undefined);
@@ -108,9 +110,9 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
 
   return (
     <>
-      <PageHeader title="소스" description="회의 녹음과 문서를 올리고 처리 상태를 확인합니다." />
+      <PageHeader title="소스" description={isDemo ? "공개 데모의 회의와 문서를 읽기 전용으로 살펴봅니다." : "회의 녹음과 문서를 올리고 처리 상태를 확인합니다."} />
 
-      <Tabs defaultValue="document">
+      {!isDemo && <Tabs defaultValue="document">
         <TabsList>
           <TabsTrigger value="document" disabled={meetingBusy}>
             문서 업로드
@@ -130,9 +132,9 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
             onBusyChange={setMeetingBusy}
           />
         </TabsContent>
-      </Tabs>
+      </Tabs>}
 
-      <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} className="mt-4" />
+      {!isDemo && <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} className="mt-4" />}
 
       <section className="mt-10">
         <h2 className="mb-3 text-lg font-semibold">올라온 소스</h2>
@@ -142,21 +144,22 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         ) : error ? (
           <ErrorState error={error} onRetry={reload} />
         ) : sources && sources.length > 0 ? (
-          <SourceList sources={sources} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (source?.status === "awaiting_review" || (source?.kind === "meeting" && source.status === "failed")) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
+          <SourceList sources={sources} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (!isDemo && (source?.status === "awaiting_review" || (source?.kind === "meeting" && source.status === "failed"))) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
         ) : (
           <EmptyState
             title="아직 올라온 소스가 없습니다"
-            description="위에서 문서를 올리거나 회의를 녹음해 맥락을 쌓아보세요."
+            description={isDemo ? "공개할 소스가 없습니다." : "위에서 문서를 올리거나 회의를 녹음해 맥락을 쌓아보세요."}
           />
         )}
       </section>
 
       <SourceViewer
+        workspaceId={workspaceId}
         sourceId={viewer?.sourceId}
         highlightChunkId={viewer?.chunkId}
         onClose={closeViewer}
       />
-      <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => { setReviewSourceId(undefined); reload(); if (searchParams.get("review")) router.replace(workspacePath(workspaceId, "sources")); }} onConfirmed={() => { setRestartKey((value) => value + 1); reload(); }} />
+      {!isDemo && <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => { setReviewSourceId(undefined); reload(); if (searchParams.get("review")) router.replace(workspacePath(workspaceId, "sources")); }} onConfirmed={() => { setRestartKey((value) => value + 1); reload(); }} />}
     </>
   );
 }

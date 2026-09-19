@@ -24,17 +24,23 @@ def canonicalize_directory_entities(
         ]
     if not snapshot:
         return set()
-    people = snapshot.get("people", [])
-    project = snapshot.get("project")
+    people = [*snapshot.get("people", []), *snapshot.get("roster", [])]
+    projects = snapshot.get("projects") or (
+        [snapshot["project"]] if isinstance(snapshot.get("project"), dict) else []
+    )
     names: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for person in people:
         for name in [person.get("name"), *person.get("aliases", [])]:
             if isinstance(name, str) and name.strip():
                 key = (EntityKind.PERSON.value, normalize_name(name, EntityKind.PERSON.value))
                 names.setdefault(key, []).append(person)
-    if isinstance(project, dict) and isinstance(project.get("name"), str):
-        key = (EntityKind.PROJECT.value, normalize_name(project["name"], EntityKind.PROJECT.value))
-        names.setdefault(key, []).append(project)
+    for project in projects:
+        if isinstance(project, dict) and isinstance(project.get("name"), str):
+            key = (
+                EntityKind.PROJECT.value,
+                normalize_name(project["name"], EntityKind.PROJECT.value),
+            )
+            names.setdefault(key, []).append(project)
 
     renamed: dict[str, str] = {}
     trusted_identifiers: set[str] = set()
@@ -42,19 +48,33 @@ def canonicalize_directory_entities(
     for entity in result.entities:
         if entity.kind not in {EntityKind.PERSON, EntityKind.PROJECT}:
             continue
-        # The directory alone never creates a participant or project graph node. A quoted
-        # source span and an extracted matching name are required before canonicalization.
+        # A quoted source span and a unique directory name or email match are required.
         if entity.name in event_names:
             continue
         if not any(ref.strip() and ref.strip() in source_text for ref in entity.source_refs):
             continue
         key = (entity.kind.value, normalize_name(entity.name, entity.kind.value))
         candidates = {str(item["id"]): item for item in names.get(key, [])}
+        matched_email = False
+        if entity.kind is EntityKind.PERSON:
+            extracted = {normalize_identifier(value) for value in entity.identifiers}
+            by_email = {
+                str(person["id"]): person
+                for person in people
+                if isinstance(person.get("email"), str)
+                and normalize_identifier(person["email"]) in extracted
+                and any(person["email"].casefold() in ref.casefold() for ref in entity.source_refs)
+            }
+            if len(by_email) == 1:
+                candidates = by_email
+                matched_email = True
+            elif len(candidates) > 1:
+                candidates = {}
         if len(candidates) != 1:
             continue
         directory_id, match = next(iter(candidates.items()))
         labels = [match["name"], *match.get("aliases", [])]
-        if not any(
+        if not matched_email and not any(
             label and label in ref and ref.strip() in source_text
             for label in labels
             for ref in entity.source_refs

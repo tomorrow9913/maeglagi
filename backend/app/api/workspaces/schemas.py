@@ -12,7 +12,7 @@ class CreateWorkspaceRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     llm_provider: str = Field(validation_alias="llmProvider")
-    llm_api_key: str = Field(min_length=1, validation_alias="llmApiKey")
+    llm_api_key: str | None = Field(default=None, validation_alias="llmApiKey")
     # The model chosen per job (answer, extraction, embedding, transcription). Jobs left out get
     # the recommended model of the key.
     models: dict[str, ModelOption] | None = None
@@ -42,6 +42,10 @@ class SourceResponse(BaseModel):
     review_state: ReviewState | None = Field(default=None, serialization_alias="reviewState")
     review_revision: int = Field(default=0, serialization_alias="reviewRevision")
     project_id: UUID | None = Field(default=None, serialization_alias="projectId")
+    project_ids: list[UUID] = Field(default_factory=list, serialization_alias="projectIds")
+    associations: list[dict] = Field(default_factory=list)
+    association_revision: int = Field(default=0, serialization_alias="associationRevision")
+    has_recording: bool = Field(default=False, serialization_alias="hasRecording")
 
 
 class TranscriptSourceRequest(BaseModel):
@@ -51,6 +55,7 @@ class TranscriptSourceRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     duration_seconds: float | None = Field(default=None, ge=0, validation_alias="durationSeconds")
     project_id: UUID | None = Field(default=None, validation_alias="projectId")
+    project_ids: list[UUID] | None = Field(default=None, validation_alias="projectIds")
     utterances: list[dict] | None = None
 
 
@@ -70,12 +75,12 @@ class CredentialInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     provider: str
-    api_key: str = Field(min_length=1, validation_alias="apiKey")
+    api_key: str | None = Field(default=None, validation_alias="apiKey")
     label: str = Field(default="기본", min_length=1, max_length=80)
 
 
 class CredentialRotation(BaseModel):
-    api_key: str = Field(min_length=1, validation_alias="apiKey")
+    api_key: str | None = Field(default=None, validation_alias="apiKey")
 
 
 class CredentialValidation(BaseModel):
@@ -114,6 +119,10 @@ class GraphNodeResponse(BaseModel):
     degree: int
     sources: list[GraphSourceResponse]
     superseded_by: str | None = Field(default=None, serialization_alias="supersededBy")
+    material: bool = False
+    source_id: UUID | None = Field(default=None, serialization_alias="sourceId")
+    directory_id: UUID | None = Field(default=None, serialization_alias="directoryId")
+    directory_kind: str | None = Field(default=None, serialization_alias="directoryKind")
 
 
 class GraphEdgeResponse(BaseModel):
@@ -127,6 +136,8 @@ class GraphEdgeResponse(BaseModel):
     kind: str | None = None
     valid_from: str | None = Field(default=None, serialization_alias="validFrom")
     valid_to: str | None = Field(default=None, serialization_alias="validTo")
+    explicit: bool = False
+    role: str | None = None
 
 
 class KnowledgeGraphResponse(BaseModel):

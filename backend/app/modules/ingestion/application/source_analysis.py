@@ -69,14 +69,25 @@ async def analyze_source(
         hint = None
         if directory_snapshot:
             project = directory_snapshot.get("project") or {}
+            projects = directory_snapshot.get("projects") or ([project] if project else [])
             hint = {
                 "people": [
                     {
                         "name": item.get("name"),
                         "role": item.get("role"),
+                        "email": item.get("email"),
                         "aliases": item.get("aliases", []),
                     }
                     for item in directory_snapshot.get("people", [])
+                ],
+                "roster": [
+                    {
+                        "name": item.get("name"),
+                        "role": item.get("role"),
+                        "email": item.get("email"),
+                        "aliases": item.get("aliases", []),
+                    }
+                    for item in directory_snapshot.get("roster", [])
                 ],
                 "project": {
                     "name": project.get("name"),
@@ -85,6 +96,16 @@ async def analyze_source(
                     "ownerName": project.get("ownerName"),
                     "ownerRole": project.get("ownerRole"),
                 },
+                "projects": [
+                    {
+                        "name": item.get("name"),
+                        "goal": item.get("goal"),
+                        "description": item.get("description"),
+                        "ownerName": item.get("ownerName"),
+                        "ownerRole": item.get("ownerRole"),
+                    }
+                    for item in projects
+                ],
             }
         result = await pipeline.extract(
             text, title=title, known_decisions=known, directory_context=hint

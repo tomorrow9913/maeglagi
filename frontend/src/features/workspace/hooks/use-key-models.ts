@@ -32,7 +32,7 @@ export function useKeyModels(
     setRoles(undefined);
     setError(undefined);
     setSelections({});
-    if (!validatedKey) {
+    if (validatedKey === undefined) {
       setIsLoading(false);
       return;
     }

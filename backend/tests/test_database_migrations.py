@@ -13,6 +13,9 @@ def test_all_sqlmodel_tables_are_registered_for_alembic() -> None:
         "context_stores",
         "workspace_people",
         "workspace_projects",
+        "project_members",
+        "source_projects",
+        "source_people",
     }
 
 

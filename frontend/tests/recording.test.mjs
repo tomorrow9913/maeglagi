@@ -290,7 +290,7 @@ test("transcript upload sends edited text once and preserves the payload on fail
   shouldFail = false;
   assert.equal(await upload.uploadTranscript(input, "project-7"), true);
   assert.equal(sent.length, 2);
-  assert.deepEqual(JSON.parse(JSON.stringify(sent[1])), { workspace: "workspace-1", body: { ...input, projectId: "project-7" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[1])), { workspace: "workspace-1", body: { ...input, projectId: "project-7", projectIds: ["project-7"] } });
   upload = hook.render("useSourceUpload", "workspace-1");
   assert.equal(upload.items[0].status, "uploaded");
   assert.equal(upload.items[0].job.id, "job-1");

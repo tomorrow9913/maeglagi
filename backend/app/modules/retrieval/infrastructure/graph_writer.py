@@ -213,12 +213,31 @@ class GraphWriter:
         id_map: dict[UUID, UUID] = {}
         for entity in entities:
             own = set(entity.identifiers)
-            found = matches.get(str(entity.id), [])
+            own_directory = {value for value in own if value.startswith("directory:")}
+            found = [
+                record
+                for record in matches.get(str(entity.id), [])
+                if not (
+                    own_directory
+                    and (
+                        record_directory := {
+                            value
+                            for value in (record.get("identifiers") or [])
+                            if value.startswith("directory:")
+                        }
+                    )
+                    and own_directory.isdisjoint(record_directory)
+                )
+            ]
             strong = [r for r in found if own & set(r.get("identifiers") or [])]
             weak = [
                 r
                 for r in found
                 if r not in strong
+                and not own_directory
+                and not any(
+                    value.startswith("directory:") for value in (r.get("identifiers") or [])
+                )
                 and not (own and r.get("identifiers"))  # both identified => homonym
             ]
             chosen: list[dict[str, Any]]
@@ -238,7 +257,10 @@ class GraphWriter:
                 # Another extracted entity already took this node; identified people who
                 # disagree must not both fold into it.
                 taken = set(claimed[0].identifiers)
-                if own and taken and own.isdisjoint(taken):
+                taken_directory = {value for value in taken if value.startswith("directory:")}
+                if (
+                    own_directory and taken_directory and own_directory.isdisjoint(taken_directory)
+                ) or (own and taken and own.isdisjoint(taken)):
                     target_id, chosen, claimed = entity.id, [], merged.get(entity.id)
             id_map[entity.id] = target_id
             names = [entity.name, *entity.aliases]

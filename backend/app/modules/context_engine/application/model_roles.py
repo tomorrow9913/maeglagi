@@ -83,13 +83,18 @@ def options_by_role(
     today = today or date.today()
     options: dict[ModelRole, list[ModelOption]] = {role: [] for role in ROLE_ORDER}
     for adapter, infos in listings:
-        live = {i.id for i in infos if i.shutdown_date is None or i.shutdown_date > today}
+        live = {i.id: i for i in infos if i.shutdown_date is None or i.shutdown_date > today}
         preferred = (defaults or {}).get(adapter.id, {})
         for role in ROLE_ORDER:
             offered = [
                 ModelOption(provider=adapter.id, model=model)
                 for model in live
-                if role in roles_for_model(model, adapter.capabilities)
+                if (
+                    role.value in live[model].roles
+                    and ROLE_CAPABILITY[role] in adapter.capabilities
+                    if live[model].roles is not None
+                    else role in roles_for_model(model, adapter.capabilities)
+                )
             ]
             offered.sort(
                 key=lambda option: (

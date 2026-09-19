@@ -52,6 +52,7 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
   const workspacePath = useWorkspacePath();
 
   const [hidden, setHidden] = useState<EntityType[]>([]);
+  const [showMaterials, setShowMaterials] = useState(true);
   // 비우면 지금 유효한 관계, 날짜를 고르면 그날 유효했던 관계를 보여줍니다.
   const [asOf, setAsOf] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
@@ -61,8 +62,8 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
   useEffect(() => setPalette(readGraphPalette()), []);
 
   const { data, error, isLoading, reload } = useAsync(
-    (signal) => api.getKnowledgeGraph(workspaceId, asOf ? { at: asOf } : undefined, signal),
-    [workspaceId, asOf],
+    (signal) => api.getKnowledgeGraph(workspaceId, { ...(asOf ? { at: asOf } : {}), includeMaterials: showMaterials }, signal),
+    [workspaceId, asOf, showMaterials],
   );
 
   const graph = useMemo(
@@ -111,6 +112,7 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" aria-pressed={showMaterials} onClick={() => setShowMaterials((shown) => !shown)} className={cn("inline-flex items-center rounded-full border px-3 py-1 text-xs", showMaterials ? "border-border text-foreground" : "border-border text-muted-foreground/60 line-through")}>회의·문서 자료</button>
         {entityTypes.map((type) => {
           const isVisible = !hidden.includes(type);
 
@@ -174,6 +176,7 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
         onClose={() => setSelectedNodeId(undefined)}
         onSelectNode={setSelectedNodeId}
         onOpenSource={openSource}
+        onOpenDirectory={(node) => router.push(`${workspacePath(workspaceId, "directory")}?${node.directoryKind === "Person" ? "person" : "project"}=${encodeURIComponent(node.directoryId ?? "")}`)}
       />
     </>
   );

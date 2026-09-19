@@ -114,6 +114,7 @@ async def list_available_providers(
                 display_name=adapter.display_name,
                 capabilities=list(adapter.capabilities),
                 configured=credential is not None,
+                auth_mode="none" if adapter.id == "ollama" else "apiKey",
                 models=models,
                 default_models=settings.provider_default_models.get(adapter.id, {}),
             )

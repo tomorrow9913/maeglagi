@@ -1,6 +1,8 @@
+"use client";
+
 import TimelinePage from "@/app/workspaces/[workspaceId]/timeline/page";
-import { DEMO_WORKSPACE_ID } from "@/lib/api";
+import { useDemoWorkspaceId } from "@/lib/api/context";
 
 export default function DemoTimelinePage() {
-  return <TimelinePage params={Promise.resolve({ workspaceId: DEMO_WORKSPACE_ID })} />;
+  return <TimelinePage params={Promise.resolve({ workspaceId: useDemoWorkspaceId() })} />;
 }

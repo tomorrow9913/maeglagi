@@ -1,6 +1,8 @@
+"use client";
+
 import SourcesPage from "@/app/workspaces/[workspaceId]/sources/page";
-import { DEMO_WORKSPACE_ID } from "@/lib/api";
+import { useDemoWorkspaceId } from "@/lib/api/context";
 
 export default function DemoSourcesPage() {
-  return <SourcesPage params={Promise.resolve({ workspaceId: DEMO_WORKSPACE_ID })} />;
+  return <SourcesPage params={Promise.resolve({ workspaceId: useDemoWorkspaceId() })} />;
 }

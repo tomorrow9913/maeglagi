@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 export type ApiKeyFieldProps = {
   id: string;
   provider: LlmProvider;
+  authMode?: "apiKey" | "none";
   value: string;
   onChange: (value: string) => void;
   /** 검증 결과가 바뀔 때마다 알려줍니다. 유효하지 않으면 undefined입니다. */
@@ -29,6 +30,7 @@ export type ApiKeyFieldProps = {
 export function ApiKeyField({
   id,
   provider,
+  authMode = "apiKey",
   value,
   onChange,
   onValidated,
@@ -52,8 +54,8 @@ export function ApiKeyField({
 
   // 입력이 멈춘 뒤에만 검증해 타이핑 중 불필요한 호출을 막습니다.
   useEffect(() => {
-    const key = value.trim();
-    if (!key) {
+    const key = authMode === "none" ? "" : value.trim();
+    if (authMode !== "none" && !key) {
       publish(undefined);
       return;
     }
@@ -73,17 +75,17 @@ export function ApiKeyField({
       } finally {
         if (!controller.signal.aborted) setIsChecking(false);
       }
-    }, 600);
+    }, authMode === "none" ? 0 : 600);
 
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [value, provider, publish, api]);
+  }, [value, provider, authMode, publish, api]);
 
   return (
     <div className="space-y-1.5">
-      <div className="relative">
+      {authMode === "apiKey" && <div className="relative">
         <Input
           id={id}
           type={isRevealed ? "text" : "password"}
@@ -111,7 +113,7 @@ export function ApiKeyField({
             <Eye className="size-3.5" aria-hidden />
           )}
         </Button>
-      </div>
+      </div>}
 
       <p
         id={`${id}-status`}
@@ -124,7 +126,7 @@ export function ApiKeyField({
         {isChecking ? (
           <>
             <Loader2 className="size-3 animate-spin" aria-hidden />
-            키를 확인하는 중…
+            {authMode === "none" ? "서버의 로컬 연결을 확인하는 중…" : "키를 확인하는 중…"}
           </>
         ) : result?.valid ? (
           <>
@@ -137,7 +139,7 @@ export function ApiKeyField({
             {result.message}
           </>
         ) : (
-          "키는 암호화해 저장되며 저장 후에는 다시 표시되지 않습니다."
+          authMode === "none" ? "서버에서 관리하는 로컬 연결입니다. 주소나 키를 입력하지 않습니다." : "키는 암호화해 저장되며 저장 후에는 다시 표시되지 않습니다."
         )}
       </p>
     </div>

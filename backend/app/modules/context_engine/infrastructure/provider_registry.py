@@ -1,4 +1,6 @@
+from app.core.config import get_settings
 from app.modules.context_engine.application.provider import ProviderAdapter
+from app.modules.context_engine.infrastructure.ollama_adapter import OllamaAdapter
 from app.modules.context_engine.infrastructure.provider_adapters import (
     AnthropicAdapter,
     OpenAICompatibleAdapter,
@@ -10,10 +12,16 @@ class ProviderRegistry:
         self._adapters = {adapter.id: adapter for adapter in adapters}
 
     def get(self, provider: str) -> ProviderAdapter | None:
+        if provider == "ollama" and get_settings().ollama_base_url:
+            return OllamaAdapter(get_settings().ollama_base_url)
         return self._adapters.get(provider)
 
     def all(self) -> list[ProviderAdapter]:
-        return list(self._adapters.values())
+        adapters = list(self._adapters.values())
+        ollama = self.get("ollama")
+        if ollama is not None:
+            adapters.append(ollama)
+        return adapters
 
 
 provider_registry = ProviderRegistry(

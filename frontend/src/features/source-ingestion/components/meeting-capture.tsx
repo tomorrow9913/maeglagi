@@ -22,7 +22,7 @@ function toUtterances(rows: TranscriptTurn[], speakers: SpeakerOption[], people:
 
 export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChange }: {
   workspaceId: string;
-  onAudio: (audio: Blob, duration: number, liveDraft?: { utterances: MeetingUtterance[] }, projectId?: string) => Promise<void>;
+  onAudio: (audio: Blob, duration: number, liveDraft?: { utterances: MeetingUtterance[] }, projectId?: string, projectIds?: string[]) => Promise<void>;
   onTranscript: (input: TranscriptSourceInput, projectId?: string) => Promise<boolean>;
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -36,7 +36,9 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
   const [title, setTitle] = useState("회의 대본");
   const [people, setPeople] = useState<WorkspacePerson[]>([]);
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
-  const [projectId, setProjectId] = useState("");
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const projectId = projectIds[0] ?? "";
+  const selectedProjectPeople = new Set(projects.filter((project) => projectIds.includes(project.id)).flatMap((project) => [...(project.participantIds ?? []), ...(project.ownerPersonId ? [project.ownerPersonId] : [])]));
   const [speakers, setSpeakers] = useState<SpeakerOption[]>([{ id: "local-1", name: "화자 1" }]);
   const [currentSpeaker, setCurrentSpeaker] = useState("local-1");
   const speakerRef = useRef("local-1");
@@ -52,6 +54,8 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
   const pendingAudio = useRef<{ blob: Blob; seconds: number } | null>(null);
   const [pendingAudioReady, setPendingAudioReady] = useState(false);
   const [audioUploadError, setAudioUploadError] = useState<string>();
+  const [failedFile, setFailedFile] = useState<File>();
+  const [fileUploadError, setFileUploadError] = useState<string>();
   const speech = useBrowserTranscript(
     (_lines, seconds) => {
       setDuration((value) => value + seconds);
@@ -102,11 +106,11 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     savingRef.current = true;
     setSaving(true);
     setAudioUploadError(undefined);
-    void onAudio(pending.blob, pending.seconds, { utterances: toUtterances(draftRef.current ?? [], speakers, people) }, projectId || undefined)
+    void onAudio(pending.blob, pending.seconds, { utterances: toUtterances(draftRef.current ?? [], speakers, people) }, projectId || undefined, projectIds)
       .then(() => { commitDraft(null); setDuration(0); previousSegments.current = []; deletedIds.current.clear(); setAudioStarted(false); setRecordingFailed(false); })
       .catch((error) => { setAudioUploadError(error instanceof Error ? error.message : "오디오를 올리지 못했습니다."); pendingAudio.current = pending; })
       .finally(() => { savingRef.current = false; setSaving(false); });
-  }, [pendingAudioReady, speechFinalized, speech.status, onAudio, speakers, people, projectId]);
+  }, [pendingAudioReady, speechFinalized, speech.status, onAudio, speakers, people, projectId, projectIds]);
   useEffect(() => {
     if (!audioStarted || stopRequested.current || !["error", "denied", "unsupported"].includes(recorder.status)) return;
     stopRequested.current = true;
@@ -135,7 +139,7 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     try {
       const utterances = toUtterances(draft, speakers, people);
       const text = utterances.filter((item) => item.text.trim()).map((item) => `${item.speakerName}: ${item.text.trim()}`).join("\n\n");
-      const accepted = await onTranscript({ title: title.trim() || "회의 대본", text, durationSeconds: duration, utterances }, projectId || undefined);
+      const accepted = await onTranscript({ title: title.trim() || "회의 대본", text, durationSeconds: duration, utterances, projectIds }, projectId || undefined);
       if (accepted) { commitDraft(null); setDuration(0); previousSegments.current = []; deletedIds.current.clear(); setRecordingFailed(false); setAudioStarted(false); }
     } finally { savingRef.current = false; setSaving(false); }
   };
@@ -156,7 +160,16 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     previousSegments.current = [];
     deletedIds.current.clear();
   };
-  const cannotStartAudio = saving || pendingAudioReady || Boolean(pendingAudio.current) || Boolean(audioUploadError) || recordingFailed;
+  const cannotStartAudio = saving || pendingAudioReady || Boolean(pendingAudio.current) || Boolean(audioUploadError) || Boolean(failedFile) || recordingFailed;
+  const uploadAudioFile = async (file: File) => {
+    if (active || savingRef.current || pendingAudio.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setFileUploadError(undefined);
+    try { await onAudio(file, 0, undefined, projectId || undefined, projectIds); setFailedFile(undefined); }
+    catch (error) { setFailedFile(file); setFileUploadError(error instanceof Error ? error.message : "파일을 올리지 못했습니다."); }
+    finally { savingRef.current = false; setSaving(false); }
+  };
   return <div className="space-y-4">
     <fieldset disabled={active || saving || draft !== null} className="flex flex-wrap gap-4 text-sm">
       <legend className="mb-2 font-medium">회의 저장 방식</legend>
@@ -165,18 +178,16 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     </fieldset>
     <div className="space-y-2 rounded-lg border p-3">
       <div className="flex items-center justify-between"><p className="text-sm font-medium">회의 프로젝트</p><Link href={workspacePath(workspaceId, "directory")} className="text-xs underline">프로젝트·참여자 관리</Link></div>
-      <select aria-label="회의 프로젝트" value={projectId} disabled={active || saving} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-        <option value="">검토 단계에서 선택</option>{projects.filter((item) => !item.archivedAt).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-      </select>
-      <p className="text-xs text-muted-foreground">여러 프로젝트 중 이 회의에 해당하는 하나를 고릅니다. 최종 확인 전에 변경할 수 있습니다.</p>
+      <div className="flex flex-wrap gap-3">{projects.filter((item) => !item.archivedAt).map((project) => <label key={project.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={projectIds.includes(project.id)} disabled={active || saving} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}</label>)}</div>
+      <p className="text-xs text-muted-foreground">회의와 관련된 프로젝트를 모두 고르면 참여자 목록을 중복 없이 불러옵니다. 최종 검토에서 변경할 수 있습니다.</p>
     </div>
     <div className="space-y-2">
       <p className="text-sm font-medium">참여자 · 현재 화자</p>
       <div className="flex flex-wrap gap-1.5">{speakers.map((item) => <Button key={item.id} size="sm" variant="outline" aria-pressed={currentSpeaker === item.id} className={currentSpeaker === item.id ? "ring-2 ring-current" : ""} onClick={() => { speakerRef.current = item.id; setCurrentSpeaker(item.id); }}>{item.name}</Button>)}</div>
-      <div className="flex flex-wrap gap-2"><select aria-label="저장된 참여자 불러오기" defaultValue="" onChange={(event) => { const person = people.find((item) => item.id === event.target.value); if (person) addPerson(person); event.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-sm"><option value="">저장된 참여자 불러오기</option>{people.filter((item) => !item.archivedAt && !speakers.some((speaker) => speaker.id === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}</option>)}</select><Button size="sm" variant="outline" onClick={() => setSpeakers((items) => [...items, { id: `local-${Date.now()}-${items.length}`, name: `화자 ${items.length + 1}` }])}>화자 추가</Button></div>
+      <div className="flex flex-wrap gap-2"><select aria-label="저장된 참여자 불러오기" defaultValue="" onChange={(event) => { const person = people.find((item) => item.id === event.target.value); if (person) addPerson(person); event.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-sm"><option value="">저장된 참여자 불러오기</option>{people.filter((item) => !item.archivedAt && (!projectIds.length || selectedProjectPeople.has(item.id)) && !speakers.some((speaker) => speaker.id === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}</option>)}</select><Button size="sm" variant="outline" onClick={() => setSpeakers((items) => [...items, { id: `local-${Date.now()}-${items.length}`, name: `화자 ${items.length + 1}` }])}>화자 추가</Button></div>
       <div className="grid gap-2 sm:grid-cols-2">{speakers.filter((item) => item.id.startsWith("local-")).map((item) => <Input key={item.id} aria-label={`${item.name} 이름`} value={item.name} maxLength={80} onChange={(event) => setSpeakers((items) => items.map((speaker) => speaker.id === item.id ? { ...speaker, name: event.target.value } : speaker))} />)}</div>
     </div>
-    {mode === "audio" ? <><RecordingControls {...recorder} disableStart={cannotStartAudio} onStart={() => { if (cannotStartAudio) return; stopRequested.current = false; setRecordingFailed(false); setAudioStarted(false); void recorder.start(); }} onStop={stopAudio} /><p className="text-xs text-muted-foreground">녹음과 동시에 브라우저 받아쓰기를 시도합니다. 지원되지 않거나 권한이 없어도 오디오 녹음은 계속됩니다. 오디오 업로드 후 서버 대본을 검토하고 명시적으로 확인해야 분석됩니다.</p>{speech.error && <p role="status" className="text-xs text-muted-foreground">실시간 받아쓰기: {speech.error}</p>}{pendingAudioReady && <p role="status" className="text-xs text-muted-foreground">마지막 받아쓰기 결과를 기다린 뒤 오디오와 초안을 올립니다.</p>}{audioUploadError && <p role="alert" className="space-x-2 text-sm text-destructive"><span>{audioUploadError} 오디오와 편집 내용은 이 화면에 남아 있습니다.</span><Button size="sm" variant="outline" disabled={saving} onClick={() => setPendingAudioReady(true)}>업로드 다시 시도</Button><Button size="sm" variant="ghost" disabled={saving} onClick={discardFailedCapture}>녹음 버리기</Button></p>}{recordingFailed && !audioUploadError && <div role="alert" className="space-x-2 text-sm text-destructive"><span>녹음 오류로 오디오를 올리지 못했습니다. 받아쓴 대본은 유지됩니다.</span>{draft?.some((row) => row.text.trim()) && <Button size="sm" variant="outline" disabled={speech.status !== "idle" || saving} onClick={() => void submit()}>텍스트 초안 업로드</Button>}<Button size="sm" variant="ghost" disabled={speech.status !== "idle" || saving} onClick={discardFailedCapture}>초안 버리기</Button></div>}</> : <div className="flex gap-2">{speech.status === "idle" ? <><Button variant="outline" onClick={addTurn}>직접 작성</Button><Button onClick={() => { previousSegments.current = draftRef.current ?? []; if (speech.start()) commitDraft(draftRef.current ?? []); }}>받아쓰기 시작</Button></> : <Button variant="outline" onClick={speech.stop}>받아쓰기 종료</Button>}</div>}
+    {mode === "audio" ? <><RecordingControls {...recorder} disableStart={cannotStartAudio} onStart={() => { if (cannotStartAudio) return; stopRequested.current = false; setRecordingFailed(false); setAudioStarted(false); void recorder.start(); }} onStop={stopAudio} /><label className="block space-y-1 text-sm">기존 오디오 파일 업로드<Input type="file" accept="audio/*,.mp3,.m4a,.wav,.webm,.ogg" disabled={active || saving || Boolean(pendingAudio.current) || Boolean(failedFile)} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAudioFile(file); event.target.value = ""; }} /></label>{failedFile && <div role="alert" className="space-x-2 text-sm text-destructive"><span>{failedFile.name}: {fileUploadError} 파일은 이 화면에 남아 있습니다.</span><Button size="sm" variant="outline" disabled={saving} onClick={() => void uploadAudioFile(failedFile)}>파일 업로드 다시 시도</Button><Button size="sm" variant="ghost" disabled={saving} onClick={() => { setFailedFile(undefined); setFileUploadError(undefined); }}>파일 선택 취소</Button></div>}<p className="text-xs text-muted-foreground">녹음과 동시에 브라우저 받아쓰기를 시도합니다. 지원되지 않거나 권한이 없어도 오디오 녹음은 계속됩니다. 오디오 파일도 서버 대본을 검토하고 명시적으로 확인해야 분석됩니다.</p>{speech.error && <p role="status" className="text-xs text-muted-foreground">실시간 받아쓰기: {speech.error}</p>}{pendingAudioReady && <p role="status" className="text-xs text-muted-foreground">마지막 받아쓰기 결과를 기다린 뒤 오디오와 초안을 올립니다.</p>}{audioUploadError && <p role="alert" className="space-x-2 text-sm text-destructive"><span>{audioUploadError} 오디오와 편집 내용은 이 화면에 남아 있습니다.</span><Button size="sm" variant="outline" disabled={saving} onClick={() => setPendingAudioReady(true)}>업로드 다시 시도</Button><Button size="sm" variant="ghost" disabled={saving} onClick={discardFailedCapture}>녹음 버리기</Button></p>}{recordingFailed && !audioUploadError && <div role="alert" className="space-x-2 text-sm text-destructive"><span>녹음 오류로 오디오를 올리지 못했습니다. 받아쓴 대본은 유지됩니다.</span>{draft?.some((row) => row.text.trim()) && <Button size="sm" variant="outline" disabled={speech.status !== "idle" || saving} onClick={() => void submit()}>텍스트 초안 업로드</Button>}<Button size="sm" variant="ghost" disabled={speech.status !== "idle" || saving} onClick={discardFailedCapture}>초안 버리기</Button></div>}</> : <div className="flex gap-2">{speech.status === "idle" ? <><Button variant="outline" onClick={addTurn}>직접 작성</Button><Button onClick={() => { previousSegments.current = draftRef.current ?? []; if (speech.start()) commitDraft(draftRef.current ?? []); }}>받아쓰기 시작</Button></> : <Button variant="outline" onClick={speech.stop}>받아쓰기 종료</Button>}</div>}
     {draft && <section aria-label="대본 편집" className="space-y-3"><h3 className="font-medium">{active ? "실시간 대본 · 바로 편집" : "대본 초안"}</h3><p className="text-xs text-muted-foreground">직접 수정한 내용은 이후 인식 결과가 덮어쓰지 않습니다. 서버 대본은 업로드 후 별도로 보존됩니다.</p><label className="block space-y-1 text-sm">제목<Input value={title} maxLength={255} disabled={saving} onChange={(event) => setTitle(event.target.value)} /></label><TranscriptEditor rows={draft} speakers={speakers} activeSpeaker={currentSpeaker} disabled={saving} listening={active} onChange={update} onDelete={(id) => { deletedIds.current.add(id); commitDraft(draftRef.current?.filter((item) => item.id !== id) ?? null); }} onAdd={addTurn} />{mode === "text" && <Button disabled={active || saving || !draft.some((row) => row.text.trim())} onClick={() => void submit()}>{saving ? "업로드 중…" : "대본 초안 업로드 · 검토로 이동"}</Button>}</section>}
   </div>;
 }

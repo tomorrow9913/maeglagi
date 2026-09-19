@@ -86,6 +86,11 @@ async def store_credential_secret(
 
 
 async def resolve_credential_secret(session: AsyncSession, credential: object) -> str:
+    # Ollama connections are configured by the deployment, not a workspace secret.
+    if getattr(credential, "provider", None) == "ollama":
+        if not get_settings().ollama_base_url:
+            raise CredentialUnavailableError("Ollama is disabled")
+        return ""
     vault_secret_id = getattr(credential, "vault_secret_id", None)
     if vault_secret_id is not None:
         return await credential_vault.reveal(session, secret_id=vault_secret_id)
