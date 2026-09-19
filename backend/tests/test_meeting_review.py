@@ -282,6 +282,7 @@ async def test_confirm_uses_edited_text_snapshot_and_is_idempotent(
         lambda **kwargs: calls.append(kwargs["task_id"]),
     )
 
+    prior_association_revision = session.source.association_revision
     first = await confirm_review(
         WORKSPACE,
         session.source.id,
@@ -298,6 +299,16 @@ async def test_confirm_uses_edited_text_snapshot_and_is_idempotent(
     )
 
     assert first.status == second.status == "queued"
+    assert session.source.association_revision == prior_association_revision + 1
+    with pytest.raises(HTTPException) as stale:
+        await patch_associations(
+            WORKSPACE,
+            session.source.id,
+            AssociationsPatch(revision=prior_association_revision, projectIds=[], people=[]),
+            user,
+            session,  # type: ignore[arg-type]
+        )
+    assert stale.value.status_code == 409
     assert calls == [str(session.source.id)]
     assert session.source.transcript_text == "김민수: 사람이 고친 문장"
     assert session.source.review_utterances[0]["speakerName"] == "김민수"

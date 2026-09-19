@@ -421,6 +421,7 @@ async def confirm_review(
                 )
             )
         source.confirmed_at = datetime.now(UTC)
+        source.association_revision += 1
         source.review_state = ReviewState.CONFIRMED
     else:
         raise HTTPException(status.HTTP_409_CONFLICT, "Meeting is not awaiting review")

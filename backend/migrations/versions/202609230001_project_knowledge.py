@@ -120,6 +120,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Older versions cannot represent keyless connection markers. Remove only
+    # those markers before restoring the secret requirement; preserve real keys.
+    op.execute(
+        "DELETE FROM provider_credentials WHERE provider = 'ollama' "
+        "AND vault_secret_id IS NULL AND encrypted_secret IS NULL"
+    )
     op.drop_constraint("ck_provider_credentials_has_secret", "provider_credentials", type_="check")
     op.create_check_constraint(
         "ck_provider_credentials_has_secret",
