@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { ErrorState } from "@/components/common/state-views";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GraphCanvas } from "@/features/knowledge-graph/components/graph-canvas";
 import { NodeDetailSheet } from "@/features/knowledge-graph/components/node-detail-sheet";
@@ -21,11 +23,21 @@ import { cn } from "@/lib/utils";
 
 const entityTypes: EntityType[] = ["person", "project", "decision", "task", "event"];
 
-/** 선택한 종류만 남기고, 한쪽 끝이 사라진 엣지도 함께 걸러냅니다. */
-function filterGraph(graph: KnowledgeGraph, hidden: EntityType[]): KnowledgeGraph {
-  if (hidden.length === 0) return graph;
+/**
+ * 선택한 종류만 남기고, 한쪽 끝이 사라진 엣지도 함께 걸러냅니다.
+ * 기준일을 골랐다면 그 시점에 아직 어떤 관계도 없던 노드는 숨깁니다(아직 없던 결정이 떠다니지 않게).
+ */
+function filterGraph(
+  graph: KnowledgeGraph,
+  hidden: EntityType[],
+  hideIsolated: boolean,
+): KnowledgeGraph {
+  if (hidden.length === 0 && !hideIsolated) return graph;
 
-  const nodes = graph.nodes.filter((node) => !hidden.includes(node.type));
+  const connected = new Set(graph.edges.flatMap((edge) => [edge.source, edge.target]));
+  const nodes = graph.nodes.filter(
+    (node) => !hidden.includes(node.type) && (!hideIsolated || connected.has(node.id)),
+  );
   const visible = new Set(nodes.map((node) => node.id));
 
   return {
@@ -39,6 +51,8 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
   const router = useRouter();
 
   const [hidden, setHidden] = useState<EntityType[]>([]);
+  // 비우면 지금 유효한 관계, 날짜를 고르면 그날 유효했던 관계를 보여줍니다.
+  const [asOf, setAsOf] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
 
   // 토큰 값은 브라우저에서만 읽을 수 있어 마운트 후 한 번만 가져옵니다.
@@ -46,13 +60,13 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
   useEffect(() => setPalette(readGraphPalette()), []);
 
   const { data, error, isLoading, reload } = useAsync(
-    (signal) => api.getKnowledgeGraph(workspaceId, signal),
-    [workspaceId],
+    (signal) => api.getKnowledgeGraph(workspaceId, asOf ? { at: asOf } : undefined, signal),
+    [workspaceId, asOf],
   );
 
   const graph = useMemo(
-    () => filterGraph(data ?? { nodes: [], edges: [] }, hidden),
-    [data, hidden],
+    () => filterGraph(data ?? { nodes: [], edges: [] }, hidden, Boolean(asOf)),
+    [data, hidden, asOf],
   );
   const selectedNode = useMemo(
     () => graph.nodes.find((node) => node.id === selectedNodeId),
@@ -71,6 +85,29 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
   return (
     <>
       <PageHeader title="Graph" description="사람·프로젝트·업무의 연결을 그래프로 탐색합니다." />
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label htmlFor="graph-as-of" className="text-xs font-medium text-muted-foreground">
+          기준일
+        </label>
+        <Input
+          id="graph-as-of"
+          type="date"
+          value={asOf}
+          onChange={(event) => setAsOf(event.target.value)}
+          className="h-8 w-40 text-xs"
+        />
+        {asOf ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setAsOf("")}>
+            지금으로
+          </Button>
+        ) : null}
+        <span className="text-xs text-muted-foreground">
+          {asOf
+            ? `${asOf}에 유효했던 관계만 보여줍니다.`
+            : "지금 유효한 관계를 보여줍니다. 날짜를 고르면 그때의 관계를 볼 수 있어요."}
+        </span>
+      </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
         {entityTypes.map((type) => {

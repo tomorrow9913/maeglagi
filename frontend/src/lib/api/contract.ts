@@ -8,6 +8,7 @@ import type {
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
+  KnowledgeGraphQuery,
   ProcessingJob,
   LlmProvider,
   Source,
@@ -80,7 +81,12 @@ export interface MaeglagiApi {
   ): Promise<ContextItem[]>;
   /** 프로젝트의 현재 상황. 첫 소스가 분석되기 전에는 null입니다. */
   getContextStore(workspaceId: string, signal?: AbortSignal): Promise<ContextStore | null>;
-  getKnowledgeGraph(workspaceId: string, signal?: AbortSignal): Promise<KnowledgeGraph>;
+  /** 워크스페이스의 지식 그래프. `at`을 주면 그 시점에 유효했던 관계만 돌려줍니다. */
+  getKnowledgeGraph(
+    workspaceId: string,
+    query?: KnowledgeGraphQuery,
+    signal?: AbortSignal,
+  ): Promise<KnowledgeGraph>;
 
   /**
    * 질문에 대한 답을 스트리밍합니다.

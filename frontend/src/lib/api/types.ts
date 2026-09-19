@@ -181,6 +181,10 @@ export type GraphNode = {
   degree: number;
   /** 이 엔티티가 등장한 근거 소스. 상세 패널에서 원문으로 이동합니다. */
   sources: ContextItemSource[];
+  /** 온톨로지의 정확한 종류(Meeting, Issue 등). `type`은 화면이 그리는 다섯 종류로 줄인 값입니다. */
+  kind?: string;
+  /** 이후 결정이 이 결정을 명시적으로 대체했다면 대체한 결정의 id */
+  supersededBy?: string | null;
 };
 
 export type GraphEdge = {
@@ -188,6 +192,17 @@ export type GraphEdge = {
   source: string;
   target: string;
   type: RelationType;
+  /** 온톨로지의 정확한 관계(WORKS_ON 등) */
+  kind?: string;
+  /** 관계의 유효 기간. 비어 있으면 시작을 모르거나 종료가 확인되지 않은 관계입니다. */
+  validFrom?: string | null;
+  validTo?: string | null;
+};
+
+/** 그래프를 볼 기준 시점. 비우면 지금 유효한 관계만 보여줍니다. */
+export type KnowledgeGraphQuery = {
+  /** ISO-8601 날짜 또는 시각. 이 시점에 유효했던 관계만 돌려줍니다. */
+  at?: string;
 };
 
 export type KnowledgeGraph = {
