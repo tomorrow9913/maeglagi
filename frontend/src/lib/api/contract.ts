@@ -11,10 +11,12 @@ import type {
   KnowledgeGraphQuery,
   ProcessingJob,
   LlmProvider,
+  ModelSelections,
   Source,
   SourceContent,
   TranscriptSourceInput,
   Workspace,
+  WorkspaceModels,
   WorkspaceSecrets,
 } from "./types";
 
@@ -47,6 +49,25 @@ export interface MaeglagiApi {
     input: { provider: LlmProvider; apiKey: string },
     signal?: AbortSignal,
   ): Promise<ApiKeyValidation>;
+  /**
+   * 키로 쓸 수 있는 모델을 용도별로 조회합니다. workspace를 만들기 전에 씁니다.
+   * 키가 유효하지 않으면 422로 실패하며, 키를 저장하지 않습니다.
+   */
+  listKeyModels(
+    input: { provider: LlmProvider; apiKey: string },
+    signal?: AbortSignal,
+  ): Promise<WorkspaceModels>;
+  /** workspace가 쓸 수 있는 모델과 저장된 선택. 용도는 항상 answer, extraction, embedding, transcription 순입니다. */
+  getWorkspaceModels(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceModels>;
+  /**
+   * 용도별 모델을 저장합니다. 목록에 없는 모델은 422, 잠긴 용도(색인된 뒤의 임베딩)를
+   * 바꾸려 하면 409로 실패합니다.
+   */
+  updateWorkspaceModels(
+    workspaceId: string,
+    selections: ModelSelections,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceModels>;
   /** 저장된 키의 provider와 마지막 4자. 키를 등록하지 않았으면 null입니다. */
   getWorkspaceSecrets(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets | null>;
   /** 키 교체. 기존 키는 덮어씌워지고 복구할 수 없습니다. */

@@ -36,11 +36,38 @@ export type AiProvider = {
   models: string[];
 };
 
+/** 모델이 쓰이는 용도. 서버가 내려주는 순서와 같습니다. */
+export type ModelRole = "answer" | "extraction" | "embedding" | "transcription";
+
+/** 어느 공급자의 어느 모델인지. 한 워크스페이스가 용도마다 다른 공급자를 쓸 수도 있습니다. */
+export type ModelOption = { provider: LlmProvider; model: string };
+
+/** 한 용도에서 고를 수 있는 모델과 지금 선택된 모델. */
+export type RoleModels = {
+  role: ModelRole;
+  /** 이 키로 쓸 수 있는 모델. 서버가 추천 순으로 정렬해 주므로 첫 번째를 미리 선택합니다. */
+  options: ModelOption[];
+  /** 워크스페이스에 저장된 선택. 키만 넣은 단계(워크스페이스 생성 전)에는 null입니다. */
+  selected: ModelOption | null;
+  /**
+   * 바꿀 수 없는 상태. 임베딩만 해당하며, 워크스페이스를 만들 때 정한 뒤로는 잠깁니다(모델마다
+   * 벡터가 달라 섞어 검색할 수 없습니다). LLM 모델은 항상 바꿀 수 있습니다.
+   */
+  locked: boolean;
+};
+
+export type WorkspaceModels = { roles: RoleModels[] };
+
+/** 용도별로 고른 모델. 고르지 않은 용도는 비워 둡니다. */
+export type ModelSelections = Partial<Record<ModelRole, ModelOption>>;
+
 export type CreateWorkspaceInput = {
   name: string;
   /** BYOK. 서버는 암호화해 저장하고 어떤 응답으로도 다시 내려주지 않습니다. */
   llmApiKey: string;
   llmProvider: LlmProvider;
+  /** 용도별로 고른 모델. 비우면 서버가 정한 기본을 씁니다. */
+  models?: ModelSelections;
 };
 
 /** 키 유효성 검증 결과. 실제 호출로 확인하므로 형식만 맞아도 실패할 수 있습니다. */
@@ -83,7 +110,13 @@ export type SourceContent = {
   title: string;
   kind: SourceKind;
   /** 청크 단위 본문. 근거 하이라이트가 chunkId로 위치를 찾습니다. */
-  chunks: { id: string; text: string }[];
+  chunks: {
+    id: string;
+    text: string;
+    /** 회의 녹음에서 이 구간이 시작·끝나는 시각(초). 문서에는 없습니다. */
+    startSeconds?: number | null;
+    endSeconds?: number | null;
+  }[];
 };
 
 /**
@@ -219,6 +252,8 @@ export type AnswerSource = {
   kind: SourceKind;
   title: string;
   excerpt: string;
+  /** 회의 근거가 시작되는 시각(초). 원문 뷰어가 이 위치로 이동합니다. 문서 근거에는 없습니다. */
+  timestamp?: number;
 };
 
 /**

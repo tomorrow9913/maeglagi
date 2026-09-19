@@ -232,7 +232,46 @@ class OpenAICompatibleAdapter:
         )
 
     async def stream(self, request: ChatRequest, api_key: str) -> AsyncIterator[str]:
-        raise NotImplementedError("Streaming adapter는 후속 단계에서 구현합니다.")
+        """Yield the answer text as the provider produces it (server-sent `data:` lines)."""
+        payload: dict[str, Any] = {
+            **request.provider_options,
+            "model": request.model,
+            "messages": [message.model_dump() for message in request.messages],
+            "stream": True,
+        }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
+        if request.max_tokens is not None:
+            payload["max_tokens"] = request.max_tokens
+        try:
+            async with (
+                httpx.AsyncClient(timeout=httpx.Timeout(30, read=120)) as client,
+                client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(api_key),
+                    json=payload,
+                ) as response,
+            ):
+                if not response.is_success:
+                    await response.aread()
+                    raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        return
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue  # keep-alive or a malformed frame: skip it, keep streaming
+                    delta = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content")
+                    if delta:
+                        yield delta
+        except httpx.HTTPError as exc:
+            raise ProviderError("Provider에 연결하지 못했습니다.") from exc
 
 
 class AnthropicAdapter:

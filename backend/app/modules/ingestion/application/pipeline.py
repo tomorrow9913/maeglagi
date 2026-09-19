@@ -1,3 +1,4 @@
+from typing import NamedTuple
 from uuid import UUID
 
 from sqlalchemy import delete
@@ -6,6 +7,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
+from app.modules.context_engine.application.model_roles import (
+    ROLE_CAPABILITY,
+    ModelRole,
+    selection_of,
+)
 from app.modules.context_engine.application.provider import (
     EmbeddingRequest,
     ProviderAdapter,
@@ -18,11 +24,24 @@ from app.modules.context_engine.infrastructure.provider_registry import provider
 from app.modules.ingestion.application.chunking import CharacterOverlapChunker
 from app.modules.ingestion.application.normalization import NormalizationService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Source
+from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
 
 class IngestionError(RuntimeError):
     pass
+
+
+class ResolvedProvider(NamedTuple):
+    """An API key that can do a job, and the model the workspace chose to do it with."""
+
+    adapter: ProviderAdapter
+    api_key: str
+    model: str
+
+
+def embedding_dimensions_argument(model: str, dimensions: int) -> int | None:
+    """Only the text-embedding-3 family accepts `dimensions`; older models are fixed-size."""
+    return dimensions if model.startswith("text-embedding-3") else None
 
 
 class IngestionPipeline:
@@ -33,14 +52,27 @@ class IngestionPipeline:
             self.settings.chunk_size_chars, self.settings.chunk_overlap_chars
         )
 
-    async def _provider(
+    def _fallback_model(self, role: ModelRole) -> str:
+        """Only for workspaces that never chose: the deployment's configured default."""
+        return {
+            ModelRole.ANSWER: self.settings.answer_model,
+            ModelRole.EXTRACTION: self.settings.extraction_model,
+            ModelRole.EMBEDDING: self.settings.embedding_model,
+            ModelRole.TRANSCRIPTION: self.settings.transcription_model,
+        }[role]
+
+    async def provider_with_model(
         self,
         session: AsyncSession,
         *,
         workspace_id: UUID,
         owner_id: UUID,
-        capability: str,
-    ) -> tuple[ProviderAdapter, str]:
+        role: ModelRole,
+    ) -> ResolvedProvider:
+        """The key and model for `role`: what the owner chose, else the first key that can."""
+        capability = ROLE_CAPABILITY[role]
+        workspace = await session.get(Workspace, workspace_id)
+        chosen = selection_of(workspace.model_settings if workspace else None, role)
         result = await session.exec(
             select(ProviderCredential)
             .where(
@@ -50,26 +82,21 @@ class IngestionPipeline:
             )
             .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
         )
-        for credential in result.all():
+        credentials = list(result.all())
+        if chosen is not None:  # the key of the chosen model's provider goes first
+            credentials.sort(key=lambda credential: credential.provider != chosen.provider)
+        for credential in credentials:
             adapter = provider_registry.get(credential.provider)
             if adapter is None or capability not in adapter.capabilities:
                 continue
             try:
-                return adapter, await resolve_credential_secret(session, credential)
+                api_key = await resolve_credential_secret(session, credential)
             except CredentialUnavailableError:
                 continue
+            uses_choice = chosen is not None and chosen.provider == credential.provider
+            model = chosen.model if uses_choice and chosen else self._fallback_model(role)
+            return ResolvedProvider(adapter, api_key, model)
         raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
-
-    async def provider_for(
-        self, session: AsyncSession, *, source: Source, capability: str
-    ) -> tuple[ProviderAdapter, str]:
-        """The workspace owner's default API key that supports `capability`."""
-        return await self._provider(
-            session,
-            workspace_id=source.workspace_id,
-            owner_id=source.owner_id,
-            capability=capability,
-        )
 
     async def transcribe(
         self,
@@ -80,21 +107,21 @@ class IngestionPipeline:
         filename: str,
         content_type: str,
     ) -> TranscriptionResponse:
-        adapter, api_key = await self._provider(
+        provider = await self.provider_with_model(
             session,
             workspace_id=source.workspace_id,
             owner_id=source.owner_id,
-            capability="transcription",
+            role=ModelRole.TRANSCRIPTION,
         )
         try:
-            return await adapter.transcribe(
+            return await provider.adapter.transcribe(
                 TranscriptionRequest(
                     audio=audio,
                     filename=filename,
                     content_type=content_type,
-                    model=self.settings.transcription_model,
+                    model=provider.model,
                 ),
-                api_key,
+                provider.api_key,
             )
         except ProviderError as exc:
             raise IngestionError(str(exc)) from exc
@@ -119,20 +146,22 @@ class IngestionPipeline:
         chunks = self.chunker.chunk(normalized)
         if not chunks:
             raise IngestionError("처리할 transcript 내용이 없습니다.")
-        adapter, api_key = await self._provider(
+        provider = await self.provider_with_model(
             session,
             workspace_id=source.workspace_id,
             owner_id=source.owner_id,
-            capability="embedding",
+            role=ModelRole.EMBEDDING,
         )
         try:
-            response = await adapter.embedding(
+            response = await provider.adapter.embedding(
                 EmbeddingRequest(
                     input=[chunk.content for chunk in chunks],
-                    model=self.settings.embedding_model,
-                    dimensions=self.settings.embedding_dimensions,
+                    model=provider.model,
+                    dimensions=embedding_dimensions_argument(
+                        provider.model, self.settings.embedding_dimensions
+                    ),
                 ),
-                api_key,
+                provider.api_key,
             )
         except ProviderError as exc:
             raise IngestionError(str(exc)) from exc
@@ -171,6 +200,51 @@ class IngestionPipeline:
     ) -> int:
         return await self.index_source(session, source=source, segments=segments, language=language)
 
+    async def embed_query(
+        self, session: AsyncSession, *, workspace_id: UUID, owner_id: UUID, query: str
+    ) -> list[float]:
+        """Embed a question once with the workspace's chosen embedding model."""
+        provider = await self.provider_with_model(
+            session, workspace_id=workspace_id, owner_id=owner_id, role=ModelRole.EMBEDDING
+        )
+        try:
+            response = await provider.adapter.embedding(
+                EmbeddingRequest(
+                    input=query,
+                    model=provider.model,
+                    dimensions=embedding_dimensions_argument(
+                        provider.model, self.settings.embedding_dimensions
+                    ),
+                ),
+                provider.api_key,
+            )
+        except ProviderError as exc:
+            raise IngestionError(str(exc)) from exc
+        embedding = response.embeddings[0]
+        if len(embedding) != self.settings.embedding_dimensions:
+            raise IngestionError("임베딩 차원이 Vector Store schema와 다릅니다.")
+        return embedding
+
+    async def search_by_embedding(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: UUID,
+        owner_id: UUID,
+        embedding: list[float],
+        limit: int,
+        source_ids: list[UUID] | None = None,
+    ) -> list[tuple[Chunk, float]]:
+        """Nearest chunks to an already-computed embedding, optionally within `source_ids`."""
+        distance = Chunk.embedding.cosine_distance(embedding).label("distance")
+        statement = select(Chunk, distance).where(
+            Chunk.workspace_id == workspace_id, Chunk.owner_id == owner_id
+        )
+        if source_ids is not None:
+            statement = statement.where(Chunk.source_id.in_(source_ids))  # type: ignore[attr-defined]
+        result = await session.exec(statement.order_by(distance).limit(limit))
+        return [(chunk, float(score)) for chunk, score in result.all()]
+
     async def search(
         self,
         session: AsyncSession,
@@ -179,30 +253,17 @@ class IngestionPipeline:
         owner_id: UUID,
         query: str,
         limit: int,
+        source_ids: list[UUID] | None = None,
     ) -> list[tuple[Chunk, float]]:
-        adapter, api_key = await self._provider(
+        """Nearest chunks to `query`, optionally only within `source_ids`."""
+        embedding = await self.embed_query(
+            session, workspace_id=workspace_id, owner_id=owner_id, query=query
+        )
+        return await self.search_by_embedding(
             session,
             workspace_id=workspace_id,
             owner_id=owner_id,
-            capability="embedding",
+            embedding=embedding,
+            limit=limit,
+            source_ids=source_ids,
         )
-        try:
-            response = await adapter.embedding(
-                EmbeddingRequest(
-                    input=query,
-                    model=self.settings.embedding_model,
-                    dimensions=self.settings.embedding_dimensions,
-                ),
-                api_key,
-            )
-        except ProviderError as exc:
-            raise IngestionError(str(exc)) from exc
-        embedding = response.embeddings[0]
-        distance = Chunk.embedding.cosine_distance(embedding).label("distance")
-        result = await session.exec(
-            select(Chunk, distance)
-            .where(Chunk.workspace_id == workspace_id, Chunk.owner_id == owner_id)
-            .order_by(distance)
-            .limit(limit)
-        )
-        return [(chunk, float(score)) for chunk, score in result.all()]
