@@ -90,9 +90,7 @@ async def _owned_workspace(
     # The model writer shares this lock with credential mutations. Refresh the
     # identity map so selections and key options are read after earlier writers.
     workspace = (
-        await session.get(
-            Workspace, workspace_id, with_for_update=True, populate_existing=True
-        )
+        await session.get(Workspace, workspace_id, with_for_update=True, populate_existing=True)
         if for_update
         else await session.get(Workspace, workspace_id)
     )

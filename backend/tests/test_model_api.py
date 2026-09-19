@@ -253,9 +253,7 @@ def test_model_update_locks_workspace_before_reading_key_options(
         return OPTIONS
 
     monkeypatch.setattr(models_module, "options_for_workspace", locked_options)
-    response = put_models(
-        TestClient(app), {"answer": {"provider": "openai", "model": "gpt-4o"}}
-    )
+    response = put_models(TestClient(app), {"answer": {"provider": "openai", "model": "gpt-4o"}})
     assert response.status_code == 200
     assert env.session.workspace_locked is False
 

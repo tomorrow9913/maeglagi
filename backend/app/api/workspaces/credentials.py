@@ -35,9 +35,7 @@ async def _owned_workspace(
     # serializes label checks, default transitions, rotation, and deletion even
     # when no credential row exists yet to lock.
     workspace = (
-        await session.get(
-            Workspace, workspace_id, with_for_update=True, populate_existing=True
-        )
+        await session.get(Workspace, workspace_id, with_for_update=True, populate_existing=True)
         if for_update
         else await session.get(Workspace, workspace_id)
     )

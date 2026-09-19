@@ -53,12 +53,21 @@ def setup_api(monkeypatch):
     settings = {"answer": {"provider": "openai", "model": "gpt-4o-mini"}}
     workspace = Workspace(owner_id=owner, name="test", model_settings=settings)
     first = ProviderCredential(
-        workspace_id=workspace.id, owner_id=owner, provider="openai", label="primary",
-        key_hint="0001", is_default=True, vault_secret_id=uuid4(),
+        workspace_id=workspace.id,
+        owner_id=owner,
+        provider="openai",
+        label="primary",
+        key_hint="0001",
+        is_default=True,
+        vault_secret_id=uuid4(),
     )
     second = ProviderCredential(
-        workspace_id=workspace.id, owner_id=owner, provider="openai", label="backup",
-        key_hint="0002", vault_secret_id=uuid4(),
+        workspace_id=workspace.id,
+        owner_id=owner,
+        provider="openai",
+        label="backup",
+        key_hint="0002",
+        vault_secret_id=uuid4(),
     )
     session = CredentialSession(workspace, [first, second])
     vault_update = AsyncMock()
@@ -78,9 +87,15 @@ def setup_api(monkeypatch):
     app.dependency_overrides[get_session] = get_test_session
     try:
         yield SimpleNamespace(
-            client=TestClient(app), workspace=workspace, credentials=session.credentials,
-            first=first, second=second, session=session, update=vault_update,
-            delete=vault_delete, create=vault_create,
+            client=TestClient(app),
+            workspace=workspace,
+            credentials=session.credentials,
+            first=first,
+            second=second,
+            session=session,
+            update=vault_update,
+            delete=vault_delete,
+            create=vault_create,
         )
     finally:
         app.dependency_overrides.clear()
@@ -90,17 +105,30 @@ def test_add_and_rotate_are_isolated_from_default_and_models(setup_api):
     case = setup_api
     path = f"/api/v1/workspaces/{case.workspace.id}/provider-credentials"
     settings = case.workspace.model_settings.copy()
-    added = case.client.post(path, json={
-        "provider": "anthropic", "label": "research", "apiKey": "secret-new-1234",
-    })
+    added = case.client.post(
+        path,
+        json={
+            "provider": "anthropic",
+            "label": "research",
+            "apiKey": "secret-new-1234",
+        },
+    )
     assert added.status_code == 201
     assert added.json()["isDefault"] is False
     assert "secret-new" not in added.text
     assert case.first.is_default is True
     assert case.workspace.model_settings == settings
-    assert case.client.post(path, json={
-        "provider": "anthropic", "label": "research", "apiKey": "duplicate",
-    }).status_code == 409
+    assert (
+        case.client.post(
+            path,
+            json={
+                "provider": "anthropic",
+                "label": "research",
+                "apiKey": "duplicate",
+            },
+        ).status_code
+        == 409
+    )
     rotated = case.client.put(f"{path}/{case.second.id}", json={"apiKey": "rotated-9999"})
     assert rotated.status_code == 200
     assert rotated.json()["keyHint"] == "9999"
@@ -141,8 +169,12 @@ def test_cross_workspace_and_owner_ids_cannot_mutate(setup_api):
     case = setup_api
     path = f"/api/v1/workspaces/{case.workspace.id}/provider-credentials"
     other = ProviderCredential(
-        workspace_id=uuid4(), owner_id=case.workspace.owner_id, provider="openai",
-        label="other", key_hint="0000", vault_secret_id=uuid4(),
+        workspace_id=uuid4(),
+        owner_id=case.workspace.owner_id,
+        provider="openai",
+        label="other",
+        key_hint="0000",
+        vault_secret_id=uuid4(),
     )
     case.credentials.append(other)
     assert case.client.put(f"{path}/{other.id}", json={"apiKey": "private"}).status_code == 404
@@ -151,9 +183,17 @@ def test_cross_workspace_and_owner_ids_cannot_mutate(setup_api):
     assert case.update.await_count == 0
     assert case.delete.await_count == 0
     case.workspace.owner_id = uuid4()
-    assert case.client.post(path, json={
-        "provider": "openai", "label": "new", "apiKey": "private",
-    }).status_code == 404
+    assert (
+        case.client.post(
+            path,
+            json={
+                "provider": "openai",
+                "label": "new",
+                "apiKey": "private",
+            },
+        ).status_code
+        == 404
+    )
     assert case.create.await_count == 0
 
 
@@ -162,9 +202,14 @@ def test_invalid_provider_key_is_rejected_before_vault_write(setup_api, monkeypa
     validator = AsyncMock(return_value=(False, "invalid provider key"))
     monkeypatch.setattr(routes, "validate_provider_credential", validator)
     path = f"/api/v1/workspaces/{case.workspace.id}/provider-credentials"
-    added = case.client.post(path, json={
-        "provider": "unknown", "label": "unknown", "apiKey": "private",
-    })
+    added = case.client.post(
+        path,
+        json={
+            "provider": "unknown",
+            "label": "unknown",
+            "apiKey": "private",
+        },
+    )
     rotated = case.client.put(f"{path}/{case.second.id}", json={"apiKey": "private"})
     assert added.status_code == 422
     assert rotated.status_code == 422
@@ -213,9 +258,7 @@ async def test_concurrent_adds_of_same_label_serialize_to_conflict(monkeypatch):
     first_session = LockedSession()
     second_session = LockedSession()
     body = routes.CredentialInput(provider="openai", apiKey="private", label="same")
-    first_task = asyncio.create_task(
-        routes.add_credential(workspace.id, body, user, first_session)
-    )
+    first_task = asyncio.create_task(routes.add_credential(workspace.id, body, user, first_session))
     await first_storing.wait()
     second_task = asyncio.create_task(
         routes.add_credential(workspace.id, body, user, second_session)
