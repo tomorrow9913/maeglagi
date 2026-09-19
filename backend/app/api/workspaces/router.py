@@ -22,6 +22,7 @@ from app.api.workspaces.schemas import (
     TranscriptSourceRequest,
     WorkspaceResponse,
 )
+from app.api.workspaces.source_content import router as source_content_router
 from app.auth import CurrentUser, bearer
 from app.core.config import get_settings
 from app.core.credentials import store_credential_secret
@@ -37,6 +38,7 @@ router = APIRouter()
 router.include_router(credentials_router)
 router.include_router(context_router)
 router.include_router(graph_router)
+router.include_router(source_content_router)
 workspaces = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
 

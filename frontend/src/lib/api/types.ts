@@ -83,7 +83,13 @@ export type SourceContent = {
   title: string;
   kind: SourceKind;
   /** 청크 단위 본문. 근거 하이라이트가 chunkId로 위치를 찾습니다. */
-  chunks: { id: string; text: string }[];
+  chunks: {
+    id: string;
+    text: string;
+    /** 회의 녹음에서 이 구간이 시작·끝나는 시각(초). 문서에는 없습니다. */
+    startSeconds?: number | null;
+    endSeconds?: number | null;
+  }[];
 };
 
 /**
