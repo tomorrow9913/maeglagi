@@ -7,6 +7,7 @@ import { ArrowUpRight, Send, Square } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AnswerModelPicker } from "@/features/ask/components/answer-model-picker";
 import { AskTurn } from "@/features/ask/components/ask-turn";
 import { MaeglagiAvatar } from "@/features/ask/components/maeglagi-avatar";
 import { exampleQuestions } from "@/features/ask/lib/example-questions";
@@ -22,7 +23,14 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
   const router = useRouter();
 
   const [draft, setDraft] = useState("");
+  const [isModelSaving, setIsModelSaving] = useState(false);
+  const modelSavingRef = useRef(false);
   const { turns, isStreaming, ask, stop, clear } = useAsk(workspaceId);
+
+  const onModelSavingChange = useCallback((saving: boolean) => {
+    modelSavingRef.current = saving;
+    setIsModelSaving(saving);
+  }, []);
 
   /*
    * 빈 화면에는 고정 예시 대신 이 워크스페이스에 실제로 쌓인 결정을 보여줍니다.
@@ -50,10 +58,11 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
 
   const submit = useCallback(
     (question: string) => {
+      if (modelSavingRef.current || isStreaming || !question.trim()) return;
       setDraft("");
       void ask(question);
     },
-    [ask],
+    [ask, isStreaming],
   );
 
   const openSource = useCallback(
@@ -95,6 +104,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
                   <li key={item.id}>
                     <button
                       type="button"
+                      disabled={isStreaming || isModelSaving}
                       onClick={() => submit(`'${item.title}' 결정의 근거는 무엇인가요?`)}
                       className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
                     >
@@ -118,6 +128,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
                   <li key={question}>
                     <button
                       type="button"
+                      disabled={isStreaming || isModelSaving}
                       onClick={() => submit(question)}
                       className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
                     >
@@ -138,32 +149,40 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
         <div ref={bottomRef} />
       </div>
 
-      <form
-        className="sticky bottom-0 flex gap-2 bg-background/85 py-4 backdrop-blur"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit(draft);
-        }}
-      >
-        <Input
-          value={draft}
-          placeholder="이 워크스페이스에 대해 질문해 보세요"
-          disabled={isStreaming}
-          onChange={(event) => setDraft(event.target.value)}
-          aria-label="질문"
+      <div className="sticky bottom-0 bg-background/85 pt-3 pb-2 backdrop-blur">
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit(draft);
+          }}
+        >
+          <Input
+            value={draft}
+            placeholder="이 워크스페이스에 대해 질문해 보세요"
+            disabled={isStreaming || isModelSaving}
+            onChange={(event) => setDraft(event.target.value)}
+            aria-label="질문"
+          />
+          {isStreaming ? (
+            <Button type="button" variant="outline" onClick={stop}>
+              <Square className="size-4" aria-hidden />
+              중단
+            </Button>
+          ) : (
+            <Button type="submit" disabled={!draft.trim() || isModelSaving}>
+              <Send className="size-4" aria-hidden />
+              보내기
+            </Button>
+          )}
+        </form>
+        <AnswerModelPicker
+          key={workspaceId}
+          workspaceId={workspaceId}
+          isStreaming={isStreaming}
+          onSavingChange={onModelSavingChange}
         />
-        {isStreaming ? (
-          <Button type="button" variant="outline" onClick={stop}>
-            <Square className="size-4" aria-hidden />
-            중단
-          </Button>
-        ) : (
-          <Button type="submit" disabled={!draft.trim()}>
-            <Send className="size-4" aria-hidden />
-            보내기
-          </Button>
-        )}
-      </form>
+      </div>
     </div>
   );
 }

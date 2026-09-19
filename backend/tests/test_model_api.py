@@ -81,8 +81,13 @@ class Env:
 def env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Env]:
     state = Env()
 
-    async def options_for_workspace(*_: Any) -> Any:
-        return OPTIONS
+    async def options_for_workspace(
+        session: Any, workspace: Any, owner: Any, provider: str | None = None
+    ) -> Any:
+        return {
+            role: [option for option in items if provider is None or option.provider == provider]
+            for role, items in OPTIONS.items()
+        }
 
     async def has_chunks(*_: Any) -> bool:
         return state.indexed
@@ -175,10 +180,38 @@ def test_the_workspace_shows_what_it_chose_and_leaves_the_rest_unset(env: Env) -
     assert roles["embedding"]["selected"] is None
 
 
-def test_a_stored_choice_the_key_no_longer_offers_shows_as_unset(env: Env) -> None:
+def test_a_stored_choice_the_key_no_longer_offers_remains_visible(env: Env) -> None:
     env.workspace.model_settings = {"answer": {"provider": "openai", "model": "retired-model"}}
 
-    assert by_role(get_models(TestClient(app)))["answer"]["selected"] is None
+    assert by_role(get_models(TestClient(app)))["answer"]["selected"] == {
+        "provider": "openai",
+        "model": "retired-model",
+    }
+
+
+def test_provider_browsing_filters_options_without_changing_saved_models(env: Env) -> None:
+    env.workspace.model_settings = {"embedding": EMBED_SMALL}
+    response = TestClient(app).get(
+        f"/api/v1/workspaces/{WORKSPACE}/ai/models", params={"provider": "anthropic"}
+    )
+    assert response.status_code == 200
+    roles = by_role(response)
+    assert all(not role["options"] for role in roles.values())
+    assert roles["embedding"]["selected"] == EMBED_SMALL
+    assert roles["embedding"]["locked"] is True
+    assert env.workspace.model_settings == {"embedding": EMBED_SMALL}
+    assert env.session.commits == 0
+
+
+def test_provider_filter_preserves_matching_options_and_rejects_unknown_provider(env: Env) -> None:
+    client = TestClient(app)
+    path = f"/api/v1/workspaces/{WORKSPACE}/ai/models"
+    response = client.get(path, params={"provider": "openai"})
+    assert response.status_code == 200
+    assert by_role(response)["answer"]["options"]
+    assert client.get(path, params={"provider": "unknown"}).status_code == 422
+    env.workspace.owner_id = uuid4()
+    assert client.get(path, params={"provider": "openai"}).status_code == 404
 
 
 def test_the_embedding_model_is_locked_once_sources_are_indexed(env: Env) -> None:
@@ -209,6 +242,27 @@ def test_a_partial_update_keeps_the_choices_it_does_not_mention(env: Env) -> Non
     put_models(TestClient(app), {"answer": {"provider": "openai", "model": "gpt-4o"}})
 
     assert env.workspace.model_settings["transcription"]["model"] == "whisper-1"
+
+
+def test_models_can_mix_providers_independently_by_role(env: Env, monkeypatch) -> None:
+    claude = ModelOption(provider="anthropic", model="claude-test")
+
+    async def mixed_options(*args):
+        return {**OPTIONS, ModelRole.ANSWER: [*OPTIONS[ModelRole.ANSWER], claude]}
+
+    monkeypatch.setattr(models_module, "options_for_workspace", mixed_options)
+    selections = {
+        "answer": claude.model_dump(),
+        "embedding": EMBED_SMALL,
+        "transcription": {"provider": "openai", "model": "whisper-1"},
+    }
+    response = put_models(TestClient(app), selections)
+    assert response.status_code == 200
+    assert env.workspace.model_settings == selections
+    assert {o["provider"] for o in by_role(response)["answer"]["options"]} == {
+        "openai",
+        "anthropic",
+    }
 
 
 def test_a_model_the_key_does_not_offer_for_that_job_is_a_422(env: Env) -> None:

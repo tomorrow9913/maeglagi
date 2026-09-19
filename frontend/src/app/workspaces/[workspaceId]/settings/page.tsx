@@ -8,30 +8,42 @@ import { ApiKeyCard } from "@/features/workspace/components/api-key-card";
 import { WorkspaceModelsCard } from "@/features/workspace/components/workspace-models-card";
 import { useAsync } from "@/hooks/use-async";
 import { api } from "@/lib/api";
-import type { AiProvider, WorkspaceSecrets } from "@/lib/api";
+import type { AiProvider, LlmProvider } from "@/lib/api";
 
 export default function SettingsPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
-
   const { data, error, isLoading, reload } = useAsync(
     (signal) =>
       Promise.all([
-        api.getWorkspaceSecrets(workspaceId, signal),
+        api.listProviderCredentials(workspaceId, signal),
         api.listWorkspaceProviders(workspaceId, signal),
       ]),
     [workspaceId],
   );
-
-  // 저장 직후 화면을 다시 불러오지 않고 결과만 반영합니다.
-  const [secrets, setSecrets] = useState<WorkspaceSecrets | null>(null);
-  useEffect(() => setSecrets(data?.[0] ?? null), [data]);
+  const [selectedProvider, setSelectedProvider] = useState<LlmProvider>();
+  const [modelRevision, setModelRevision] = useState(0);
+  const credentials = data?.[0] ?? [];
   const providers: AiProvider[] = data?.[1] ?? [];
+
+  useEffect(() => {
+    if (!data || data[1].length === 0) return;
+    setSelectedProvider((current) =>
+      current && data[1].some((item) => item.id === current)
+        ? current
+        : (data[0].find((item) => item.isDefault)?.provider ?? data[1][0].id),
+    );
+  }, [data]);
+
+  const provider =
+    selectedProvider && providers.some((item) => item.id === selectedProvider)
+      ? selectedProvider
+      : (credentials.find((item) => item.isDefault)?.provider ?? providers[0]?.id);
+  const hasCredential = credentials.some((item) => item.status === "active");
 
   return (
     <>
       <PageHeader title="설정" description="워크스페이스 정보와 BYOK API key를 관리합니다." />
-
-      {isLoading ? (
+      {isLoading && !data ? (
         <ListSkeleton count={1} className="h-40" />
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
@@ -44,17 +56,26 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
         <div className="space-y-4">
           <ApiKeyCard
             workspaceId={workspaceId}
-            secrets={secrets}
+            credentials={credentials}
             providers={providers}
-            onUpdated={setSecrets}
+            provider={provider}
+            onProviderChange={setSelectedProvider}
+            onUpdated={() => {
+              reload();
+              setModelRevision((value) => value + 1);
+            }}
           />
-          {/* 키가 있어야 쓸 수 있는 모델을 알 수 있습니다. 키를 바꾸면 목록이 달라져 다시 마운트합니다. */}
-          {secrets ? (
+          {hasCredential ? (
             <WorkspaceModelsCard
-              key={`${secrets.provider}-${secrets.updatedAt}`}
+              key={`${workspaceId}-${modelRevision}`}
               workspaceId={workspaceId}
+              providers={providers}
             />
-          ) : null}
+          ) : (
+            <section className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+              사용할 모델을 보려면 위에서 API key를 등록해 주세요.
+            </section>
+          )}
         </div>
       )}
     </>

@@ -17,11 +17,11 @@
 └── docs/              # 아키텍처 결정 및 개발 문서
 ```
 
-백엔드는 하나의 배포 단위를 유지하되 모듈 경계를 분명히 한 모듈러 모놀리스입니다. 해커톤 PoC에서 운영 복잡도를 낮추면서 향후 AI Context Engine이나 worker를 독립 서비스로 분리할 수 있습니다.
+백엔드는 모듈 경계를 분명히 한 모듈러 모놀리스이며, API와 Celery worker를 별도 프로세스로 배포합니다.
 
 ## 빠른 시작
 
-필수 도구: Python 3.12+, `uv`, Node.js 22+, `pnpm`, Supabase 프로젝트
+필수 도구: Python 3.12+, `uv`, Node.js 22+, `pnpm`, Supabase 프로젝트, Valkey 또는 Redis
 
 ```bash
 cp .env.example .env
@@ -34,6 +34,14 @@ uv run uvicorn app.main:app --reload
 cd ../frontend
 pnpm install
 pnpm dev
+```
+
+문서·회의 처리 작업을 실행하려면 Valkey/Redis를 시작하고 `.env`의
+`CELERY_BROKER_URL`을 설정한 뒤 별도 터미널에서 worker를 실행합니다.
+
+```bash
+cd backend
+uv run celery -A app.core.celery:celery_app worker --loglevel=INFO --concurrency=2
 ```
 
 - Frontend: http://localhost:3000
@@ -54,7 +62,10 @@ Supabase Auth 세션을 쿠키로 유지하고, FastAPI는 전달받은 access t
 백엔드는 저장소 루트의 `render.yaml`을 Render Blueprint로 가져온 뒤 다음 값을 설정합니다.
 
 - API/worker: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
-  `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ORIGINS`
+  `SUPABASE_SERVICE_ROLE_KEY`; API: `CORS_ORIGINS`
+
+Blueprint가 API와 worker의 `CELERY_BROKER_URL`을 Render Key Value에 연결하고,
+`APP_SECRET_KEY`를 생성해 두 서비스에 설정합니다.
 
 프론트엔드는 `frontend`를 Root Directory로 지정해 Vercel에 배포하고
 `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_USE_MOCKS`, `NEXT_PUBLIC_SUPABASE_URL`,
@@ -86,7 +97,9 @@ Alembic revision입니다. 배포 전 `make migrate`를 실행하고, 모델 변
 - `GET /api/v1/workspaces/{id}/ai/providers` — 구현된 provider, capability, 사용 가능한 모델 목록
 - `POST /api/v1/workspaces/{id}/ai/chat` — 공통 요청을 provider adapter로 위임
 
-키 원문은 API 응답이나 로그로 반환하지 않고 `APP_SECRET_KEY`로 암호화해 저장합니다.
+새 키 원문은 Supabase Vault에 저장하고 `provider_credentials`에는 Vault secret UUID만
+기록합니다. 키 원문은 API 응답이나 로그로 반환하지 않습니다. `APP_SECRET_KEY`는
+Vault 도입 전에 암호화해 저장한 credential을 읽는 호환 경로에서 사용합니다.
 provider 호출은 공통 adapter 계약으로 정규화하되 provider 고유 옵션과 응답 메타데이터는
 확장 필드에 보존합니다. 새 provider는 registry에 adapter를 등록해야만 API 목록에 노출됩니다.
 
@@ -96,8 +109,8 @@ provider 호출은 공통 adapter 계약으로 정규화하되 provider 고유 �
 - LLM 호출은 `context_engine` 모듈의 provider port 뒤로 격리합니다.
 - 라우터는 입력 검증과 HTTP 변환만 맡고 비즈니스 흐름은 application service가 담당합니다.
 - API 계약의 단일 기준은 FastAPI 라우터와 Pydantic 모델이며 OpenAPI 문서는 자동 생성합니다.
-- 프론트는 FastAPI의 `/openapi.json`에서 TypeScript 타입과 API 클라이언트를 생성하고, mock/real API를 환경변수로 전환합니다.
-- API key는 원문을 다시 노출하지 않으며 실제 구현 시 KMS/Vault envelope encryption을 사용합니다.
+- 프론트는 `frontend/src/lib/api/`의 타입과 클라이언트를 사용하고, mock/real API를 환경변수로 전환합니다.
+- Provider API key는 Supabase Vault에 보관하고 원문을 API 응답으로 다시 노출하지 않습니다.
 
 상세 내용은 [docs/architecture.md](docs/architecture.md)를 참고하세요.
 
@@ -108,18 +121,11 @@ OpenAPI 파일을 수동으로 중복 관리하지 않습니다. FastAPI가 라�
 ```text
 FastAPI router + Pydantic model
                 ↓
-          /openapi.json
-                ↓
-Frontend TypeScript type / API client
+          /openapi.json (개발 환경)
 ```
 
-백엔드를 실행한 뒤 프론트 타입을 생성하는 예시는 다음과 같습니다. 실제 도입 시 아래 명령을 `frontend/package.json`의 `generate:api` 스크립트로 고정합니다.
-
-```bash
-cd frontend
-pnpm exec openapi-typescript \
-  http://localhost:8000/openapi.json \
-  -o src/lib/api/schema.d.ts
-```
-
-API 변경 시에는 FastAPI 라우터/Pydantic 모델을 먼저 수정하고 타입을 다시 생성합니다. `contracts/`에는 OpenAPI 사본이 아니라 Ontology와 AI structured output처럼 HTTP 스키마만으로 충분히 표현되지 않는 도메인 계약을 둡니다.
+개발 환경에서 백엔드를 실행하면 `/openapi.json`과 `/docs`에서 현재 API를 확인할 수
+있습니다. 운영 환경에서는 두 경로가 비활성화됩니다. 현재 프론트 API 타입과 클라이언트는
+`frontend/src/lib/api/`에 있으며 자동 생성 스크립트는 없습니다. API 변경 시에는
+FastAPI 라우터/Pydantic 모델과 프론트 클라이언트를 함께 맞춥니다.
+`contracts/openapi.yaml`은 저장소에 남아 있는 수동 명세이며 현행 API의 기준은 아닙니다.

@@ -1,0 +1,30 @@
+{
+  "scenario": "redis-adoption",
+  "question": "Redis를 왜 도입했나요?",
+  "sources": [
+    {
+      "id": "plan-0901",
+      "kind": "document",
+      "title": "API 성능 개선 기획서",
+      "file": "plan-0901.md"
+    },
+    {
+      "id": "meeting-0905",
+      "kind": "meeting",
+      "title": "성능 회의",
+      "file": "meeting-0905.txt"
+    },
+    {
+      "id": "poc-0908",
+      "kind": "document",
+      "title": "Redis 캐시 PoC 결과",
+      "file": "poc-0908.md"
+    },
+    {
+      "id": "meeting-0912",
+      "kind": "meeting",
+      "title": "아키텍처 회의",
+      "file": "meeting-0912.txt"
+    }
+  ]
+}

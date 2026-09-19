@@ -23,6 +23,7 @@ from app.modules.context_engine.application.model_roles import (
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
+from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.workspaces.infrastructure.models import Workspace
 
 router = APIRouter()
@@ -66,8 +67,9 @@ def _response(
             RoleModelsResponse(
                 role=role.value,
                 options=options[role],
-                # A choice the key no longer offers is shown as unset rather than as a dead option.
-                selected=chosen if chosen in options[role] else None,
+                # The stored choice remains visible even when browsing another provider or
+                # when a key no longer offers it. In particular, never hide a locked embedding.
+                selected=chosen,
                 locked=role in locked,
             )
         )
@@ -102,10 +104,12 @@ async def list_key_models(body: KeyModelsRequest, _user: CurrentUser) -> Workspa
 
 @router.get("/workspaces/{workspace_id}/ai/models", response_model=WorkspaceModelsResponse)
 async def get_workspace_models(
-    workspace_id: UUID, user: CurrentUser, session: Session
+    workspace_id: UUID, user: CurrentUser, session: Session, provider: str | None = None
 ) -> WorkspaceModelsResponse:
     workspace = await _owned_workspace(workspace_id, user, session)
-    options = await options_for_workspace(session, workspace.id, user.id)
+    if provider is not None and provider_registry.get(provider) is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown provider")
+    options = await options_for_workspace(session, workspace.id, user.id, provider)
     return _response(options, workspace.model_settings, await _locked_roles(session, workspace))
 
 
