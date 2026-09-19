@@ -21,8 +21,19 @@ WORKSPACE = uuid4()
 SOURCE = uuid4()
 
 
-def entity(name: str, kind: EntityKind, aliases: list[str] | None = None) -> ExtractedEntity:
-    return ExtractedEntity(name=name, kind=kind, aliases=aliases or [], source_refs=["근거"])
+def entity(
+    name: str,
+    kind: EntityKind,
+    aliases: list[str] | None = None,
+    identifiers: list[str] | None = None,
+) -> ExtractedEntity:
+    return ExtractedEntity(
+        name=name,
+        kind=kind,
+        aliases=aliases or [],
+        identifiers=identifiers or [],
+        source_refs=["근거"],
+    )
 
 
 def relation(source: str, target: str, kind: RelationKind) -> ExtractedRelation:
@@ -254,3 +265,155 @@ async def test_writer_rejects_relation_kinds_outside_the_ontology() -> None:
 
     with pytest.raises(ValueError):
         await writer(FakeStore()).write(graph)
+
+
+A = "a@example.com"
+B = "b@example.com"
+
+
+def people(*items: ExtractedEntity):  # type: ignore[no-untyped-def]
+    return resolve(extraction(list(items)))
+
+
+def test_same_name_with_different_emails_are_different_people() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+        entity("김민수", EntityKind.PERSON, identifiers=[B]),
+    )
+
+    assert len(graph.entities) == 2
+    assert len({item.id for item in graph.entities}) == 2  # homonyms never share a node id
+    assert {tuple(item.identifiers) for item in graph.entities} == {(A,), (B,)}
+
+
+def test_same_email_merges_even_when_the_names_differ() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+        entity("Minsu Kim", EntityKind.PERSON, identifiers=["A@Example.com "]),
+    )
+
+    assert len(graph.entities) == 1
+    assert graph.entities[0].identifiers == [A]
+    assert {graph.entities[0].name, *graph.entities[0].aliases} == {"김민수", "Minsu Kim"}
+
+
+def test_email_formats_are_normalized() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON, identifiers=["mailto:A@EXAMPLE.com"]),
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+    )
+
+    assert len(graph.entities) == 1
+
+
+def test_a_mention_without_identifiers_joins_the_identified_person() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+        entity("김민수", EntityKind.PERSON),
+    )
+
+    assert len(graph.entities) == 1
+    assert graph.warnings == []
+
+
+def test_identifiers_arrive_late_and_still_merge_with_the_bare_name() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON),
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+    )
+
+    assert len(graph.entities) == 1
+    assert graph.entities[0].identifiers == [A]
+
+
+def test_ambiguous_bare_mention_stays_separate_and_is_reported() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+        entity("김민수", EntityKind.PERSON, identifiers=[B]),
+        entity("김민수", EntityKind.PERSON),
+    )
+
+    assert len(graph.entities) == 3
+    assert any("합치지 않았습니다" in warning for warning in graph.warnings)
+
+
+def test_relation_to_an_ambiguous_name_is_dropped_not_guessed() -> None:
+    graph = resolve(
+        extraction(
+            [
+                entity("김민수", EntityKind.PERSON, identifiers=[A]),
+                entity("김민수", EntityKind.PERSON, identifiers=[B]),
+                entity("맥락이", EntityKind.PROJECT),
+            ],
+            [relation("김민수", "맥락이", RelationKind.WORKS_ON)],
+        )
+    )
+
+    assert graph.relations == []
+    assert any("관계 끝점을 정할 수 없습니다" in warning for warning in graph.warnings)
+
+
+def existing(node_id: UUID, *, row_id: UUID, identifiers: list[str]) -> dict[str, Any]:
+    return {
+        "row_id": str(row_id),
+        "id": str(node_id),
+        "name": "김민수",
+        "aliases": [],
+        "keys": ["김민수"],
+        "identifiers": identifiers,
+        "source_ids": [str(uuid4())],
+    }
+
+
+async def test_writer_does_not_merge_into_a_same_name_node_with_another_email() -> None:
+    graph = people(entity("김민수", EntityKind.PERSON, identifiers=[B]))
+    person = graph.entities[0]
+    store = FakeStore([existing(uuid4(), row_id=person.id, identifiers=[A])])
+
+    await writer(store).write(graph)
+
+    assert store.calls[1][1]["rows"][0]["id"] == str(person.id)
+
+
+async def test_writer_merges_by_email_across_sources_even_if_the_name_differs() -> None:
+    graph = people(entity("Minsu Kim", EntityKind.PERSON, identifiers=[A]))
+    person = graph.entities[0]
+    node = uuid4()
+    store = FakeStore([existing(node, row_id=person.id, identifiers=[A])])
+
+    await writer(store).write(graph)
+
+    row = store.calls[1][1]["rows"][0]
+    assert row["id"] == str(node)
+    assert row["identifiers"] == [A]
+
+
+async def test_writer_reports_an_ambiguous_bare_name_instead_of_guessing() -> None:
+    graph = people(entity("김민수", EntityKind.PERSON))
+    person = graph.entities[0]
+    store = FakeStore(
+        [
+            existing(uuid4(), row_id=person.id, identifiers=[A]),
+            existing(uuid4(), row_id=person.id, identifiers=[B]),
+        ]
+    )
+
+    warnings = await writer(store).write(graph)
+
+    assert store.calls[1][1]["rows"][0]["id"] == str(person.id)
+    assert len(warnings) == 1
+
+
+async def test_two_different_emails_cannot_both_fold_into_one_bare_existing_node() -> None:
+    graph = people(
+        entity("김민수", EntityKind.PERSON, identifiers=[A]),
+        entity("김민수", EntityKind.PERSON, identifiers=[B]),
+    )
+    node = uuid4()
+    store = FakeStore([existing(node, row_id=item.id, identifiers=[]) for item in graph.entities])
+
+    await writer(store).write(graph)
+
+    ids = [row["id"] for row in store.calls[1][1]["rows"]]
+    assert len(set(ids)) == 2
+    assert str(node) in ids

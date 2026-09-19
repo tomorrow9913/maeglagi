@@ -14,16 +14,20 @@ from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 _FIND_EXISTING = """
 UNWIND $rows AS row
 MATCH (e:Entity {workspace_id: $workspace_id})
-WHERE e.kind = row.kind AND any(key IN row.keys WHERE key IN coalesce(e.keys, []))
+WHERE e.kind = row.kind AND (
+    any(key IN row.keys WHERE key IN coalesce(e.keys, []))
+    OR any(ident IN row.identifiers WHERE ident IN coalesce(e.identifiers, []))
+)
 RETURN row.id AS row_id, e.id AS id, e.name AS name, e.aliases AS aliases,
-       e.keys AS keys, e.source_ids AS source_ids
+       e.keys AS keys, e.identifiers AS identifiers, e.source_ids AS source_ids
 """
 
 _UPSERT_ENTITIES = """
 UNWIND $rows AS row
 MERGE (e:Entity {id: row.id})
 SET e.workspace_id = row.workspace_id, e.kind = row.kind, e.name = row.name,
-    e.aliases = row.aliases, e.keys = row.keys, e.source_ids = row.source_ids,
+    e.aliases = row.aliases, e.keys = row.keys, e.identifiers = row.identifiers,
+    e.source_ids = row.source_ids,
     e.source_id = row.source_id, e.chunk_id = row.chunk_id, e.timestamp = row.timestamp
 """
 
@@ -45,10 +49,11 @@ class GraphWriter:
     def __init__(self, store: Neo4jGraphStore) -> None:
         self.store = store
 
-    async def write(self, graph: ResolvedGraph) -> None:
+    async def write(self, graph: ResolvedGraph) -> list[str]:
+        """Upsert the graph and return warnings about matches it refused to guess."""
         if not graph.entities:
-            return
-        merged, id_map = await self._reconcile(graph.entities)
+            return []
+        merged, id_map, warnings = await self._reconcile(graph.entities)
         await self.store.execute(
             _UPSERT_ENTITIES,
             {"rows": [_entity_row(entity, sources) for entity, sources in merged]},
@@ -58,41 +63,80 @@ class GraphWriter:
                 _UPSERT_RELATIONS.format(kind=kind.value),
                 {"rows": [_relation_row(r) for r in relations]},
             )
+        return warnings
 
     async def _reconcile(
         self, entities: list[GraphEntity]
-    ) -> tuple[list[tuple[GraphEntity, list[str]]], dict[UUID, UUID]]:
-        """Point each entity at an existing node that shares a key, unioning the spellings."""
+    ) -> tuple[list[tuple[GraphEntity, list[str]]], dict[UUID, UUID], list[str]]:
+        """Point each entity at the existing node it is the same as, without guessing.
+
+        Shared identifier -> same node. Shared name only -> same node unless both carry
+        identifiers that differ (homonyms). Several equally plausible same-name nodes and no
+        identifier to tell them apart -> keep separate and warn.
+        """
         workspace_id = entities[0].workspace_id
         records = await self.store.execute(
             _FIND_EXISTING,
             {
                 "workspace_id": str(workspace_id),
-                "rows": [{"id": str(e.id), "kind": e.kind, "keys": e.keys} for e in entities],
+                "rows": [
+                    {"id": str(e.id), "kind": e.kind, "keys": e.keys, "identifiers": e.identifiers}
+                    for e in entities
+                ],
             },
         )
         matches: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for record in records:
             matches[record["row_id"]].append(record)
 
+        warnings: list[str] = []
         merged: dict[UUID, tuple[GraphEntity, set[str]]] = {}
         id_map: dict[UUID, UUID] = {}
         for entity in entities:
+            own = set(entity.identifiers)
             found = matches.get(str(entity.id), [])
-            target_id = UUID(min(record["id"] for record in found)) if found else entity.id
+            strong = [r for r in found if own & set(r.get("identifiers") or [])]
+            weak = [
+                r
+                for r in found
+                if r not in strong
+                and not (own and r.get("identifiers"))  # both identified => homonym
+            ]
+            chosen: list[dict[str, Any]]
+            if strong:
+                chosen = strong
+            elif not own and sum(1 for r in weak if r.get("identifiers")) > 1:
+                warnings.append(
+                    f"이름이 같은 기존 노드가 여러 개라 합치지 않았습니다: {entity.name} "
+                    "(이메일 등 식별 정보가 필요합니다)"
+                )
+                chosen = []
+            else:
+                chosen = weak
+            target_id = UUID(min(r["id"] for r in chosen)) if chosen else entity.id
+            claimed = merged.get(target_id)
+            if claimed is not None and target_id != entity.id:
+                # Another extracted entity already took this node; identified people who
+                # disagree must not both fold into it.
+                taken = set(claimed[0].identifiers)
+                if own and taken and own.isdisjoint(taken):
+                    target_id, chosen, claimed = entity.id, [], merged.get(entity.id)
             id_map[entity.id] = target_id
             names = [entity.name, *entity.aliases]
             keys = set(entity.keys)
+            identifiers = set(own)
             sources = {str(entity.evidence.source_id)}
-            for record in found:
+            for record in chosen:
                 if UUID(record["id"]) == target_id:
                     names += [record["name"], *(record["aliases"] or [])]
                     keys |= set(record["keys"] or [])
+                    identifiers |= set(record.get("identifiers") or [])
                     sources |= set(record["source_ids"] or [])
-            if target_id in merged:  # two extracted entities collapsed onto one existing node
-                previous, previous_sources = merged[target_id]
+            if claimed is not None:  # two extracted entities collapsed onto one node
+                previous, previous_sources = claimed
                 names += [previous.name, *previous.aliases]
                 keys |= set(previous.keys)
+                identifiers |= set(previous.identifiers)
                 sources |= previous_sources
             name = pick_canonical(names, entity.kind)
             merged[target_id] = (
@@ -102,11 +146,13 @@ class GraphWriter:
                         "name": name,
                         "aliases": [n for n in dict.fromkeys(names) if n != name],
                         "keys": sorted(keys),
+                        "identifiers": sorted(identifiers),
                     }
                 ),
                 sources,
             )
-        return [(entity, sorted(sources)) for entity, sources in merged.values()], id_map
+        merged_list = [(entity, sorted(sources)) for entity, sources in merged.values()]
+        return merged_list, id_map, warnings
 
 
 def _entity_row(entity: GraphEntity, source_ids: list[str]) -> dict[str, Any]:
@@ -117,6 +163,7 @@ def _entity_row(entity: GraphEntity, source_ids: list[str]) -> dict[str, Any]:
         "name": entity.name,
         "aliases": entity.aliases,
         "keys": entity.keys,
+        "identifiers": entity.identifiers,
         "source_ids": source_ids,
         "source_id": str(entity.evidence.source_id),
         "chunk_id": str(entity.evidence.chunk_id) if entity.evidence.chunk_id else None,

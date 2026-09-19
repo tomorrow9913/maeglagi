@@ -28,6 +28,8 @@ class ExtractedEntity(StageOutput):
     name: str
     kind: EntityKind
     aliases: list[str]
+    # Identifying details stated in the source (email, employee id, handle). Empty if none.
+    identifiers: list[str]
     source_refs: list[str]
 
 
