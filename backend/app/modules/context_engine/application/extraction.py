@@ -64,7 +64,7 @@ class ExtractionPipeline:
         self.temperature = temperature
         self.usage: dict[str, int] = {}
 
-    async def _run(
+    async def run_stage(
         self, stage: str, system: str, payload: dict[str, object], output_type: type[Output]
     ) -> Output:
         request = StructuredOutputRequest(
@@ -95,12 +95,12 @@ class ExtractionPipeline:
         warnings: list[str] = []
         source = {"title": title, "text": text}
 
-        classification = await self._run(
+        classification = await self.run_stage(
             "classification", prompts.CLASSIFICATION_PROMPT, source, ClassificationOutput
         )
         classified = classification.model_dump(mode="json")
 
-        entities = await self._run(
+        entities = await self.run_stage(
             "entity",
             prompts.ENTITY_PROMPT,
             {**source, "classification": classified},
@@ -109,7 +109,7 @@ class ExtractionPipeline:
         entity_items = _with_refs(entities.entities, "entity", lambda i: i.name, warnings)
         entity_dump = [item.model_dump(mode="json") for item in entity_items]
 
-        events = await self._run(
+        events = await self.run_stage(
             "event",
             prompts.EVENT_PROMPT,
             {**source, "classification": classified, "entities": entity_dump},
@@ -118,7 +118,7 @@ class ExtractionPipeline:
         event_items = _with_refs(events.events, "event", lambda i: i.name, warnings)
         event_dump = [item.model_dump(mode="json") for item in event_items]
 
-        relations = await self._run(
+        relations = await self.run_stage(
             "relation",
             prompts.RELATION_PROMPT,
             {**source, "entities": entity_dump, "events": event_dump},
@@ -138,7 +138,7 @@ class ExtractionPipeline:
                     f"{relation.source} -{relation.kind.value}-> {relation.target}"
                 )
 
-        contexts = await self._run(
+        contexts = await self.run_stage(
             "context",
             prompts.CONTEXT_PROMPT,
             {
