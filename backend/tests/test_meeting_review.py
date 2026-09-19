@@ -24,6 +24,7 @@ from app.api.workspaces.review import (
 )
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
+from app.core.config import Settings
 from app.core.database import get_session
 from app.main import create_app
 from app.modules.workspaces.infrastructure.models import (
@@ -143,6 +144,86 @@ async def test_meeting_can_confirm_without_a_project(monkeypatch: pytest.MonkeyP
     assert response.status == "queued"
     assert session.source.confirmed_snapshot["projects"] == []
     assert len(calls) == 1
+
+
+async def test_postgres_confirmation_enqueues_before_source_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    session.source.review_utterances = [utterance()]
+    events: list[str] = []
+
+    async def enqueue(db: FakeSession, source: Source, *, supersede_existing: bool) -> None:
+        assert db is session
+        assert source.status == "queued"
+        assert supersede_existing is True
+        assert session.commits == 0
+        events.append("enqueue")
+
+    original_commit = session.commit
+
+    async def commit() -> None:
+        events.append("commit")
+        await original_commit()
+
+    monkeypatch.setattr(session, "commit", commit)
+    monkeypatch.setattr(
+        review_module,
+        "get_settings",
+        lambda: Settings(_env_file=None, processing_executor="postgres", pg_executor_enabled=False),
+    )
+    monkeypatch.setattr(review_module, "enqueue_pg_source", enqueue)
+    monkeypatch.setattr(review_module, "wake_executors", lambda: events.append("wake"))
+    monkeypatch.setattr(
+        review_module.process_source,
+        "apply_async",
+        lambda **kwargs: pytest.fail("Celery must not be selected"),
+    )
+    response = await confirm_review(
+        WORKSPACE,
+        session.source.id,
+        ConfirmRequest(revision=0),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert response.status == "queued"
+    assert events == ["enqueue", "commit", "wake"]
+    # The first HTTP response may be lost; repeating confirmation must report
+    # the persisted job without publishing another one.
+    repeated = await confirm_review(
+        WORKSPACE,
+        session.source.id,
+        ConfirmRequest(revision=0),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert repeated.status == "queued"
+    assert events == ["enqueue", "commit", "wake"]
+
+
+async def test_postgres_draft_save_keeps_analysis_gate_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    monkeypatch.setattr(
+        review_module,
+        "get_settings",
+        lambda: Settings(_env_file=None, processing_executor="postgres"),
+    )
+
+    async def unexpected_enqueue(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("Saving a draft must not enqueue analysis")
+
+    monkeypatch.setattr(review_module, "enqueue_pg_source", unexpected_enqueue)
+    await save_review(
+        WORKSPACE,
+        session.source.id,
+        ReviewPatch(revision=0, utterances=[utterance()]),
+        AuthUser(id=OWNER),
+        session,  # type: ignore[arg-type]
+    )
+    assert session.source.review_state == "awaiting_review"
+    assert session.source.status == "awaiting_review"
 
 
 async def test_review_project_change_invalidates_stale_association_client() -> None:

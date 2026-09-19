@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -67,6 +68,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     celery_broker_url: SecretStr = SecretStr("memory://")
     celery_task_always_eager: bool = False
+    processing_executor: Literal["celery", "postgres"] = "celery"
+    pg_executor_enabled: bool = True
+    pg_executor_poll_seconds: float = Field(default=2.0, ge=0.2, le=60)
+    pg_executor_lease_seconds: int = Field(default=120, ge=60, le=3600)
 
     @property
     def supabase_enabled(self) -> bool:

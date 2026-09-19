@@ -22,6 +22,7 @@ from app.modules.ingestion.application.source_analysis import (
     SourceAnalysisService,
     analyze_source,
 )
+from app.modules.ingestion.infrastructure import source_processor as processor
 from app.modules.ingestion.infrastructure import tasks
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 from tests.seeds import SEEDS
@@ -477,10 +478,10 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> Any:
         async def fake_download(_: Source) -> bytes:
             return download
 
-        monkeypatch.setattr(tasks, "session_factory", lambda: FakeTaskSession(record))
-        monkeypatch.setattr(tasks, "_download_source", fake_download)
-        monkeypatch.setattr(tasks, "IngestionPipeline", StubIngestion)
-        monkeypatch.setattr(tasks, "SourceAnalysisService", RecordingAnalysis)
+        monkeypatch.setattr(processor, "session_factory", lambda: FakeTaskSession(record))
+        monkeypatch.setattr(processor, "_download_source", fake_download)
+        monkeypatch.setattr(processor, "IngestionPipeline", StubIngestion)
+        monkeypatch.setattr(processor, "SourceAnalysisService", RecordingAnalysis)
 
     return install
 
@@ -490,7 +491,7 @@ async def test_a_document_is_analyzed_from_its_parsed_text(wired: Any) -> None:
     record.kind, record.title = "document", "plan.md"
     wired(record, "# 기획서\n담당: 박지훈".encode())
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
 
     (call,) = RecordingAnalysis.calls
     assert call["text"] == "# 기획서\n담당: 박지훈"
@@ -505,7 +506,7 @@ async def test_a_browser_transcript_meeting_is_analyzed_from_its_transcript(wire
     record.review_utterances = [{"id": "1", "speakerName": "지훈", "text": "Redis를 도입합시다."}]
     wired(record)
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
 
     assert [c["text"] for c in RecordingAnalysis.calls] == ["지훈: Redis를 도입합시다."]
     assert record.status == "succeeded"
@@ -520,7 +521,7 @@ async def test_an_analysis_failure_fails_the_job_instead_of_reporting_success(wi
     RecordingAnalysis.error = RuntimeError("Neo4j down")
 
     with pytest.raises(RuntimeError, match="Neo4j down"):
-        await tasks._process_source(record.id)
+        await processor._process_source(record.id)
 
     assert record.status != "succeeded"
 
@@ -532,7 +533,7 @@ async def test_unconfirmed_meeting_never_indexes_or_analyzes(wired: Any) -> None
     record.status = "awaiting_review"
     wired(record)
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
 
     assert RecordingAnalysis.calls == []
     assert record.status == "awaiting_review"
@@ -547,7 +548,7 @@ async def test_server_stt_stops_at_review_and_keeps_live_edits(wired: Any) -> No
     ]
     wired(record, b"audio")
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
 
     assert record.status == record.processing_stage == "awaiting_review"
     assert record.raw_transcript_text == "서버 원문"
@@ -575,9 +576,9 @@ async def test_final_stt_failure_is_retryable_without_downstream_writes(
         yield
 
     monkeypatch.setattr(StubIngestion, "transcribe", fail_transcription)
-    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(processor, "_source_execution_lock", held_lock)
 
-    error = await tasks._run_source_attempt(record.id, final_attempt=True)
+    error = await processor.process_source_attempt(record.id, final_attempt=True)
 
     assert isinstance(error, RuntimeError)
     assert (record.status, record.review_state, record.processing_stage) == (
@@ -598,8 +599,8 @@ async def test_duplicate_confirmed_job_does_not_index_twice(wired: Any) -> None:
     record.review_utterances = [{"id": "1", "speakerName": "민수", "text": "수정본"}]
     wired(record)
 
-    await tasks._process_source(record.id)
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
+    await processor._process_source(record.id)
 
     assert StubIngestion.index_calls == 1
     assert len(RecordingAnalysis.calls) == 1
@@ -614,7 +615,7 @@ async def test_redelivered_processing_job_resumes_after_worker_loss(wired: Any) 
     record.review_utterances = [{"id": "1", "speakerName": "민수", "text": "수정본"}]
     wired(record)
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
 
     assert record.status == "succeeded"
     assert StubIngestion.index_calls == 1
@@ -643,12 +644,12 @@ async def test_concurrent_attempts_wait_then_recheck_succeeded_state(
         await release.wait()
         status = "succeeded"
 
-    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
-    monkeypatch.setattr(tasks, "_process_source", process)
+    monkeypatch.setattr(processor, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(processor, "_process_source", process)
     identifier = uuid4()
-    first = asyncio.create_task(tasks._run_source_attempt(identifier, final_attempt=False))
+    first = asyncio.create_task(processor.process_source_attempt(identifier, final_attempt=False))
     await entered.wait()
-    second = asyncio.create_task(tasks._run_source_attempt(identifier, final_attempt=False))
+    second = asyncio.create_task(processor.process_source_attempt(identifier, final_attempt=False))
     await asyncio.sleep(0)
     assert calls == 1
     release.set()
@@ -685,8 +686,8 @@ async def test_advisory_lock_keeps_a_dedicated_transaction_until_attempt_ends(
         def connect(self) -> Connection:
             return Connection()
 
-    monkeypatch.setattr(tasks, "engine", Engine())
-    async with tasks._source_execution_lock(uuid4()):
+    monkeypatch.setattr(processor, "engine", Engine())
+    async with processor._source_execution_lock(uuid4()):
         assert len(keys) == 2
         assert keys[0] >= 0 and keys[1] < 0
         assert any("SELECT workspace_id" in statement for statement in statements)
@@ -742,14 +743,14 @@ async def test_workspace_lock_survives_checkpoint_commits_and_allows_other_works
         def connect(self) -> Connection:
             return Connection()
 
-    monkeypatch.setattr(tasks, "engine", Engine())
+    monkeypatch.setattr(processor, "engine", Engine())
     first_entered, release_first = asyncio.Event(), asyncio.Event()
     second_entered, other_entered = asyncio.Event(), asyncio.Event()
     checkpoint_commits = 0
 
     async def run(source_id: UUID, entered: asyncio.Event) -> None:
         nonlocal checkpoint_commits
-        async with tasks._source_execution_lock(source_id):
+        async with processor._source_execution_lock(source_id):
             entered.set()
             checkpoint_commits += 1  # A separate write session commits while the lock stays held.
             if source_id == first_source:
@@ -862,7 +863,7 @@ async def test_task_resumes_committed_analysis_without_reindexing(wired: Any) ->
     record.analysis_checkpoint = {"phase": "done"}
     wired(record)
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
 
     assert record.status == "succeeded"
     assert StubIngestion.index_calls == 0
@@ -889,13 +890,13 @@ async def test_worker_loss_after_analysis_commit_resumes_without_reindexing(
                 raise RuntimeError("worker lost after analysis commit")
             return []
 
-    monkeypatch.setattr(tasks, "SourceAnalysisService", CommitThenDie)
+    monkeypatch.setattr(processor, "SourceAnalysisService", CommitThenDie)
     with pytest.raises(RuntimeError, match="worker lost"):
-        await tasks._process_source(record.id)
+        await processor._process_source(record.id)
     assert record.analysis_checkpoint["phase"] == "done"
     assert StubIngestion.index_calls == 1
 
-    await tasks._process_source(record.id)
+    await processor._process_source(record.id)
     assert record.status == "succeeded"
     assert StubIngestion.index_calls == 1
     assert CommitThenDie.calls == 2
@@ -916,12 +917,12 @@ async def test_database_error_inside_pipeline_is_an_infrastructure_failure(
     async def update(source_id: UUID, **kwargs: Any) -> None:
         updates.append(source_id)
 
-    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
-    monkeypatch.setattr(tasks, "_process_source", fail_query)
-    monkeypatch.setattr(tasks, "_update_source", update)
+    monkeypatch.setattr(processor, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(processor, "_process_source", fail_query)
+    monkeypatch.setattr(processor, "_update_source", update)
 
     with pytest.raises(OperationalError):
-        await tasks._run_source_attempt(SOURCE, final_attempt=True)
+        await processor.process_source_attempt(SOURCE, final_attempt=True)
     assert updates == []
 
 
@@ -938,7 +939,7 @@ def test_infrastructure_retries_do_not_consume_application_attempts(
         calls[-1] = (calls[-1][0], kwargs)
         return RuntimeError("scheduled retry")
 
-    monkeypatch.setattr(tasks, "_run_source_attempt", infrastructure_failure)
+    monkeypatch.setattr(tasks, "process_source_attempt", infrastructure_failure)
     monkeypatch.setattr(tasks.process_source, "retry", retry)
     tasks.process_source.push_request(retries=100)
     try:
@@ -965,7 +966,7 @@ def test_provider_failure_advances_only_application_attempt_counter(
         retries.append(kwargs)
         return RuntimeError("scheduled retry")
 
-    monkeypatch.setattr(tasks, "_run_source_attempt", provider_failure)
+    monkeypatch.setattr(tasks, "process_source_attempt", provider_failure)
     monkeypatch.setattr(tasks.process_source, "retry", retry)
     tasks.process_source.push_request(retries=100)
     try:

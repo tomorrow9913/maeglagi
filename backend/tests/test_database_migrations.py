@@ -16,6 +16,7 @@ def test_all_sqlmodel_tables_are_registered_for_alembic() -> None:
         "project_members",
         "source_projects",
         "source_people",
+        "processing_jobs",
     }
 
 

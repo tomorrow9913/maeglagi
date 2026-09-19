@@ -35,6 +35,31 @@ docker compose --env-file .env.docker run --rm migrate
 
 운영 DB에는 백업과 변경 시간을 확보하세요. `/api/v1/health`는 API 프로세스를 확인하고 `/api/v1/ready`는 pgvector를 포함한 외부 저장소와 선택 graph의 연결 상태를 표시합니다. 컨테이너가 실행 중인 것만으로 Supabase 자격 증명까지 검증되지는 않습니다.
 
+## PostgreSQL 실행기만 사용하는 PoC
+
+먼저 migration을 적용하고 API 환경에 `PROCESSING_EXECUTOR=postgres`를 설정합니다. 기존 Supabase PostgreSQL에 작업을 저장하고 API 프로세스가 실행하므로 Redis 주소와 별도 Celery worker는 필요하지 않습니다. 같은 자료를 서로 다른 실행기로 처리하지 않도록 전환 전 기존 작업을 정리하고 worker를 중지합니다. 이미 실패한 자료는 화면에서 재시도합니다.
+
+```sh
+# .env.docker: PROCESSING_EXECUTOR=postgres
+# migration은 기존 DB와 새 DB 모두 새 버전 적용 시 필요합니다.
+docker compose --env-file .env.docker run --rm migrate
+docker compose --env-file .env.docker up -d --build api frontend
+```
+
+Render API와 Vercel 프론트를 계속 쓴다면 이 모드에서 별도 Docker 서버를 실행할 필요는 없습니다. 프론트 환경변수는 동일하며, API 실행기 설정은 프론트에 공개하지 않습니다. 무료 API의 수면·재시작과 PoC 이후 Airflow 이전 범위는 [분석 실행기 계획](free-processing-plan.md)에 정리합니다.
+
+### PostgreSQL worker를 API와 분리
+
+API 재시작과 분석 프로세스를 분리하려면 Render API에 `PROCESSING_EXECUTOR=postgres`, `PG_EXECUTOR_ENABLED=false`를 설정하고, Docker 서버의 `.env.docker`에 같은 Supabase DB/Storage/서버 키 및 선택 graph 설정을 넣습니다. API는 작업 등록과 상태 조회만 맡습니다. worker를 먼저 기동하고 연결을 확인한 뒤 API 내 실행기를 끄면 전환 중 처리가 멈추는 시간을 줄일 수 있습니다. 잠깐 겹치는 동안에도 DB 선점과 자료 잠금이 중복 처리를 제어합니다.
+
+```sh
+# Redis 없이 PostgreSQL worker만 실행합니다.
+docker compose --env-file .env.docker up -d --build pg-worker
+docker compose --env-file .env.docker logs -f pg-worker
+```
+
+독립 worker는 `PG_EXECUTOR_ENABLED=false`여도 동작합니다. 이 변수는 API 내 실행 여부만 제어합니다. `pg-worker` 서비스는 실행기를 `postgres`로 고정합니다. API와 worker 모두 멈추더라도 작업은 PostgreSQL에 남아 worker가 다시 시작되면 이어서 처리됩니다. 단, 작업 등록 트랜잭션 자체가 DB 장애로 실패한 경우에는 성공 응답을 보내지 않으므로 화면에서 재시도해야 합니다.
+
 ## Render API + Vercel 프론트 + Docker worker
 
 1. Render API와 Docker worker가 **같은 Redis 인스턴스, DB 번호, 기본 Celery queue**에 접근하도록 구성합니다. Docker 내부 `redis` 호스트 이름은 Render에서 해석되지 않습니다. 양쪽 URL은 서로 달라도 됩니다. 예를 들어 worker는 `redis://:PASSWORD@redis:6379/0`, Render는 `rediss://:PASSWORD@redis.example.com:6380/0?ssl_cert_reqs=required`를 사용할 수 있습니다. 비밀번호의 URL 예약 문자는 인코딩합니다.

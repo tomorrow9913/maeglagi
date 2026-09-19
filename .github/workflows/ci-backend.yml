@@ -20,6 +20,18 @@ jobs:
     name: ruff · pytest
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -42,10 +54,26 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
-      # Settings의 모든 필드에 기본값이 있어 비밀값 없이 실행됩니다.
-      # 외부 서비스에 붙는 테스트를 추가하면 여기에 env를 함께 넣어야 합니다.
+      - name: Prepare disposable pgvector database
+        run: |
+          uv run python - <<'PYTHON'
+          import asyncio
+          import asyncpg
+          async def prepare():
+              connection = await asyncpg.connect("postgresql://postgres@127.0.0.1:5432/postgres")
+              try:
+                  await connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
+              finally:
+                  await connection.close()
+          asyncio.run(prepare())
+          PYTHON
+
+      # 모든 DB 검증은 이 작업에만 존재하는 로컬 서비스에서 수행합니다.
       - name: Test
         # 테스트가 공유하는 앱의 메모리 rate limiter가 전체 suite 요청을 막지 않도록 합니다.
         env:
           RATE_LIMIT: 100000/minute
+          DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/postgres
+          PG_EXECUTOR_TEST_DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/postgres
+          ASK_TEST_DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1:5432/postgres
         run: uv run pytest -q
