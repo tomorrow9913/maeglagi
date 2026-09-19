@@ -142,23 +142,23 @@ class HybridRetriever:
             )
             for index, chunk in enumerate((c for c in ordered if c.source_id in sources), start=1)
         ]
-        if not evidence and self.lexical_search is not None:
+        if self.lexical_search is not None:
             matches = await self.lexical_search(question, None, self.max_evidence)
-            if graph_sources and len(matches) < self.max_evidence:
-                matches += await self.lexical_search(
-                    question, graph_sources, self.max_evidence - len(matches)
-                )
-            seen: set[tuple[UUID, UUID | None]] = set()
+            if graph_sources:
+                matches += await self.lexical_search(question, graph_sources, self.max_evidence)
+            vector_keys = {(item.source.source_id, item.source.chunk_id) for item in evidence}
+            seen: set[tuple[UUID, UUID | None]] = set(vector_keys)
+            lexical: list[Evidence] = []
             for match in matches:
                 key = (match.source_id, match.chunk_id)
                 if key in seen or not match.text.strip():
                     continue
                 seen.add(key)
                 text = match.text.strip()[:MAX_TEXT]
-                evidence.append(
+                lexical.append(
                     Evidence(
                         source=AnswerSource(
-                            index=len(evidence) + 1,
+                            index=0,
                             source_id=match.source_id,
                             chunk_id=match.chunk_id,
                             kind=match.kind,
@@ -169,8 +169,13 @@ class HybridRetriever:
                         text=text,
                     )
                 )
-                if len(evidence) >= self.max_evidence:
-                    break
+            # Parsed source text has no embedding, so reserve room for up to two lexical
+            # citations before filling the rest with vector hits and other lexical matches.
+            lexical.sort(key=lambda item: item.source.chunk_id is not None)
+            leading = lexical[: min(2, self.max_evidence)]
+            evidence = (leading + evidence + lexical[len(leading) :])[: self.max_evidence]
+            for index, item in enumerate(evidence, start=1):
+                item.source.index = index
         return RetrievalResult(evidence=evidence, facts=facts, entities=entity_names)
 
     async def _graph_sources(

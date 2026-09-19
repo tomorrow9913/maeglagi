@@ -42,6 +42,39 @@ def test_korean_pairs_and_mixed_language_terms() -> None:
     assert "결정" in query_terms("최근 어떤 결정이 바뀌었어?")
     assert "redis" in query_terms("Redis를 왜 도입했나요?")
     assert query_terms("? !") == []
+    terms = query_terms("마에글라기에서는 Redis를 왜 도입했나요?")
+    assert terms[:3] == ["마에글라기에서는", "redis", "도입했나요"]
+    assert len(terms) == 8
+
+
+async def test_parsed_source_is_retained_when_eight_chunks_match() -> None:
+    owner, workspace, source = (uuid4() for _ in range(3))
+    chunks = [
+        (uuid4(), uuid4(), "document", "오래된 문서", "Redis 이전 결정", None) for _ in range(8)
+    ]
+    session = Session(chunks, [(source, "meeting", "새 회의", "Redis 도입")])
+
+    matches = await search_lexically(  # type: ignore[arg-type]
+        session, workspace_id=workspace, owner_id=owner, question="Redis", limit=8
+    )
+
+    assert len(matches) == 8
+    assert sum(match.chunk_id is not None for match in matches) == 7
+    assert matches[-1].source_id == source and matches[-1].chunk_id is None
+
+
+async def test_source_only_matches_fill_the_result_window_without_chunks() -> None:
+    owner, workspace = uuid4(), uuid4()
+    sources = [(uuid4(), "document", f"문서 {index}", "Redis 결정") for index in range(8)]
+    session = Session([], sources)
+
+    matches = await search_lexically(  # type: ignore[arg-type]
+        session, workspace_id=workspace, owner_id=owner, question="Redis", limit=8
+    )
+
+    assert len(matches) == 8
+    assert [match.source_id for match in matches] == [source[0] for source in sources]
+    assert all(match.chunk_id is None for match in matches)
 
 
 async def test_null_embedding_chunk_is_returned_from_bounded_eligible_query() -> None:

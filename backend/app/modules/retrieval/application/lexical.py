@@ -30,13 +30,19 @@ class LexicalMatch:
 
 def query_terms(question: str) -> list[str]:
     """Use words and Hangul pairs so inflected Korean questions still find their stems."""
+    words = [
+        word
+        for word in re.findall(r"[a-z0-9]+|[가-힣]+", question.lower())
+        if len(word) >= 2 and word not in STOP_WORDS
+    ]
     terms: list[str] = []
-    for word in re.findall(r"[a-z0-9]+|[가-힣]+", question.lower()):
-        if len(word) < 2 or word in STOP_WORDS:
-            continue
-        candidates = [word]
-        if re.fullmatch(r"[가-힣]+", word) and len(word) > 2:
-            candidates.extend(word[i : i + 2] for i in range(len(word) - 1))
+    pairs = (
+        word[i : i + 2]
+        for word in words
+        if re.fullmatch(r"[가-힣]+", word) and len(word) > 2
+        for i in range(len(word) - 1)
+    )
+    for candidates in (words, pairs):
         for term in candidates:
             if term not in terms:
                 terms.append(term)
@@ -103,9 +109,6 @@ async def search_lexically(
         LexicalMatch(source_id, chunk_id, kind, title, text, timestamp)
         for chunk_id, source_id, kind, title, text, timestamp in rows
     ]
-    if len(matches) >= limit:
-        return matches
-
     # Parsed documents and confirmed meetings remain usable even when indexing failed.
     content = case((Source.kind == "meeting", Source.transcript_text), else_=Source.content_text)
     source_ready = or_(
@@ -155,13 +158,14 @@ async def search_lexically(
             predicate,
         )
         .order_by(rank.desc(), Source.created_at.desc(), Source.id)
-        .limit(limit - len(matches))
+        .limit(max(limit - len(matches), min(limit, 2)))
     )
     represented = {match.source_id for match in matches}
     if represented:
         statement = statement.where(Source.id.not_in(represented))  # type: ignore[attr-defined]
-    matches.extend(
+    source_matches = [
         LexicalMatch(source_id, None, kind, title, text)
         for source_id, kind, title, text in (await session.exec(statement)).all()
-    )
-    return matches
+    ]
+    # Keep room for parsed sources even when indexed chunks fill the result window.
+    return matches[: limit - len(source_matches)] + source_matches

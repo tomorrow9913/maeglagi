@@ -762,6 +762,68 @@ async def test_keyword_fallback_deduplicates_and_bounds_citations() -> None:
     assert len({e.source.chunk_id for e in result.evidence}) == 4
 
 
+async def test_full_vector_results_include_new_parsed_source_text() -> None:
+    old_chunks = [chunk(SOURCE_A, f"오래된 결정 {index}") for index in range(8)]
+    calls: list[tuple[list[UUID] | None, int]] = []
+
+    async def lexical(
+        question: str, source_ids: list[UUID] | None, limit: int
+    ) -> list[LexicalMatch]:
+        calls.append((source_ids, limit))
+        return [LexicalMatch(SOURCE_B.id, None, SOURCE_B.kind, SOURCE_B.title, "Redis 도입")]
+
+    retriever = HybridRetriever(
+        embed=Embedder(),
+        search=Recorder(old_chunks),
+        load_sources=load_sources,
+        lexical_search=lexical,
+    )
+    result = await retriever.retrieve(WORKSPACE, "Redis를 왜 도입했나요?")
+
+    assert calls == [(None, 8)]
+    assert len(result.evidence) == 8
+    assert result.evidence[0].source.source_id == SOURCE_B.id
+    assert result.evidence[0].source.chunk_id is None
+    assert [item.source.index for item in result.evidence] == list(range(1, 9))
+
+
+async def test_mixed_vector_and_lexical_results_deduplicate_and_keep_graph_scope() -> None:
+    old_chunks = [chunk(SOURCE_A, f"오래된 결정 {index}") for index in range(8)]
+    new_chunk = chunk(SOURCE_B, "Redis 채택")
+    calls: list[tuple[list[UUID] | None, int]] = []
+
+    async def lexical(
+        question: str, source_ids: list[UUID] | None, limit: int
+    ) -> list[LexicalMatch]:
+        calls.append((source_ids, limit))
+        return [
+            LexicalMatch(SOURCE_A.id, old_chunks[0].id, SOURCE_A.kind, SOURCE_A.title, "중복"),
+            LexicalMatch(
+                SOURCE_B.id, new_chunk.id, SOURCE_B.kind, SOURCE_B.title, new_chunk.content
+            ),
+            LexicalMatch(SOURCE_B.id, None, SOURCE_B.kind, SOURCE_B.title, "새 회의록"),
+        ]
+
+    retriever = HybridRetriever(
+        embed=Embedder(),
+        search=Recorder(old_chunks),
+        load_sources=load_sources,
+        lexical_search=lexical,
+        graph=FakeGraph(),  # type: ignore[arg-type]
+    )
+    result = await retriever.retrieve(WORKSPACE, "박지훈 Redis 결정은?")
+
+    assert len(calls) == 2 and calls[0] == (None, 8)
+    assert set(calls[1][0] or []) == {SOURCE_A.id, SOURCE_B.id}
+    assert len(result.evidence) == 8
+    assert [(item.source.source_id, item.source.chunk_id) for item in result.evidence[:2]] == [
+        (SOURCE_B.id, None),
+        (SOURCE_B.id, new_chunk.id),
+    ]
+    assert len({(item.source.source_id, item.source.chunk_id) for item in result.evidence}) == 8
+    assert result.evidence[2].text == old_chunks[0].content
+
+
 async def test_vector_evidence_from_unreviewed_source_is_excluded() -> None:
     draft = SOURCE_A.model_copy(update={"status": SourceStatus.AWAITING_REVIEW})
 

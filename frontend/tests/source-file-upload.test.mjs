@@ -28,7 +28,15 @@ test("supported audio, empty MIME, and document classification match the backend
     assert.equal(result.file.name, `sample${extension}`);
   }
   assert.equal(classifier.classifySourceFile(file("notes.pdf", "application/pdf")).kind, "document");
-  assert.equal(classifier.classifySourceFile(file("movie.mp4", "video/mp4")).kind, "unsupported");
+  for (const [name, mime] of [["recording.mp4", "video/mp4"], ["recording.webm", "video/webm"]]) {
+    const result = classifier.classifySourceFile(file(name, mime));
+    assert.equal(result.kind, "audio");
+    assert.equal(result.file.type, mime);
+  }
+  assert.equal(classifier.classifySourceFile(file("movie.mov", "video/quicktime")).kind, "unsupported");
+  assert.equal(classifier.classifySourceFile(file("wrong.mp4", "video/webm")).kind, "unsupported");
+  assert.equal(classifier.classifySourceFile(file("empty.mp4", "video/mp4", 0)).kind, "unsupported");
+  assert.equal(classifier.classifySourceFile(file("large.webm", "video/webm", classifier.MAX_AUDIO_BYTES + 1)).kind, "unsupported");
   assert.equal(classifier.classifySourceFile(file("wrong.mp3", "audio/wav")).kind, "unsupported");
   assert.equal(classifier.classifySourceFile(file("empty.wav", "audio/wav", 0)).kind, "unsupported");
   assert.equal(classifier.classifySourceFile(file("recording.webm", "audio/mp4")).kind, "audio");
@@ -93,7 +101,7 @@ test("mixed selection sends audio once to recording upload with projects and doc
   const choose = allNodes(tree).find((node) => node.type === "UploadDropzone").props.onFilesSelected;
   const audio = file("meeting.m4a");
   const document = file("notes.txt", "text/plain");
-  choose([audio, document, file("clip.mp4", "video/mp4")]);
+  choose([audio, document, file("clip.mov", "video/quicktime")]);
   choose([audio]);
   await Promise.resolve();
   assert.equal(recordings.length, 1);
