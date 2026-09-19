@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MeetingCapture } from "@/features/source-ingestion/components/meeting-capture";
+import { MeetingReviewDialog } from "@/features/source-ingestion/components/meeting-review-dialog";
 import { SourceList } from "@/features/source-ingestion/components/source-list";
 import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { UploadDropzone } from "@/features/source-ingestion/components/upload-dropzone";
@@ -34,6 +35,8 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
   const workspacePath = useWorkspacePath();
   const [meetingBusy, setMeetingBusy] = useState(false);
+  const [reviewSourceId, setReviewSourceId] = useState<string>();
+  const [restartKey, setRestartKey] = useState(0);
   const searchParams = useSearchParams();
 
   /*
@@ -50,6 +53,10 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
     }
     setViewer({ sourceId, chunkId: searchParams.get("chunk") ?? undefined });
   }, [searchParams]);
+  useEffect(() => {
+    const sourceId = searchParams.get("review");
+    if (sourceId) setReviewSourceId(sourceId);
+  }, [searchParams]);
 
   const closeViewer = useCallback(() => {
     setViewer(undefined);
@@ -63,6 +70,11 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
     isLoading,
     reload,
   } = useAsync((signal) => api.listSources(workspaceId, signal), [workspaceId]);
+  useEffect(() => {
+    if (!sources?.some((source) => source.status === "processing" || source.status === "queued" || source.status === "enqueue_pending")) return;
+    const timer = window.setInterval(reload, 3000);
+    return () => window.clearInterval(timer);
+  }, [sources, reload]);
 
   const onUploaded = useCallback(() => reload(), [reload]);
   const { items, uploadDocuments, uploadRecording, uploadTranscript, dismiss } = useSourceUpload(
@@ -76,6 +88,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
     (job: ProcessingJob) => {
       reload();
 
+      if (job.status === "awaiting_review") { toast.info("회의 대본 검토가 준비됐습니다."); setReviewSourceId(job.sourceId); return; }
       if (job.status === "failed") {
         toast.error("소스 처리에 실패했습니다.");
         return;
@@ -91,7 +104,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
     [reload, router, workspaceId, workspacePath],
   );
 
-  const jobs = useJobPolling(jobIds, onSettled);
+  const jobs = useJobPolling(jobIds, onSettled, restartKey);
 
   return (
     <>
@@ -111,6 +124,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
 
         <TabsContent value="meeting" className="mt-4">
           <MeetingCapture
+            workspaceId={workspaceId}
             onAudio={uploadRecording}
             onTranscript={uploadTranscript}
             onBusyChange={setMeetingBusy}
@@ -118,7 +132,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         </TabsContent>
       </Tabs>
 
-      <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} className="mt-4" />
+      <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} className="mt-4" />
 
       <section className="mt-10">
         <h2 className="mb-3 text-lg font-semibold">올라온 소스</h2>
@@ -128,7 +142,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         ) : error ? (
           <ErrorState error={error} onRetry={reload} />
         ) : sources && sources.length > 0 ? (
-          <SourceList sources={sources} onOpen={(sourceId) => setViewer({ sourceId })} />
+          <SourceList sources={sources} onOpen={(sourceId) => { const source = sources.find((item) => item.id === sourceId); if (source?.status === "awaiting_review" || (source?.kind === "meeting" && source.status === "failed")) setReviewSourceId(sourceId); else setViewer({ sourceId }); }} />
         ) : (
           <EmptyState
             title="아직 올라온 소스가 없습니다"
@@ -142,6 +156,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         highlightChunkId={viewer?.chunkId}
         onClose={closeViewer}
       />
+      <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => { setReviewSourceId(undefined); reload(); if (searchParams.get("review")) router.replace(workspacePath(workspaceId, "sources")); }} onConfirmed={() => { setRestartKey((value) => value + 1); reload(); }} />
     </>
   );
 }

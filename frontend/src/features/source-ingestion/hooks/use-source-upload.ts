@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useApi } from "@/lib/api/context";
-import type { ProcessingJob, TranscriptSourceInput } from "@/lib/api";
+import type { MeetingUtterance, ProcessingJob, TranscriptSourceInput } from "@/lib/api";
 
 import { validateDocuments } from "../lib/validate-file";
 
@@ -106,20 +106,20 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
 
   /** 녹음이 끝나는 즉시 호출됩니다. 사용자가 따로 업로드를 누르지 않습니다. */
   const uploadRecording = useCallback(
-    async (audio: Blob, durationSeconds: number) => {
+    async (audio: Blob, durationSeconds: number, liveDraft?: { utterances: MeetingUtterance[] }, projectId?: string) => {
       if (audio.size === 0) {
         toast.error("녹음된 오디오가 없습니다.");
-        return;
+        throw new Error("녹음된 오디오가 없습니다.");
       }
 
       const item = enqueue(recordingName(), audio.size, durationSeconds);
 
       try {
-        const job = await api.uploadRecording(workspaceId, audio, {
+        const job = await api.uploadRecording(workspaceId, audio, liveDraft, projectId, {
           onProgress: (ratio) => patch(item.id, { progress: ratio }),
         });
         patch(item.id, { status: "uploaded", progress: 1, job });
-        toast.success("녹음을 올렸습니다. 음성 인식을 시작합니다.");
+        toast.success("녹음을 올렸습니다. 음성 인식 후 대본 검토가 필요합니다.");
         onUploaded?.();
         window.dispatchEvent(new Event("maeglagi:sources-changed"));
       } catch (error) {
@@ -128,13 +128,14 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
           errorMessage: error instanceof Error ? error.message : "업로드에 실패했습니다.",
         });
         toast.error("녹음 업로드에 실패했습니다.");
+        throw error;
       }
     },
     [workspaceId, patch, enqueue, onUploaded, api],
   );
 
   const uploadTranscript = useCallback(
-    async (input: TranscriptSourceInput) => {
+    async (input: TranscriptSourceInput, projectId?: string) => {
       if (!input.text.trim()) return false;
       const item = enqueue(
         input.title || "회의 대본",
@@ -142,11 +143,11 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
         input.durationSeconds,
       );
       try {
-        const job = await api.uploadTranscript(workspaceId, input);
+        const job = await api.uploadTranscript(workspaceId, { ...input, projectId: projectId || null });
         patch(item.id, { status: "uploaded", progress: 1, job });
         onUploaded?.();
         window.dispatchEvent(new Event("maeglagi:sources-changed"));
-        toast.success("검토한 대본을 올렸습니다. 분석을 시작합니다.");
+        toast.success("대본 초안을 올렸습니다. 검토 후 확인해 주세요.");
         return true;
       } catch (error) {
         patch(item.id, {

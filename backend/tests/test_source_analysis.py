@@ -1,5 +1,6 @@
 import copy
 import json
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -264,6 +265,16 @@ async def test_analysis_is_skipped_without_a_chat_key() -> None:
     assert "chat" in warnings[0]
 
 
+async def test_analysis_service_skips_unconfirmed_meeting_before_provider_lookup() -> None:
+    meeting = source()
+    meeting.review_state = "awaiting_review"
+    service = SourceAnalysisService(NoChatKey(), Settings(_env_file=None))  # type: ignore[arg-type]
+
+    warnings = await service.run(FakeSession(), source=meeting, text="본문")  # type: ignore[arg-type]
+
+    assert "대본 확인" in warnings[0]
+
+
 async def test_the_service_names_the_store_after_the_workspace_and_releases_its_lock() -> None:
     repository, session = FakeRepository(), FakeSession()
     service = SourceAnalysisService(
@@ -295,6 +306,14 @@ class FakeTaskSession:
     async def get(self, model: Any, identifier: Any) -> Source:
         return self.record
 
+    async def exec(self, statement: Any) -> Any:
+        class Result:
+            def first(self) -> Source:
+                return self_record
+
+        self_record = self.record
+        return Result()
+
     def add(self, obj: Any) -> None:
         pass
 
@@ -303,8 +322,14 @@ class FakeTaskSession:
 
 
 class StubIngestion:
+    index_calls = 0
+
     async def index_source(self, session: Any, **kwargs: Any) -> int:
+        type(self).index_calls += 1
         return 1
+
+    async def transcribe(self, session: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(text="서버 원문", duration_seconds=5, segments=[])
 
 
 class RecordingAnalysis:
@@ -324,6 +349,7 @@ class RecordingAnalysis:
 def wired(monkeypatch: pytest.MonkeyPatch) -> Any:
     RecordingAnalysis.calls = []
     RecordingAnalysis.error = None
+    StubIngestion.index_calls = 0
 
     def install(record: Source, download: bytes = b"") -> None:
         async def fake_download(_: Source) -> bytes:
@@ -353,6 +379,8 @@ async def test_a_document_is_analyzed_from_its_parsed_text(wired: Any) -> None:
 async def test_a_browser_transcript_meeting_is_analyzed_from_its_transcript(wired: Any) -> None:
     record = source()
     record.transcript_source, record.transcript_text = "browser", "지훈: Redis를 도입합시다."
+    record.review_state = "confirmed"
+    record.review_utterances = [{"id": "1", "speakerName": "지훈", "text": "Redis를 도입합시다."}]
     wired(record)
 
     await tasks._process_source(record.id)
@@ -364,6 +392,8 @@ async def test_a_browser_transcript_meeting_is_analyzed_from_its_transcript(wire
 async def test_an_analysis_failure_fails_the_job_instead_of_reporting_success(wired: Any) -> None:
     record = source()
     record.transcript_source, record.transcript_text = "browser", "본문"
+    record.review_state = "confirmed"
+    record.review_utterances = [{"id": "1", "speakerName": "화자 1", "text": "본문"}]
     wired(record)
     RecordingAnalysis.error = RuntimeError("Neo4j down")
 
@@ -371,6 +401,52 @@ async def test_an_analysis_failure_fails_the_job_instead_of_reporting_success(wi
         await tasks._process_source(record.id)
 
     assert record.status != "succeeded"
+
+
+async def test_unconfirmed_meeting_never_indexes_or_analyzes(wired: Any) -> None:
+    record = source()
+    record.transcript_source = "browser"
+    record.review_state = "awaiting_review"
+    record.status = "awaiting_review"
+    wired(record)
+
+    await tasks._process_source(record.id)
+
+    assert RecordingAnalysis.calls == []
+    assert record.status == "awaiting_review"
+
+
+async def test_server_stt_stops_at_review_and_keeps_live_edits(wired: Any) -> None:
+    record = source()
+    record.transcript_source = "server"
+    record.review_state = "transcribing"
+    record.review_utterances = [
+        {"id": "live-1", "speakerName": "지훈", "text": "사람이 수정한 문장"}
+    ]
+    wired(record, b"audio")
+
+    await tasks._process_source(record.id)
+
+    assert record.status == record.processing_stage == "awaiting_review"
+    assert record.raw_transcript_text == "서버 원문"
+    assert record.review_utterances[0]["text"] == "사람이 수정한 문장"
+    assert StubIngestion.index_calls == 0
+    assert RecordingAnalysis.calls == []
+
+
+async def test_duplicate_confirmed_job_does_not_index_twice(wired: Any) -> None:
+    record = source()
+    record.transcript_source = "browser"
+    record.review_state = "confirmed"
+    record.transcript_text = "민수: 수정본"
+    record.review_utterances = [{"id": "1", "speakerName": "민수", "text": "수정본"}]
+    wired(record)
+
+    await tasks._process_source(record.id)
+    await tasks._process_source(record.id)
+
+    assert StubIngestion.index_calls == 1
+    assert len(RecordingAnalysis.calls) == 1
 
 
 async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:

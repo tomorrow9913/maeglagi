@@ -8,6 +8,7 @@ import { useAsync } from "@/hooks/use-async";
 import { useApi, useWorkspacePath } from "@/lib/api/context";
 import { SourceViewer } from "./source-viewer";
 import { SourceUploadDialog } from "./source-upload-dialog";
+import { MeetingReviewDialog } from "./meeting-review-dialog";
 
 export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
   const api = useApi();
@@ -17,12 +18,18 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
     [workspaceId],
   );
   const [viewer, setViewer] = useState<string>();
+  const [reviewSourceId, setReviewSourceId] = useState<string>();
   const [mode, setMode] = useState<"document" | "meeting" | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
     window.addEventListener("maeglagi:sources-changed", reload);
     return () => window.removeEventListener("maeglagi:sources-changed", reload);
   }, [reload]);
+  useEffect(() => {
+    if (!data?.some((source) => source.status === "processing" || source.status === "queued" || source.status === "enqueue_pending")) return;
+    const timer = window.setInterval(reload, 3000);
+    return () => window.clearInterval(timer);
+  }, [data, reload]);
   useEffect(() => {
     const openUpload = (event: Event) => {
       const detail = (event as CustomEvent<{ workspaceId: string; mode: "document" | "meeting" }>)
@@ -97,7 +104,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             <li key={source.id}>
               <button
                 type="button"
-                onClick={() => setViewer(source.id)}
+                onClick={() => source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed") ? setReviewSourceId(source.id) : setViewer(source.id)}
                 className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <FileText className="mt-0.5 size-3 shrink-0" aria-hidden />
@@ -108,6 +115,8 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
                       ? "분석 완료"
                       : source.status === "failed"
                         ? "처리 실패"
+                        : source.status === "awaiting_review"
+                          ? "대본 검토 필요 · 열기"
                         : "처리 중"}
                   </span>
                 </span>
@@ -118,6 +127,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
       </div>
       <SourceViewer sourceId={viewer} onClose={() => setViewer(undefined)} />
       <SourceUploadDialog workspaceId={workspaceId} mode={mode} onClose={() => setMode(null)} />
+      <MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onConfirmed={() => { reload(); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} />
     </section>
   );
 }

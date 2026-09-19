@@ -111,6 +111,7 @@ export type Source = {
   durationSeconds?: number;
   /** server는 오디오 STT, browser는 브라우저 받아쓰기 원문입니다. */
   transcriptSource?: "server" | "browser";
+  projectId?: string | null;
 };
 
 /** 원문 뷰어가 쓰는 정규화된 본문 */
@@ -134,7 +135,7 @@ export type SourceContent = {
  * 회의 녹음은 `transcribing`을 거치고 문서는 건너뜁니다. 표시 문구는
  * 프론트가 소유하므로 서버는 이 키만 내려줍니다.
  */
-export type ProcessingStage = "uploaded" | "transcribing" | "analyzing" | "graphing" | "completed";
+export type ProcessingStage = "uploaded" | "transcribing" | "awaiting_review" | "confirmed" | "analyzing" | "graphing" | "completed";
 
 /** 업로드 직후의 비동기 처리 상태 */
 export type ProcessingJob = {
@@ -154,6 +155,63 @@ export type TranscriptSourceInput = {
   text: string;
   title?: string;
   durationSeconds?: number;
+  utterances?: MeetingUtterance[];
+  projectId?: string | null;
+};
+
+export type WorkspacePerson = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  aliases: string[];
+  role?: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PersonInput = { name: string; aliases?: string[]; role?: string | null };
+export type WorkspaceProject = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  goal: string | null;
+  description: string | null;
+  ownerPersonId: string | null;
+  startsOn: string | null;
+  endsOn: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type ProjectInput = {
+  name: string;
+  goal?: string | null;
+  description?: string | null;
+  ownerPersonId?: string | null;
+  startsOn?: string | null;
+  endsOn?: string | null;
+};
+export type MeetingUtterance = {
+  id: string;
+  personId?: string | null;
+  speakerName: string;
+  text: string;
+  startSeconds?: number | null;
+  endSeconds?: number | null;
+};
+export type MeetingReview = {
+  sourceId: string;
+  title: string;
+  transcriptSource: "server" | "browser";
+  reviewState: "transcribing" | "awaiting_review" | "confirmed";
+  revision: number;
+  projectId: string | null;
+  utterances: MeetingUtterance[];
+  rawTranscriptText: string | null;
+  rawUtterances: MeetingUtterance[];
+  confirmedAt: string | null;
+  confirmedSnapshot: unknown | null;
 };
 
 /** 맥락 항목이 어떤 소스에서 나왔는지. 카드에서 바로 보여줄 수 있게 함께 내려줍니다. */

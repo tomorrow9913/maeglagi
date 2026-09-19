@@ -177,6 +177,38 @@ def test_artifact_validation_rejects_tampering_and_cross_workspace_references() 
         validate_artifact(resign(changed), owner_id=owner)
 
 
+def test_snapshot_accepts_directory_rows_and_checks_source_project_reference() -> None:
+    snapshot, owner = artifact()
+    workspace = snapshot["payload"]["workspace"]["id"]
+    person, project = str(uuid4()), str(uuid4())
+    snapshot["payload"]["people"] = [
+        {
+            "id": person,
+            "workspace_id": workspace,
+            "owner_id": str(owner),
+            "name": "민수",
+            "role": "개발자",
+        }
+    ]
+    snapshot["payload"]["projects"] = [
+        {
+            "id": project,
+            "workspace_id": workspace,
+            "owner_id": str(owner),
+            "name": "맥락이",
+            "owner_person_id": person,
+        }
+    ]
+    snapshot["payload"]["sources"][0]["project_id"] = project
+
+    assert validate_artifact(resign(snapshot), owner_id=owner)["projects"][0]["id"] == project
+    assert validate_artifact(snapshot, owner_id=owner)["people"][0]["role"] == "개발자"
+
+    snapshot["payload"]["sources"][0]["project_id"] = str(uuid4())
+    with pytest.raises(SnapshotError, match="Orphan source project"):
+        validate_artifact(resign(snapshot), owner_id=owner)
+
+
 @pytest.mark.parametrize("collection", ("open_issues", "decisions", "next_actions"))
 def test_context_store_nested_source_must_exist_or_be_null(collection: str) -> None:
     snapshot, owner = artifact()

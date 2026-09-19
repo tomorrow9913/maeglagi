@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -35,6 +35,57 @@ class Workspace(SQLModel, table=True):
     )
 
 
+class WorkspacePerson(SQLModel, table=True):
+    __tablename__ = "workspace_people"
+    __table_args__ = (Index("workspace_people_workspace_id_idx", "workspace_id"),)
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    owner_id: UUID
+    name: str = Field(max_length=120)
+    role: str | None = Field(default=None, max_length=120)
+    aliases: list[str] = Field(default_factory=list, sa_column=Column(JSONB, nullable=False))
+    archived_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class WorkspaceProject(SQLModel, table=True):
+    __tablename__ = "workspace_projects"
+    __table_args__ = (Index("workspace_projects_workspace_id_idx", "workspace_id"),)
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    owner_id: UUID
+    name: str = Field(max_length=120)
+    goal: str | None = Field(default=None, sa_column=Column(Text))
+    description: str | None = Field(default=None, sa_column=Column(Text))
+    owner_person_id: UUID | None = Field(
+        default=None, sa_column=Column(ForeignKey("workspace_people.id", ondelete="SET NULL"))
+    )
+    starts_on: date | None = None
+    ends_on: date | None = None
+    archived_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
 class Source(SQLModel, table=True):
     __tablename__ = "sources"
     __table_args__ = (
@@ -64,6 +115,22 @@ class Source(SQLModel, table=True):
     transcript_source: str | None = Field(default=None, max_length=20)
     duration_seconds: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     transcript_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    raw_transcript_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    raw_utterances: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
+    )
+    review_utterances: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSONB, nullable=False, default=list)
+    )
+    review_state: str | None = Field(default=None, max_length=24)
+    review_revision: int = Field(default=0)
+    project_id: UUID | None = Field(
+        default=None, sa_column=Column(ForeignKey("workspace_projects.id", ondelete="SET NULL"))
+    )
+    confirmed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    confirmed_snapshot: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
     content_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     status: str = Field(default="queued", max_length=20)
     processing_stage: str = Field(default="uploaded", max_length=20)

@@ -162,10 +162,20 @@ class ExtractionPipeline:
         *,
         title: str | None = None,
         known_decisions: list[str] | None = None,
+        directory_context: dict[str, object] | None = None,
     ) -> ExtractionResult:
         self.usage = {}
         warnings: list[str] = []
         source = {"title": title, "text": text}
+        if directory_context:
+            source["directory_hint"] = {
+                "note": (
+                    "Workspace directory metadata is for identity disambiguation only. "
+                    "It is not source evidence that a person attended or a fact occurred; "
+                    "extract only facts supported by quoted source text."
+                ),
+                **directory_context,
+            }
 
         classification = await self.run_stage(
             "classification", prompts.CLASSIFICATION_PROMPT, source, ClassificationOutput

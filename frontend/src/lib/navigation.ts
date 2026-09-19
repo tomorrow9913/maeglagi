@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { FileText, MessageCircleQuestion, Network, Settings, Waypoints } from "lucide-react";
+import { FileText, MessageCircleQuestion, Network, Settings, Waypoints, UsersRound } from "lucide-react";
 
 export type WorkspaceNavItem = {
   /** `/workspaces/[workspaceId]` 아래의 상대 경로 */
@@ -21,6 +21,12 @@ export const workspaceNavItems: WorkspaceNavItem[] = [
     label: "소스",
     description: "회의 녹음과 문서를 올리고 처리 상태를 확인합니다.",
     icon: FileText,
+  },
+  {
+    segment: "directory",
+    label: "참여자·프로젝트",
+    description: "참여자와 프로젝트를 관리합니다.",
+    icon: UsersRound,
   },
   {
     segment: "timeline",

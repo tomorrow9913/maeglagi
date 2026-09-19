@@ -4,6 +4,7 @@ from uuid import UUID
 
 import httpx
 from celery import Task
+from sqlmodel import select
 
 from app.core.celery import celery_app
 from app.core.config import get_settings
@@ -43,8 +44,10 @@ async def _update_source(
         source = await session.get(Source, source_id)
         if source is None:
             return
+        if source.status == "succeeded" or source.review_state == "awaiting_review":
+            return
         source.status = status
-        source.processing_stage = stage
+        source.processing_stage = "confirmed" if source.review_state == "confirmed" else stage
         source.progress = progress
         source.error_message = error_message
         session.add(source)
@@ -53,9 +56,14 @@ async def _update_source(
 
 async def _process_source(source_id: UUID) -> None:
     async with session_factory() as session:
-        source = await session.get(Source, source_id)
+        result = await session.exec(select(Source).where(Source.id == source_id).with_for_update())
+        source = result.first()
         if source is None:
             raise ValueError(f"Source not found: {source_id}")
+        if source.status in {"succeeded", "processing", "awaiting_review"}:
+            return
+        if source.kind == "meeting" and source.review_state not in {"transcribing", "confirmed"}:
+            return
         source.status = "processing"
         source.error_message = None
         pipeline = IngestionPipeline()
@@ -77,7 +85,7 @@ async def _process_source(source_id: UUID) -> None:
                 source=source,
                 segments=[DocumentSection(text=parsed_text)],
             )
-        elif source.transcript_source == "server":
+        elif source.review_state == "transcribing":
             source.processing_stage = "transcribing"
             source.progress = 0.2
             await session.commit()
@@ -89,42 +97,58 @@ async def _process_source(source_id: UUID) -> None:
                 filename=source.title,
                 content_type=source.content_type,
             )
-            source.transcript_text = transcription.text
-            graph_text = transcription.text
+            source.raw_transcript_text = transcription.text
             source.duration_seconds = transcription.duration_seconds
-            source.processing_stage = "analyzing"
-            source.progress = 0.5
-            segments = [
-                TranscriptSegment(
-                    text=item.text,
-                    start_seconds=item.start_seconds,
-                    end_seconds=item.end_seconds,
-                    speaker=item.speaker,
-                )
-                for item in transcription.segments
+            source.raw_utterances = [
+                {
+                    "id": f"server-{index}",
+                    "personId": None,
+                    "speakerName": item.speaker or "화자 1",
+                    "text": item.text,
+                    "startSeconds": item.start_seconds,
+                    "endSeconds": item.end_seconds,
+                }
+                for index, item in enumerate(transcription.segments)
             ] or [
-                TranscriptSegment(
-                    text=transcription.text,
-                    start_seconds=0,
-                    end_seconds=transcription.duration_seconds or 0,
-                )
+                {
+                    "id": "server-0",
+                    "personId": None,
+                    "speakerName": "화자 1",
+                    "text": transcription.text,
+                    "startSeconds": 0,
+                    "endSeconds": transcription.duration_seconds or 0,
+                }
             ]
-            await pipeline.index_source(session, source=source, segments=segments)
+            if not source.review_utterances:
+                source.review_utterances = list(source.raw_utterances)
+            source.review_state = "awaiting_review"
+            source.status = "awaiting_review"
+            source.processing_stage = "awaiting_review"
+            source.progress = 0.45
+            session.add(source)
+            await session.commit()
+            return
         else:
             graph_text = source.transcript_text or ""
+            if source.review_state != "confirmed":
+                return
             source.processing_stage = "analyzing"
             source.progress = 0.5
             await session.commit()
+            segments = [
+                TranscriptSegment(
+                    text=str(item["text"]),
+                    speaker=str(item["speakerName"]),
+                    start_seconds=item.get("startSeconds") or 0,
+                    end_seconds=item.get("endSeconds") or item.get("startSeconds") or 0,
+                )
+                for item in source.review_utterances
+                if item.get("text", "").strip()
+            ]
             await pipeline.index_source(
                 session,
                 source=source,
-                segments=[
-                    TranscriptSegment(
-                        text=source.transcript_text or "",
-                        start_seconds=0,
-                        end_seconds=source.duration_seconds or 0,
-                    )
-                ],
+                segments=segments,
             )
 
         source.processing_stage = "graphing"

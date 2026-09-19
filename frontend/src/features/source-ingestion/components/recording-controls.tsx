@@ -14,6 +14,7 @@ export type RecordingControlsProps = {
   errorMessage?: string;
   onStart: () => void;
   onStop: () => void;
+  disableStart?: boolean;
 };
 
 function formatElapsed(totalSeconds: number): string {
@@ -43,6 +44,7 @@ export function RecordingControls({
   errorMessage,
   onStart,
   onStop,
+  disableStart = false,
 }: RecordingControlsProps) {
   const isRecording = status === "recording";
   const isBusy = status === "requesting" || status === "stopping";
@@ -79,7 +81,7 @@ export function RecordingControls({
           <Button
             type="button"
             size="sm"
-            disabled={isBusy || status === "unsupported"}
+            disabled={isBusy || disableStart || status === "unsupported"}
             onClick={onStart}
           >
             <Mic className="size-4" aria-hidden />

@@ -10,6 +10,9 @@ import type {
   ModelRole,
   ModelSelections,
   ProcessingJob,
+  MeetingReview,
+  WorkspacePerson,
+  WorkspaceProject,
   Source,
   SourceContent,
   Workspace,
@@ -63,6 +66,9 @@ const state = {
   sources: seedSources.map((source) => ({ ...source })),
   transcripts: new Map<string, SourceContent>(),
   jobs: new Map<string, ProcessingJob & { startedAt: number }>(),
+  people: [] as WorkspacePerson[],
+  projects: [] as WorkspaceProject[],
+  reviews: new Map<string, MeetingReview>(),
   /** 키 원문은 저장하지 않고, 서버가 내려줄 힌트만 흉내 냅니다. */
   secrets: new Map<string, WorkspaceSecrets[]>([
     [
@@ -188,8 +194,27 @@ const nextId = (prefix: string) => `${prefix}-${++sequence}`;
 
 /** 경과 시간으로 진행률과 단계를 계산합니다. */
 function advanceJob(job: ProcessingJob & { startedAt: number }): ProcessingJob {
-  const stages =
-    job.transcriptSource === "browser"
+  if (job.status === "awaiting_review") {
+    const { startedAt: _startedAt, ...rest } = job;
+    return { ...rest };
+  }
+  const review = state.reviews.get(job.sourceId);
+  if (review?.reviewState === "transcribing" && Date.now() - job.startedAt >= JOB_DURATION_MS / 2) {
+    review.reviewState = "awaiting_review";
+    review.rawTranscriptText = "화자 1: 회의 녹음의 서버 음성 인식 초안입니다. 내용을 확인해 주세요.";
+    review.rawUtterances = [{ id: nextId("utterance"), personId: null, speakerName: "화자 1", text: "회의 녹음의 서버 음성 인식 초안입니다. 내용을 확인해 주세요.", startSeconds: 0 }];
+    if (!review.utterances.length) review.utterances = structuredClone(review.rawUtterances);
+    job.status = "awaiting_review";
+    job.stage = "awaiting_review";
+    job.progress = 0.5;
+    const source = state.sources.find((item) => item.id === job.sourceId);
+    if (source) source.status = "awaiting_review";
+    const { startedAt: _startedAt, ...rest } = job;
+    return { ...rest };
+  }
+  const stages = review?.reviewState === "confirmed"
+    ? (["analyzing", "graphing", "completed"] as const)
+    : job.transcriptSource === "browser"
       ? (["uploaded", "analyzing", "graphing", "completed"] as const)
       : stageSequence[job.sourceKind];
   const elapsed = Date.now() - job.startedAt;
@@ -229,7 +254,7 @@ function registerUpload(workspaceId: string, source: Source): ProcessingJob {
   if (workspace) workspace.sourceCount += 1;
 
   const job: ProcessingJob & { startedAt: number } = {
-    id: nextId("job"),
+    id: source.id,
     sourceId: source.id,
     sourceKind: source.kind,
     transcriptSource: source.transcriptSource,
@@ -416,6 +441,57 @@ export const mockApi: MaeglagiApi = {
     return saved;
   },
 
+  async listPeople(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return state.people.filter((item) => item.workspaceId === workspaceId).map((item) => structuredClone(item));
+  },
+  async createPerson(workspaceId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    if (!input.name.trim()) throw new ApiError(422, "이름을 입력해 주세요.");
+    const now = new Date().toISOString();
+    const item: WorkspacePerson = { id: nextId("person"), workspaceId, name: input.name.trim(), aliases: input.aliases ?? [], role: input.role ?? null, archivedAt: null, createdAt: now, updatedAt: now };
+    state.people.push(item);
+    return structuredClone(item);
+  },
+  async updatePerson(workspaceId, personId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const item = state.people.find((person) => person.workspaceId === workspaceId && person.id === personId);
+    if (!item) throw new ApiError(404, "참여자를 찾을 수 없습니다.");
+    if (input.name !== undefined) item.name = input.name.trim();
+    if (input.aliases !== undefined) item.aliases = input.aliases;
+    if (input.role !== undefined) item.role = input.role;
+    if (input.archived !== undefined) item.archivedAt = input.archived ? new Date().toISOString() : null;
+    item.updatedAt = new Date().toISOString();
+    return structuredClone(item);
+  },
+  async listProjects(workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return state.projects.filter((item) => item.workspaceId === workspaceId).map((item) => structuredClone(item));
+  },
+  async createProject(workspaceId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    if (!input.name.trim()) throw new ApiError(422, "프로젝트 이름을 입력해 주세요.");
+    if (input.endsOn && input.startsOn && input.endsOn < input.startsOn) throw new ApiError(422, "종료일은 시작일보다 빠를 수 없습니다.");
+    if (input.ownerPersonId && !state.people.some((item) => item.id === input.ownerPersonId && item.workspaceId === workspaceId && !item.archivedAt)) throw new ApiError(422, "활성 참여자를 담당자로 선택해 주세요.");
+    const now = new Date().toISOString();
+    const item: WorkspaceProject = { id: nextId("project"), workspaceId, name: input.name.trim(), goal: input.goal ?? null, description: input.description ?? null, ownerPersonId: input.ownerPersonId ?? null, startsOn: input.startsOn ?? null, endsOn: input.endsOn ?? null, archivedAt: null, createdAt: now, updatedAt: now };
+    state.projects.push(item);
+    return structuredClone(item);
+  },
+  async updateProject(workspaceId, projectId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const item = state.projects.find((project) => project.workspaceId === workspaceId && project.id === projectId);
+    if (!item) throw new ApiError(404, "프로젝트를 찾을 수 없습니다.");
+    const start = input.startsOn === undefined ? item.startsOn : input.startsOn;
+    const end = input.endsOn === undefined ? item.endsOn : input.endsOn;
+    if (start && end && end < start) throw new ApiError(422, "종료일은 시작일보다 빠를 수 없습니다.");
+    if (input.ownerPersonId && !state.people.some((person) => person.id === input.ownerPersonId && person.workspaceId === workspaceId && !person.archivedAt)) throw new ApiError(422, "활성 참여자를 담당자로 선택해 주세요.");
+    Object.assign(item, input);
+    if (input.archived !== undefined) item.archivedAt = input.archived ? new Date().toISOString() : null;
+    item.updatedAt = new Date().toISOString();
+    return structuredClone(item);
+  },
+
   async listSources(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     return state.sources
@@ -444,8 +520,9 @@ export const mockApi: MaeglagiApi = {
     });
   },
 
-  async uploadRecording(workspaceId, audio, options) {
+  async uploadRecording(workspaceId, audio, liveDraft, projectId, options) {
     await simulateTransfer(options);
+    if (projectId && !state.projects.some((item) => item.id === projectId && item.workspaceId === workspaceId && !item.archivedAt)) throw new ApiError(422, "활성 프로젝트를 선택해 주세요.");
     const job = registerUpload(workspaceId, {
       id: nextId("src"),
       workspaceId,
@@ -456,33 +533,36 @@ export const mockApi: MaeglagiApi = {
       // Blob에는 길이 정보가 없으므로 대략치로 둡니다. 실제 값은 STT가 채웁니다.
       durationSeconds: Math.round(audio.size / 16_000),
       transcriptSource: "server",
+      projectId: projectId ?? null,
     });
     job.transcriptSource = "server";
+    state.reviews.set(job.sourceId, { sourceId: job.sourceId, title: state.sources.find((item) => item.id === job.sourceId)?.title ?? "회의 녹음", transcriptSource: "server", reviewState: "transcribing", revision: 0, projectId: projectId ?? null, utterances: structuredClone(liveDraft?.utterances ?? []), rawTranscriptText: null, rawUtterances: [], confirmedAt: null, confirmedSnapshot: null });
     return job;
   },
 
   async uploadTranscript(workspaceId, input, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!input.text.trim()) throw new ApiError(422, "대본을 입력해 주세요.");
+    if (input.projectId && !state.projects.some((item) => item.id === input.projectId && item.workspaceId === workspaceId && !item.archivedAt)) throw new ApiError(422, "활성 프로젝트를 선택해 주세요.");
     const job = registerUpload(workspaceId, {
       id: nextId("src"),
       workspaceId,
       kind: "meeting",
       title: input.title?.trim() || `회의 대본 ${new Date().toLocaleString("ko-KR")}`,
-      status: "processing",
+      status: "awaiting_review",
       createdAt: new Date().toISOString(),
       durationSeconds: input.durationSeconds,
       transcriptSource: "browser",
+      projectId: input.projectId ?? null,
     });
-    state.transcripts.set(job.sourceId, {
-      sourceId: job.sourceId,
-      title: input.title?.trim() || "회의 대본",
-      kind: "meeting",
-      chunks: input.text
-        .trim()
-        .split(/\n\n+/)
-        .map((text, index) => ({ id: `${job.sourceId}-chunk-${index}`, text })),
-    });
+    state.reviews.set(job.sourceId, { sourceId: job.sourceId, title: input.title?.trim() || "회의 대본", transcriptSource: "browser", reviewState: "awaiting_review", revision: 0, projectId: input.projectId ?? null, utterances: structuredClone(input.utterances?.length ? input.utterances : [{ id: nextId("utterance"), personId: null, speakerName: "화자 1", text: input.text }]), rawTranscriptText: input.text, rawUtterances: structuredClone(input.utterances ?? []), confirmedAt: null, confirmedSnapshot: null });
+    const storedJob = state.jobs.get(job.id)!;
+    storedJob.status = "awaiting_review";
+    storedJob.stage = "awaiting_review";
+    storedJob.progress = 0.5;
+    job.status = "awaiting_review";
+    job.stage = "awaiting_review";
+    job.progress = 0.5;
     job.transcriptSource = "browser";
     return job;
   },
@@ -491,6 +571,47 @@ export const mockApi: MaeglagiApi = {
     await delay(120, signal);
     const job = state.jobs.get(jobId);
     if (!job) throw new ApiError(404, "처리 작업을 찾을 수 없습니다.");
+    return advanceJob(job);
+  },
+  async getMeetingReview(workspaceId, sourceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const review = state.reviews.get(sourceId);
+    if (!review || !state.sources.some((item) => item.id === sourceId && item.workspaceId === workspaceId)) throw new ApiError(404, "검토 대본을 찾을 수 없습니다.");
+    return structuredClone(review);
+  },
+  async saveMeetingReview(workspaceId, sourceId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const review = state.reviews.get(sourceId);
+    if (!review || !state.sources.some((item) => item.id === sourceId && item.workspaceId === workspaceId)) throw new ApiError(404, "검토 대본을 찾을 수 없습니다.");
+    if (review.reviewState !== "awaiting_review" || review.revision !== input.revision) throw new ApiError(409, "대본이 변경됐습니다. 다시 불러와 주세요.");
+    if (input.projectId && !state.projects.some((item) => item.id === input.projectId && item.workspaceId === workspaceId && !item.archivedAt)) throw new ApiError(422, "활성 프로젝트를 선택해 주세요.");
+    const source = state.sources.find((item) => item.id === sourceId);
+    const ids = input.utterances.map((item) => item.id);
+    if (new Set(ids).size !== ids.length) throw new ApiError(422, "발언 ID가 중복됐습니다.");
+    if (input.utterances.some((item) => item.personId && !state.people.some((person) => person.id === item.personId && person.workspaceId === source?.workspaceId && !person.archivedAt))) throw new ApiError(422, "활성 참여자를 화자로 선택해 주세요.");
+    review.projectId = input.projectId;
+    review.utterances = structuredClone(input.utterances);
+    review.revision += 1;
+    return structuredClone(review);
+  },
+  async confirmMeetingReview(workspaceId, sourceId, revision, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const review = state.reviews.get(sourceId);
+    const job = [...state.jobs.values()].find((item) => item.sourceId === sourceId);
+    if (!review || !job || !state.sources.some((item) => item.id === sourceId && item.workspaceId === workspaceId)) throw new ApiError(404, "검토 대본을 찾을 수 없습니다.");
+    if (review.revision !== revision) throw new ApiError(409, "대본이 변경됐습니다. 다시 불러와 주세요.");
+    if (review.reviewState === "confirmed") return advanceJob(job);
+    if (!review.projectId || !state.projects.some((item) => item.id === review.projectId && item.workspaceId === workspaceId && !item.archivedAt) || !review.utterances.some((item) => item.text.trim())) throw new ApiError(422, "활성 프로젝트와 발언을 확인해 주세요.");
+    review.reviewState = "confirmed";
+    review.confirmedAt = new Date().toISOString();
+    review.confirmedSnapshot = { project: structuredClone(state.projects.find((item) => item.id === review.projectId)), people: structuredClone(state.people.filter((person) => review.utterances.some((item) => item.personId === person.id))) };
+    state.transcripts.set(sourceId, { sourceId, title: review.title, kind: "meeting", chunks: review.utterances.filter((item) => item.text.trim()).map((item, index) => ({ id: `${sourceId}-chunk-${index}`, text: `${item.speakerName}: ${item.text}`, startSeconds: item.startSeconds, endSeconds: item.endSeconds })) });
+    job.status = "processing";
+    job.stage = "analyzing";
+    job.progress = 0;
+    job.startedAt = Date.now();
+    const source = state.sources.find((item) => item.id === sourceId);
+    if (source) { source.status = "processing"; source.projectId = review.projectId; }
     return advanceJob(job);
   },
 

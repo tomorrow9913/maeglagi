@@ -7,7 +7,13 @@ from app.modules.context_engine.infrastructure.models import (
     ContextRecord,
     ContextStoreRecord,
 )
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    ProviderCredential,
+    Source,
+    Workspace,
+    WorkspacePerson,
+    WorkspaceProject,
+)
 
 __all__ = [
     "Chunk",
@@ -17,4 +23,6 @@ __all__ = [
     "SQLModel",
     "Source",
     "Workspace",
+    "WorkspacePerson",
+    "WorkspaceProject",
 ]

@@ -8,7 +8,9 @@ import { formatBytes } from "../lib/format";
 
 const statusTone: Record<ProcessingStatus, StatusTone> = {
   queued: "neutral",
+  enqueue_pending: "info",
   processing: "info",
+  awaiting_review: "warning",
   succeeded: "success",
   failed: "danger",
 };
@@ -39,7 +41,7 @@ export function SourceList({
             <button
               type="button"
               onClick={() => onOpen(source.id)}
-              disabled={source.status !== "succeeded"}
+              disabled={source.status !== "succeeded" && source.status !== "awaiting_review" && !(source.kind === "meeting" && source.status === "failed")}
               className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-accent/40 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -52,7 +54,7 @@ export function SourceList({
               <StatusBadge tone={statusTone[source.status]}>
                 {processingStatusLabel[source.status]}
               </StatusBadge>
-              {source.status === "succeeded" ? (
+              {source.status === "succeeded" || source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed") ? (
                 <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               ) : null}
             </button>

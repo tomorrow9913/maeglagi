@@ -90,6 +90,9 @@ class _Group:
 
 def _stable_key(group_kind: str, canonical: str, identifiers: set[str]) -> str:
     # Identified entities are keyed by identifier, so homonyms never share a node id.
+    directory_ids = sorted(value for value in identifiers if value.startswith("directory:"))
+    if directory_ids:
+        return f"id:{directory_ids[0]}"
     return f"id:{min(identifiers)}" if identifiers else normalize_name(canonical, group_kind)
 
 
@@ -138,6 +141,7 @@ def resolve_extraction(
     source_id: UUID,
     chunk_id: UUID | None = None,
     timestamp: datetime | None = None,
+    trusted_directory_identifiers: set[str] | None = None,
 ) -> ResolvedGraph:
     """Merge mentions of the same entity; never merge on name alone when identifiers disagree.
 
@@ -149,12 +153,18 @@ def resolve_extraction(
     Events (Meeting/Decision/Task/...) are graph entities too and are resolved together.
     """
     warnings: list[str] = []
+    trusted = trusted_directory_identifiers or set()
     mentions: list[tuple[str, str, list[str], set[str], datetime | None]] = [
         (
             item.name,
             item.kind.value,
             item.aliases,
-            {normalize_identifier(v) for v in item.identifiers} - {""},
+            {
+                normalized
+                for value in item.identifiers
+                if (normalized := normalize_identifier(value))
+                and (not normalized.startswith("directory:") or normalized in trusted)
+            },
             None,
         )
         for item in result.entities

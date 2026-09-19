@@ -13,7 +13,7 @@ const code = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 vm.runInNewContext(code, { exports });
-const { mergeTranscript, serializeTranscript } = exports;
+const { mergeTranscript, serializeTranscript, unresolvedReviewPeople, reviewUtterances } = exports;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("interim rows evolve into final rows by stable ID without mutating inputs", () => {
@@ -84,4 +84,24 @@ test("serialization trims text, skips blanks, and falls back for missing speaker
   );
   assert.equal(serializeTranscript([], []), "");
   assert.equal(rows[0].text, "  안녕하세요  ");
+});
+
+test("archived and missing person references remain intact until explicit reassignment", () => {
+  const rows = [
+    { id: 1, personId: "archived", speaker: "archived", text: "결정", isFinal: true },
+    { id: 2, personId: "missing", speaker: "missing", text: "확인", isFinal: true },
+  ];
+  const people = [{ id: "archived", name: "김수진", archivedAt: "2026-09-01" }];
+  const speakers = [
+    { id: "archived", name: "김수진 (보관됨)" },
+    { id: "missing", name: "이민호 (목록에 없음)" },
+    { id: "local", name: "미등록 화자" },
+  ];
+  const ids = new Map([[1, "server-1"], [2, "server-2"]]);
+  assert.deepEqual(plain(unresolvedReviewPeople(rows, people)), [1, 2]);
+  assert.deepEqual(plain(reviewUtterances(rows, people, speakers, ids).map(({ personId }) => personId)), ["archived", "missing"]);
+
+  const reassigned = rows.map((row) => ({ ...row, speaker: "local" }));
+  assert.deepEqual(plain(unresolvedReviewPeople(reassigned, people)), []);
+  assert.deepEqual(plain(reviewUtterances(reassigned, people, speakers, ids).map(({ personId }) => personId)), [null, null]);
 });

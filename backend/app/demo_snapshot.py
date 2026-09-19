@@ -14,7 +14,7 @@ import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -22,7 +22,7 @@ from uuid import UUID, uuid4, uuid5
 
 import httpx
 from neo4j import GraphDatabase
-from sqlalchemy import DateTime, inspect, select, text
+from sqlalchemy import Date, DateTime, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.modules.context_engine.domain.ontology import RelationKind
@@ -31,9 +31,14 @@ from app.modules.context_engine.infrastructure.models import (
     ContextRecord,
     ContextStoreRecord,
 )
-from app.modules.workspaces.infrastructure.models import Source, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    Source,
+    Workspace,
+    WorkspacePerson,
+    WorkspaceProject,
+)
 
-TABLES = (Source, Chunk, ContextRecord, ContextStoreRecord)
+TABLES = (WorkspacePerson, WorkspaceProject, Source, Chunk, ContextRecord, ContextStoreRecord)
 MAX_ARTIFACT_BYTES = 25_000_000
 MAX_RESTORE_SECONDS = 60
 COMMIT_SETTLE_SECONDS = 5
@@ -50,10 +55,8 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _json(value: Any) -> Any:
-    if isinstance(value, (UUID, datetime)):
+    if isinstance(value, (UUID, datetime, date)):
         return str(value)
-    if hasattr(value, "iso_format"):
-        return value.iso_format()
     if hasattr(value, "tolist"):
         return value.tolist()
     if isinstance(value, dict):
@@ -121,19 +124,18 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
     _require(isinstance(payload, dict), "Invalid payload")
     _require(len(_canonical(payload)) <= MAX_ARTIFACT_BYTES, "Artifact exceeds size limit")
     _require(artifact["sha256"] == _digest(payload), "Artifact checksum mismatch")
+    required = {
+        "version",
+        "workspace",
+        "sources",
+        "chunks",
+        "contexts",
+        "context_stores",
+        "graph",
+        "objects",
+    }
     _require(
-        set(payload)
-        == {
-            "version",
-            "workspace",
-            "sources",
-            "chunks",
-            "contexts",
-            "context_stores",
-            "graph",
-            "objects",
-        },
-        "Unexpected payload fields",
+        required <= set(payload) <= required | {"people", "projects"}, "Unexpected payload fields"
     )
     _require(payload["version"] == VERSION, "Unsupported artifact version")
     workspace = payload["workspace"]
@@ -158,6 +160,8 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
         )
     for key in ("sources", "chunks", "contexts", "context_stores", "objects"):
         _require(isinstance(payload[key], list), f"Invalid {key}")
+    for key in ("people", "projects"):
+        _require(isinstance(payload.get(key, []), list), f"Invalid {key}")
     sources, chunks, contexts, stores = (
         payload[key] for key in ("sources", "chunks", "contexts", "context_stores")
     )
@@ -166,10 +170,15 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
         "Incomplete processed demo state",
     )
     source_ids, chunk_ids = _ids(sources, "source ID"), _ids(chunks, "chunk ID")
+    people = payload.get("people", [])
+    projects = payload.get("projects", [])
+    person_ids, project_ids = _ids(people, "person ID"), _ids(projects, "project ID")
     chunk_sources = {chunk["id"]: chunk.get("source_id") for chunk in chunks}
     _ids(contexts, "context ID")
     _ids(stores, "context store ID")
     for key, rows in (
+        ("people", people),
+        ("projects", projects),
         ("sources", sources),
         ("chunks", chunks),
         ("contexts", contexts),
@@ -182,7 +191,24 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
                 "Workspace mismatch",
             )
             _require(_uuid(row.get("owner_id"), "row owner ID") == owner, "Owner mismatch")
+    for project in projects:
+        person_id = project.get("owner_person_id")
+        _require(
+            person_id is None or _uuid(person_id, "project owner person ID") in person_ids,
+            "Orphan project owner person",
+        )
+    for person in people:
+        role = person.get("role")
+        _require(
+            role is None or (isinstance(role, str) and len(role) <= 120),
+            "Invalid person role",
+        )
     for source in sources:
+        project_id = source.get("project_id")
+        _require(
+            project_id is None or _uuid(project_id, "source project ID") in project_ids,
+            "Orphan source project",
+        )
         _require(
             source.get("status") == "succeeded" and source.get("processing_stage") == "completed",
             "Source is not fully processed",
@@ -281,6 +307,17 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
 
 def _remap(value: str | None, target: UUID) -> str | None:
     return str(uuid5(target, value)) if value else None
+
+
+def _remap_directory_identifier(value: str, target: UUID) -> str:
+    parts = value.split(":", 2)
+    if len(parts) == 3 and parts[0] == "directory" and parts[1] in {"person", "project"}:
+        try:
+            UUID(parts[2])
+        except ValueError:
+            return value
+        return f"directory:{parts[1]}:{_remap(parts[2], target)}"
+    return value
 
 
 def restore_plan(artifact: dict[str, Any], owner_id: UUID) -> dict[str, Any]:
@@ -386,6 +423,8 @@ async def export_snapshot(
     payload = {
         "version": VERSION,
         "workspace": _row(workspace),
+        "people": rows["workspace_people"],
+        "projects": rows["workspace_projects"],
         "sources": rows["sources"],
         "chunks": rows["chunks"],
         "contexts": rows["contexts"],
@@ -404,10 +443,21 @@ def _model_row(model: Any, row: dict[str, Any]) -> Any:
         column = attribute.columns[0]
         if column.name in row:
             value = row[column.name]
-            if column.name in {"id", "workspace_id", "source_id", "chunk_id", "owner_id"}:
+            if column.name in {
+                "id",
+                "workspace_id",
+                "source_id",
+                "chunk_id",
+                "owner_id",
+                "project_id",
+                "person_id",
+                "owner_person_id",
+            }:
                 value = UUID(value) if value is not None else None
             elif isinstance(column.type, DateTime) and value is not None:
                 value = datetime.fromisoformat(value)
+            elif isinstance(column.type, Date) and value is not None:
+                value = date.fromisoformat(value)
             values[attribute.key] = value
     return model(**values)
 
@@ -516,6 +566,10 @@ async def restore_snapshot(
                     source_ids=[_remap(item, target) for item in node["source_ids"]],
                     superseded_by=_remap(node.get("superseded_by"), target),
                 )
+                props["identifiers"] = [
+                    _remap_directory_identifier(value, target)
+                    for value in node.get("identifiers", [])
+                ]
                 tx.run(
                     "CREATE (e:Entity {id: $id, workspace_id: $workspace}) SET e += $props",
                     id=props["id"],
@@ -553,12 +607,14 @@ async def restore_snapshot(
             graph_created = True
             tx.commit()
         for model, key in (
+            (WorkspacePerson, "people"),
+            (WorkspaceProject, "projects"),
             (Source, "sources"),
             (Chunk, "chunks"),
             (ContextRecord, "contexts"),
             (ContextStoreRecord, "context_stores"),
         ):
-            for original in payload[key]:
+            for original in payload.get(key, []):
                 row = dict(original)
                 row.update(
                     id=_remap(original["id"], target),
@@ -567,6 +623,33 @@ async def restore_snapshot(
                 )
                 if key == "sources":
                     row["object_path"] = source_paths[original["id"]]
+                    row["project_id"] = _remap(original.get("project_id"), target)
+                    row["review_utterances"] = [
+                        {**item, "personId": _remap(item.get("personId"), target)}
+                        for item in original.get("review_utterances", [])
+                    ]
+                    row["raw_utterances"] = [
+                        {**item, "personId": _remap(item.get("personId"), target)}
+                        for item in original.get("raw_utterances", [])
+                    ]
+                    snapshot = original.get("confirmed_snapshot")
+                    if snapshot:
+                        row["confirmed_snapshot"] = {
+                            **snapshot,
+                            "project": {
+                                **snapshot["project"],
+                                "id": _remap(snapshot["project"]["id"], target),
+                                "ownerPersonId": _remap(
+                                    snapshot["project"].get("ownerPersonId"), target
+                                ),
+                            },
+                            "people": [
+                                {**person, "id": _remap(person["id"], target)}
+                                for person in snapshot.get("people", [])
+                            ],
+                        }
+                if key == "projects":
+                    row["owner_person_id"] = _remap(original.get("owner_person_id"), target)
                 if key in {"chunks", "contexts"}:
                     row["source_id"] = _remap(original["source_id"], target)
                 if key == "contexts":

@@ -10,6 +10,8 @@ def test_all_sqlmodel_tables_are_registered_for_alembic() -> None:
         "chunks",
         "contexts",
         "context_stores",
+        "workspace_people",
+        "workspace_projects",
     }
 
 

@@ -36,6 +36,7 @@ export function useBrowserTranscript(
   updateRef.current = onUpdate;
   const nextIdRef = useRef(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
     () => () => {
@@ -47,6 +48,7 @@ export function useBrowserTranscript(
         recognition.abort();
       }
       if (timer.current) clearInterval(timer.current);
+      if (stopTimer.current) clearTimeout(stopTimer.current);
     },
     [],
   );
@@ -66,6 +68,7 @@ export function useBrowserTranscript(
     recognition.continuous = true;
     recognition.interimResults = true;
     const resultIds: number[] = [];
+    const resultStarts: number[] = [];
     let finalLines: string[] = [];
     let pending = "";
     const startedAt = Date.now();
@@ -87,10 +90,13 @@ export function useBrowserTranscript(
       const segments = Array.from(event.results)
         .map((result, index) => {
           if (resultIds[index] === undefined) resultIds[index] = nextIdRef.current++;
+          if (resultStarts[index] === undefined) resultStarts[index] = Math.max(0, (Date.now() - startedAt) / 1000);
           return {
             id: resultIds[index],
             text: result[0].transcript.trim(),
             isFinal: result.isFinal,
+            startSeconds: resultStarts[index],
+            endSeconds: result.isFinal ? Math.max(resultStarts[index], (Date.now() - startedAt) / 1000) : null,
           };
         })
         .filter((segment) => segment.text);
@@ -108,6 +114,8 @@ export function useBrowserTranscript(
     recognition.onend = () => {
       if (recognitionRef.current !== recognition) return;
       recognitionRef.current = null;
+      if (stopTimer.current) clearTimeout(stopTimer.current);
+      stopTimer.current = null;
       if (timer.current) clearInterval(timer.current);
       timer.current = null;
       setStatus("idle");
@@ -132,9 +140,15 @@ export function useBrowserTranscript(
   };
 
   const stop = () => {
-    if (recognitionRef.current && status === "listening") {
+    if (recognitionRef.current && !stopTimer.current) {
       setStatus("stopping");
-      recognitionRef.current.stop();
+      const recognition = recognitionRef.current;
+      try { recognition.stop(); } catch { recognition.abort(); recognition.onend?.(); return; }
+      stopTimer.current = setTimeout(() => {
+        if (recognitionRef.current !== recognition) return;
+        recognition.abort();
+        recognition.onend?.();
+      }, 3000);
     }
   };
   return { status, lines, interim, error, elapsed, start, stop };

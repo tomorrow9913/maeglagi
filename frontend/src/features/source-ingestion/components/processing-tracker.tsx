@@ -44,7 +44,7 @@ export function ProcessingTracker({ job, className }: { job: ProcessingJob; clas
                   <Check className="size-3" aria-hidden />
                 ) : isCurrent && failed ? (
                   <AlertCircle className="size-3" aria-hidden />
-                ) : isCurrent ? (
+                ) : isCurrent && job.status !== "awaiting_review" ? (
                   <Loader2 className="size-3 animate-spin" aria-hidden />
                 ) : null}
                 {stageLabel[stage]}

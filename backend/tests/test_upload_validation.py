@@ -18,7 +18,7 @@ from app.modules.ingestion.application.upload_validation import (
     validate_document,
     validate_recording,
 )
-from app.modules.workspaces.infrastructure.models import Workspace
+from app.modules.workspaces.infrastructure.models import Workspace, WorkspaceProject
 
 workspace_router = import_module("app.api.workspaces.router")
 
@@ -103,10 +103,13 @@ def test_bad_recordings(name: str, mime: str, content: bytes, error: type[ValueE
 class FakeSession:
     def __init__(self) -> None:
         self.sources: list[Any] = []
+        self.project = WorkspaceProject(workspace_id=WORKSPACE, owner_id=USER, name="Project")
 
-    async def get(self, model: Any, identifier: Any) -> Workspace | None:
+    async def get(self, model: Any, identifier: Any, **kwargs: Any) -> Any:
         if model is Workspace and identifier == WORKSPACE:
             return Workspace(id=WORKSPACE, owner_id=USER, name="test")
+        if model is WorkspaceProject and identifier == self.project.id:
+            return self.project
         return None
 
     def add(self, source: Any) -> None:
@@ -173,3 +176,39 @@ def test_browser_mp4_is_stored_with_matching_filename(
     assert len(uploaded) == len(session.sources) == 1
     assert uploaded[0].title == "recording.mp4"
     assert uploaded[0].content_type == "audio/mp4"
+
+
+def test_capture_project_selection_is_persisted_on_both_meeting_upload_paths(
+    client: tuple[TestClient, FakeSession, list[Any]],
+) -> None:
+    http, session, uploaded = client
+    base = f"/api/v1/workspaces/{WORKSPACE}/sources"
+    audio = http.post(
+        f"{base}/recordings",
+        files={"audio": ("recording.webm", b"\x1a\x45\xdf\xa3webm", "audio/webm")},
+        data={"projectId": str(session.project.id)},
+        headers={"Authorization": "Bearer test"},
+    )
+    transcript = http.post(
+        f"{base}/transcripts",
+        json={"text": "발언", "projectId": str(session.project.id)},
+        headers={"Authorization": "Bearer test"},
+    )
+    assert audio.status_code == transcript.status_code == 202
+    assert len(uploaded) == len(session.sources) == 2
+    assert all(source.project_id == session.project.id for source in session.sources)
+
+
+def test_foreign_project_cannot_start_a_meeting_upload(
+    client: tuple[TestClient, FakeSession, list[Any]],
+) -> None:
+    http, session, uploaded = client
+    session.project.workspace_id = uuid4()
+    response = http.post(
+        f"/api/v1/workspaces/{WORKSPACE}/sources/recordings",
+        files={"audio": ("recording.webm", b"\x1a\x45\xdf\xa3webm", "audio/webm")},
+        data={"projectId": str(session.project.id)},
+        headers={"Authorization": "Bearer test"},
+    )
+    assert response.status_code == 422
+    assert uploaded == session.sources == []

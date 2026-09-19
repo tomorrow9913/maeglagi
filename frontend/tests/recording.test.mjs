@@ -48,6 +48,8 @@ function loadHook(path, globals = {}, modules = {}) {
     DOMException,
     setInterval: () => 1,
     clearInterval() {},
+    setTimeout: () => 1,
+    clearTimeout() {},
     ...globals,
   });
   return {
@@ -156,6 +158,21 @@ test("unmount while recording discards audio instead of uploading", async () => 
   assert.equal(env.released(), 1);
 });
 
+test("recorder error ends capture, releases microphone, and never uploads a partial blob", async () => {
+  const env = audioEnvironment();
+  const hook = loadHook(
+    "../src/features/source-ingestion/hooks/use-audio-recorder.ts",
+    env.globals,
+  );
+  let completed = 0;
+  const recorder = hook.render("useAudioRecorder", { onComplete: () => completed++ });
+  await recorder.start();
+  env.recorders[0].events.error();
+  assert.equal(env.released(), 1);
+  assert.equal(completed, 0);
+  assert.equal(hook.render("useAudioRecorder", { onComplete: () => completed++ }).status, "error");
+});
+
 function speechEnvironment() {
   const instances = [];
   class Recognition {
@@ -216,6 +233,28 @@ test("speech preserves tentative tail for review when service ends and aborts si
   assert.equal(completed.length, 1);
 });
 
+test("speech stop timeout finalizes the draft if the browser never emits end", () => {
+  const env = speechEnvironment();
+  const timers = [];
+  const hook = loadHook(
+    "../src/features/source-ingestion/hooks/use-browser-transcript.ts",
+    {
+      ...env.globals,
+      setTimeout(callback) { timers.push(callback); return timers.length; },
+    },
+  );
+  const completed = [];
+  let speech = hook.render("useBrowserTranscript", (lines) => completed.push(lines));
+  speech.start();
+  env.instances[0].onresult({ results: [result("남은 발언", false)] });
+  speech = hook.render("useBrowserTranscript", (lines) => completed.push(lines));
+  speech.stop();
+  assert.equal(completed.length, 0);
+  timers[0]();
+  assert.equal(completed.length, 1);
+  assert.deepEqual(Array.from(completed[0]), ["남은 발언"]);
+});
+
 test("transcript upload sends edited text once and preserves the payload on failure", async () => {
   let shouldFail = true;
   const sent = [];
@@ -249,10 +288,34 @@ test("transcript upload sends edited text once and preserves the payload on fail
   assert.equal(upload.items[0].errorMessage, "offline");
   assert.equal(input.text, "김민수: 수정한 문장");
   shouldFail = false;
-  assert.equal(await upload.uploadTranscript(input), true);
+  assert.equal(await upload.uploadTranscript(input, "project-7"), true);
   assert.equal(sent.length, 2);
-  assert.deepEqual(sent[1], { workspace: "workspace-1", body: input });
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[1])), { workspace: "workspace-1", body: { ...input, projectId: "project-7" } });
   upload = hook.render("useSourceUpload", "workspace-1");
   assert.equal(upload.items[0].status, "uploaded");
   assert.equal(upload.items[0].job.id, "job-1");
+});
+
+test("recording upload carries the chosen project and live draft", async () => {
+  const sent = [];
+  const hook = loadHook(
+    "../src/features/source-ingestion/hooks/use-source-upload.ts",
+    { window: { dispatchEvent() {} }, Event },
+    {
+      sonner: { toast: { error() {}, success() {} } },
+      "@/lib/api/context": { useApi: () => ({
+        async uploadRecording(...args) { sent.push(args); return { id: "source-1", sourceId: "source-1" }; },
+      }) },
+      "../lib/validate-file": {},
+    },
+  );
+  const upload = hook.render("useSourceUpload", "workspace-1");
+  const audio = new Blob(["audio"]);
+  const liveDraft = { utterances: [{ id: "u-1", personId: null, speakerName: "화자 1", text: "확인" }] };
+  await upload.uploadRecording(audio, 4, liveDraft, "project-7");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][0], "workspace-1");
+  assert.equal(sent[0][1], audio);
+  assert.deepEqual(sent[0][2], liveDraft);
+  assert.equal(sent[0][3], "project-7");
 });

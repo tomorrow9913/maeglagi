@@ -10,6 +10,12 @@ import type {
   CreateWorkspaceInput,
   KnowledgeGraph,
   ProcessingJob,
+  MeetingReview,
+  MeetingUtterance,
+  PersonInput,
+  ProjectInput,
+  WorkspacePerson,
+  WorkspaceProject,
   Source,
   SourceContent,
   TranscriptSourceInput,
@@ -90,6 +96,13 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
+  listPeople: (workspaceId, signal) => apiFetch<WorkspacePerson[]>(`/workspaces/${workspaceId}/people`, { signal }),
+  createPerson: (workspaceId, input: PersonInput, signal) => apiFetch<WorkspacePerson>(`/workspaces/${workspaceId}/people`, { method: "POST", body: JSON.stringify(input), signal }),
+  updatePerson: (workspaceId, personId, input, signal) => apiFetch<WorkspacePerson>(`/workspaces/${workspaceId}/people/${personId}`, { method: "PATCH", body: JSON.stringify(input), signal }),
+  listProjects: (workspaceId, signal) => apiFetch<WorkspaceProject[]>(`/workspaces/${workspaceId}/projects`, { signal }),
+  createProject: (workspaceId, input: ProjectInput, signal) => apiFetch<WorkspaceProject>(`/workspaces/${workspaceId}/projects`, { method: "POST", body: JSON.stringify(input), signal }),
+  updateProject: (workspaceId, projectId, input, signal) => apiFetch<WorkspaceProject>(`/workspaces/${workspaceId}/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(input), signal }),
+
   listSources: (workspaceId, signal) =>
     apiFetch<Source[]>(`/workspaces/${workspaceId}/sources`, { signal }),
 
@@ -102,9 +115,11 @@ export const httpApi: MaeglagiApi = {
     return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/documents`, form, options);
   },
 
-  uploadRecording: (workspaceId, audio, options) => {
+  uploadRecording: (workspaceId, audio, liveDraft?: { utterances: MeetingUtterance[] }, projectId?, options?) => {
     const form = new FormData();
     form.append("audio", audio, "recording.webm");
+    if (liveDraft?.utterances.length) form.append("liveDraft", JSON.stringify(liveDraft));
+    if (projectId) form.append("projectId", projectId);
     return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/recordings`, form, options);
   },
 
@@ -116,6 +131,9 @@ export const httpApi: MaeglagiApi = {
     }),
 
   getJob: (jobId, signal) => apiFetch<ProcessingJob>(`/jobs/${jobId}`, { signal }),
+  getMeetingReview: (workspaceId, sourceId, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { signal }),
+  saveMeetingReview: (workspaceId, sourceId, input, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { method: "PATCH", body: JSON.stringify(input), signal }),
+  confirmMeetingReview: (workspaceId, sourceId, revision, signal) => apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/${sourceId}/review/confirm`, { method: "POST", body: JSON.stringify({ revision }), signal }),
 
   listContextItems: (workspaceId, query, signal) =>
     apiFetch<ContextItem[]>(`/workspaces/${workspaceId}/context${timelineQuery(query)}`, {

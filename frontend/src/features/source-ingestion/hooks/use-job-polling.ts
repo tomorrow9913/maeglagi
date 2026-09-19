@@ -8,7 +8,7 @@ import type { ProcessingJob } from "@/lib/api";
 const POLL_INTERVAL_MS = 1_000;
 
 function isTerminal(job: ProcessingJob): boolean {
-  return job.status === "succeeded" || job.status === "failed";
+  return job.status === "succeeded" || job.status === "failed" || job.status === "awaiting_review";
 }
 
 /**
@@ -20,6 +20,7 @@ function isTerminal(job: ProcessingJob): boolean {
 export function useJobPolling(
   jobIds: string[],
   onSettled?: (job: ProcessingJob) => void,
+  restartKey = 0,
 ): Record<string, ProcessingJob> {
   const [jobs, setJobs] = useState<Record<string, ProcessingJob>>({});
   const api = useApi();
@@ -28,8 +29,8 @@ export function useJobPolling(
   const settledRef = useRef(onSettled);
   settledRef.current = onSettled;
 
-  // 완료 통지를 작업당 한 번만 보냅니다.
-  const notified = useRef(new Set<string>());
+  // 같은 job이 검토 대기에서 확인 후 완료로 이동할 때는 새 상태를 다시 알립니다.
+  const notified = useRef(new Map<string, ProcessingJob["status"]>());
 
   // 배열 identity가 매 렌더 바뀌므로 내용으로 비교합니다.
   const key = jobIds.join(",");
@@ -57,8 +58,8 @@ export function useJobPolling(
 
         if (isTerminal(job)) {
           pending.delete(job.id);
-          if (!notified.current.has(job.id)) {
-            notified.current.add(job.id);
+          if (notified.current.get(job.id) !== job.status) {
+            notified.current.set(job.id, job.status);
             settledRef.current?.(job);
           }
         }
@@ -75,7 +76,7 @@ export function useJobPolling(
       clearTimeout(timer);
       pending = new Set();
     };
-  }, [key, api]);
+  }, [key, api, restartKey]);
 
   return jobs;
 }

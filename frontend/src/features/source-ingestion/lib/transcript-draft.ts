@@ -1,6 +1,44 @@
-export type TranscriptSegment = { id: number; text: string; isFinal: boolean };
+export type TranscriptSegment = { id: number; text: string; isFinal: boolean; startSeconds?: number | null; endSeconds?: number | null };
 
-export type TranscriptTurn = TranscriptSegment & { speaker: string; edited?: boolean };
+export type TranscriptTurn = TranscriptSegment & {
+  speaker: string;
+  /** Keeps an existing directory reference even when the person was later archived. */
+  personId?: string | null;
+  edited?: boolean;
+  startSeconds?: number | null;
+  endSeconds?: number | null;
+};
+
+type ReviewPerson = { id: string; name: string; archivedAt: string | null };
+type ReviewSpeaker = { id: string; name: string };
+
+/** Existing person references remain attached until a row is explicitly reassigned. */
+export function unresolvedReviewPeople(rows: TranscriptTurn[], people: ReviewPerson[]): number[] {
+  return rows.filter((row) => {
+    const person = people.find((item) => item.id === row.speaker);
+    return Boolean(person?.archivedAt || (row.personId && row.speaker === row.personId && !person));
+  }).map((row) => row.id);
+}
+
+export function reviewUtterances(
+  rows: TranscriptTurn[],
+  people: ReviewPerson[],
+  speakers: ReviewSpeaker[],
+  ids: Map<number, string>,
+) {
+  return rows.map((row) => {
+    const person = people.find((item) => item.id === row.speaker);
+    const speaker = speakers.find((item) => item.id === row.speaker);
+    return {
+      id: ids.get(row.id) ?? `manual-${Math.abs(row.id)}`,
+      personId: person?.id ?? (row.speaker === row.personId ? row.personId : null) ?? null,
+      speakerName: person?.name || speaker?.name || "화자 1",
+      text: row.text,
+      startSeconds: row.startSeconds ?? null,
+      endSeconds: row.endSeconds ?? null,
+    };
+  });
+}
 
 export function mergeTranscript(
   current: TranscriptTurn[],
@@ -20,6 +58,8 @@ export function mergeTranscript(
         ...row,
         text: row.edited ? row.text : update.text,
         isFinal: update.isFinal,
+        startSeconds: row.startSeconds ?? update.startSeconds,
+        endSeconds: update.endSeconds ?? row.endSeconds,
       });
     } else if (row.edited || row.isFinal) {
       rows.push({ ...row });

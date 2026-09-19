@@ -13,6 +13,7 @@ import {
 import { useSourceUpload } from "../hooks/use-source-upload";
 import { useJobPolling } from "../hooks/use-job-polling";
 import { MeetingCapture } from "./meeting-capture";
+import { MeetingReviewDialog } from "./meeting-review-dialog";
 import { UploadDropzone } from "./upload-dropzone";
 import { UploadQueue } from "./upload-queue";
 import type { ProcessingJob } from "@/lib/api";
@@ -29,17 +30,20 @@ export function SourceUploadDialog({
   const { items, uploadDocuments, uploadRecording, uploadTranscript, dismiss } =
     useSourceUpload(workspaceId);
   const [recordingBusy, setRecordingBusy] = useState(false);
+  const [reviewSourceId, setReviewSourceId] = useState<string>();
+  const [restartKey, setRestartKey] = useState(0);
   const busy = recordingBusy || items.some((item) => item.status === "uploading");
   const ids = useMemo(() => items.flatMap((item) => (item.job ? [item.job.id] : [])), [items]);
   const settled = useCallback((job: ProcessingJob) => {
     window.dispatchEvent(new Event("maeglagi:sources-changed"));
-    if (job.status === "failed")
+    if (job.status === "awaiting_review") { toast.info("대본 검토가 준비됐습니다."); setReviewSourceId(job.sourceId); }
+    else if (job.status === "failed")
       toast.error("소스 분석에 실패했습니다. 소스에서 상태를 확인해 주세요.");
     else toast.success("소스 분석이 완료됐습니다. Ask에서 질문해 보세요.");
   }, []);
-  const jobs = useJobPolling(ids, settled);
+  const jobs = useJobPolling(ids, settled, restartKey);
   return (
-    <Dialog
+    <><Dialog
       open={mode !== null}
       onOpenChange={(open) => {
         if (!open && !busy) onClose();
@@ -63,6 +67,7 @@ export function SourceUploadDialog({
         </DialogHeader>
         {mode === "meeting" ? (
           <MeetingCapture
+            workspaceId={workspaceId}
             onAudio={uploadRecording}
             onTranscript={uploadTranscript}
             onBusyChange={setRecordingBusy}
@@ -70,7 +75,7 @@ export function SourceUploadDialog({
         ) : (
           <UploadDropzone onFilesSelected={uploadDocuments} />
         )}
-        <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} />
+        <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} />
         {busy ? (
           <p className="text-xs text-muted-foreground">
             진행 중인 녹음·업로드를 마치고, 대본을 업로드하거나 버리면 닫을 수 있습니다.
@@ -81,6 +86,6 @@ export function SourceUploadDialog({
           </Button>
         )}
       </DialogContent>
-    </Dialog>
+    </Dialog><MeetingReviewDialog workspaceId={workspaceId} sourceId={reviewSourceId} onClose={() => setReviewSourceId(undefined)} onConfirmed={() => { setRestartKey((value) => value + 1); window.dispatchEvent(new Event("maeglagi:sources-changed")); }} /></>
   );
 }

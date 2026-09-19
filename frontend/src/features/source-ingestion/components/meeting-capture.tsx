@@ -1,403 +1,182 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useApi, useWorkspacePath } from "@/lib/api/context";
+import type { MeetingUtterance, TranscriptSourceInput, WorkspacePerson, WorkspaceProject } from "@/lib/api";
 import { useAudioRecorder } from "../hooks/use-audio-recorder";
 import { useBrowserTranscript } from "../hooks/use-browser-transcript";
-import { mergeTranscript, serializeTranscript, type TranscriptTurn } from "../lib/transcript-draft";
+import { mergeTranscript, type TranscriptTurn } from "../lib/transcript-draft";
 import { RecordingControls } from "./recording-controls";
-import type { TranscriptSourceInput } from "@/lib/api";
+import { TranscriptEditor, type SpeakerOption } from "./transcript-editor";
 
-const speakerColors = [
-  "text-[var(--chart-2-hex)]",
-  "text-[var(--chart-4-hex)]",
-  "text-[var(--chart-1-hex)]",
-  "text-[var(--chart-3-hex)]",
-  "text-[var(--chart-5-hex)]",
-];
-const speakerColor = (speaker: string | number) =>
-  speakerColors[Number(speaker) % speakerColors.length];
+function toUtterances(rows: TranscriptTurn[], speakers: SpeakerOption[], people: WorkspacePerson[]): MeetingUtterance[] {
+  return rows.map((row) => {
+    const speaker = speakers.find((item) => item.id === row.speaker);
+    const person = people.find((item) => item.id === row.speaker);
+    return { id: String(row.id), personId: person?.id ?? null, speakerName: speaker?.name.trim() || person?.name || "화자 1", text: row.text, startSeconds: row.startSeconds ?? null, endSeconds: row.endSeconds ?? null };
+  });
+}
 
-export function MeetingCapture({
-  onAudio,
-  onTranscript,
-  onBusyChange,
-}: {
-  onAudio: (audio: Blob, duration: number) => Promise<void>;
-  onTranscript: (input: TranscriptSourceInput) => Promise<boolean>;
+export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChange }: {
+  workspaceId: string;
+  onAudio: (audio: Blob, duration: number, liveDraft?: { utterances: MeetingUtterance[] }, projectId?: string) => Promise<void>;
+  onTranscript: (input: TranscriptSourceInput, projectId?: string) => Promise<boolean>;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const editorId = useId();
-  const pendingFocus = useRef<number | null>(null);
-  const [mode, setMode] = useState<"text" | "audio">("text");
+  const api = useApi();
+  const workspacePath = useWorkspacePath();
+  const [mode, setMode] = useState<"text" | "audio">("audio");
   const [draft, setDraft] = useState<TranscriptTurn[] | null>(null);
+  const draftRef = useRef<TranscriptTurn[] | null>(null);
+  const commitDraft = (next: TranscriptTurn[] | null) => { draftRef.current = next; setDraft(next); };
   const [duration, setDuration] = useState(0);
   const [title, setTitle] = useState("회의 대본");
-  const [speakers, setSpeakers] = useState(["화자 1"]);
-  const [currentSpeaker, setCurrentSpeaker] = useState("0");
-  const speakerRef = useRef("0");
+  const [people, setPeople] = useState<WorkspacePerson[]>([]);
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [speakers, setSpeakers] = useState<SpeakerOption[]>([{ id: "local-1", name: "화자 1" }]);
+  const [currentSpeaker, setCurrentSpeaker] = useState("local-1");
+  const speakerRef = useRef("local-1");
   const previousSegments = useRef<TranscriptTurn[]>([]);
   const deletedIds = useRef(new Set<number>());
   const manualId = useRef(-1);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const [audioStarted, setAudioStarted] = useState(false);
+  const [speechFinalized, setSpeechFinalized] = useState(true);
+  const [recordingFailed, setRecordingFailed] = useState(false);
+  const stopRequested = useRef(false);
+  const pendingAudio = useRef<{ blob: Blob; seconds: number } | null>(null);
+  const [pendingAudioReady, setPendingAudioReady] = useState(false);
+  const [audioUploadError, setAudioUploadError] = useState<string>();
   const speech = useBrowserTranscript(
     (_lines, seconds) => {
       setDuration((value) => value + seconds);
-      // Recognition events already populated the editable draft; do not replace users' corrections.
-      setDraft((rows) => rows ?? []);
+      commitDraft(draftRef.current ?? []);
+      setSpeechFinalized(true);
     },
     (segments) => {
       const speaker = speakerRef.current;
-      setDraft((rows) =>
-        mergeTranscript(
-          rows ?? [],
-          [...previousSegments.current, ...segments].filter(
-            (segment) => !deletedIds.current.has(segment.id),
-          ),
-          speaker,
-        ),
-      );
+      const timed = segments.map((segment) => ({ ...segment, startSeconds: segment.startSeconds == null ? null : segment.startSeconds + duration, endSeconds: segment.endSeconds == null ? null : segment.endSeconds + duration }));
+      commitDraft(mergeTranscript(draftRef.current ?? [], [...previousSegments.current, ...timed].filter((segment) => !deletedIds.current.has(segment.id)), speaker));
     },
   );
-  const recorder = useAudioRecorder({
-    onComplete: (audio, seconds) => {
-      void onAudio(audio, seconds);
-    },
-  });
-  const active =
-    speech.status !== "idle" || ["requesting", "recording", "stopping"].includes(recorder.status);
+  const recorder = useAudioRecorder({ onComplete: (blob, seconds) => { pendingAudio.current = { blob, seconds }; setPendingAudioReady(true); } });
+  const active = speech.status !== "idle" || ["requesting", "recording", "stopping"].includes(recorder.status);
+
   useEffect(() => {
-    onBusyChange?.(active || draft !== null || saving);
-  }, [active, draft, saving, onBusyChange]);
+    let cancelled = false;
+    void Promise.all([api.listPeople(workspaceId), api.listProjects(workspaceId)]).then(([roster, options]) => {
+      if (cancelled) return;
+      setPeople(roster);
+      setProjects(options);
+    }).catch(() => { /* capture can continue with local speakers */ });
+    return () => { cancelled = true; };
+  }, [api, workspaceId]);
   useEffect(() => {
-    if (!active && draft === null && !saving) return;
-    const preventLoss = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
+    if (mode !== "audio" || recorder.status !== "recording" || audioStarted) return;
+    setAudioStarted(true);
+    previousSegments.current = draftRef.current ?? [];
+    setSpeechFinalized(false);
+    if (speech.start()) commitDraft(draftRef.current ?? []);
+    else setSpeechFinalized(true);
+  }, [mode, recorder.status, audioStarted, speech]);
+  useEffect(() => {
+    if (mode !== "audio" || recorder.status !== "recording" || !audioStarted || stopRequested.current || speech.status !== "idle" || speech.error) return;
+    const timer = window.setTimeout(() => {
+      if (stopRequested.current) return;
+      previousSegments.current = draftRef.current ?? [];
+      setSpeechFinalized(false);
+      if (!speech.start()) setSpeechFinalized(true);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [mode, recorder.status, audioStarted, speech.status, speech.error, speech]);
+  useEffect(() => {
+    if (!pendingAudioReady || !speechFinalized || speech.status !== "idle" || savingRef.current || !pendingAudio.current) return;
+    const pending = pendingAudio.current;
+    pendingAudio.current = null;
+    setPendingAudioReady(false);
+    savingRef.current = true;
+    setSaving(true);
+    setAudioUploadError(undefined);
+    void onAudio(pending.blob, pending.seconds, { utterances: toUtterances(draftRef.current ?? [], speakers, people) }, projectId || undefined)
+      .then(() => { commitDraft(null); setDuration(0); previousSegments.current = []; deletedIds.current.clear(); setAudioStarted(false); setRecordingFailed(false); })
+      .catch((error) => { setAudioUploadError(error instanceof Error ? error.message : "오디오를 올리지 못했습니다."); pendingAudio.current = pending; })
+      .finally(() => { savingRef.current = false; setSaving(false); });
+  }, [pendingAudioReady, speechFinalized, speech.status, onAudio, speakers, people, projectId]);
+  useEffect(() => {
+    if (!audioStarted || stopRequested.current || !["error", "denied", "unsupported"].includes(recorder.status)) return;
+    stopRequested.current = true;
+    setRecordingFailed(true);
+    speech.stop();
+  }, [audioStarted, recorder.status, speech]);
+  useEffect(() => { onBusyChange?.(active || draft !== null || saving || pendingAudioReady || Boolean(audioUploadError)); }, [active, draft, saving, pendingAudioReady, audioUploadError, onBusyChange]);
+  useEffect(() => {
+    if (!active && draft === null && !saving && !pendingAudioReady && !audioUploadError) return;
+    const preventLoss = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", preventLoss);
     return () => window.removeEventListener("beforeunload", preventLoss);
-  }, [active, draft, saving]);
-  const update = (id: number, values: Partial<TranscriptTurn>) =>
-    setDraft((rows) => rows?.map((row) => (row.id === id ? { ...row, ...values } : row)) ?? null);
-  const grow = (element: HTMLTextAreaElement) => {
-    element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  };
+  }, [active, draft, saving, pendingAudioReady, audioUploadError]);
+
+  const update = (id: number, values: Partial<TranscriptTurn>) => commitDraft(draftRef.current?.map((row) => row.id === id ? { ...row, ...values } : row) ?? null);
   const addTurn = () => {
-    const row = {
-      id: manualId.current--,
-      speaker: speakerRef.current,
-      text: "",
-      isFinal: true,
-      edited: true,
-    };
-    pendingFocus.current = row.id;
-    setDraft((rows) => [...(rows ?? []), row]);
+    const id = manualId.current--;
+    commitDraft([...(draftRef.current ?? []), { id, speaker: speakerRef.current, text: "", isFinal: true, edited: true }]);
+    return id;
   };
-  useEffect(() => {
-    if (pendingFocus.current === null) return;
-    document.getElementById(`${editorId}-${pendingFocus.current}`)?.focus();
-    pendingFocus.current = null;
-  }, [draft, editorId]);
-  const start = () => {
-    previousSegments.current = draft ?? [];
-    if (speech.start()) setDraft((rows) => rows ?? []);
-  };
+  const stopAudio = () => { stopRequested.current = true; speech.stop(); recorder.stop(); };
   const submit = async () => {
     if (active || savingRef.current || !draft?.some((row) => row.text.trim())) return;
     savingRef.current = true;
     setSaving(true);
     try {
-      if (
-        await onTranscript({
-          title: title.trim() || "회의 대본",
-          text: serializeTranscript(draft, speakers),
-          durationSeconds: duration,
-        })
-      ) {
-        setDraft(null);
-        setDuration(0);
-        previousSegments.current = [];
-        deletedIds.current.clear();
-      }
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
+      const utterances = toUtterances(draft, speakers, people);
+      const text = utterances.filter((item) => item.text.trim()).map((item) => `${item.speakerName}: ${item.text.trim()}`).join("\n\n");
+      const accepted = await onTranscript({ title: title.trim() || "회의 대본", text, durationSeconds: duration, utterances }, projectId || undefined);
+      if (accepted) { commitDraft(null); setDuration(0); previousSegments.current = []; deletedIds.current.clear(); setRecordingFailed(false); setAudioStarted(false); }
+    } finally { savingRef.current = false; setSaving(false); }
   };
-  return (
-    <div className="space-y-4">
-      <fieldset
-        disabled={active || saving || draft !== null}
-        className="flex flex-wrap gap-4 text-sm"
-      >
-        <legend className="mb-2 font-medium">회의 저장 방식</legend>
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="meeting-mode"
-            checked={mode === "text"}
-            onChange={() => setMode("text")}
-          />
-          브라우저 STT · 텍스트만 업로드
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name="meeting-mode"
-            checked={mode === "audio"}
-            onChange={() => setMode("audio")}
-          />
-          오디오 업로드 · 서버 STT
-        </label>
-      </fieldset>
-      {mode === "audio" ? (
-        <>
-          <RecordingControls
-            {...recorder}
-            onStart={() => {
-              void recorder.start();
-            }}
-            onStop={recorder.stop}
-          />
-          <p className="text-xs text-muted-foreground">
-            정지하면 오디오 한 개를 업로드하고 서버에서 대본을 생성합니다.
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="text-xs text-muted-foreground">
-            참여자를 미리 등록하고 현재 화자를 선택하세요. 받아쓰기 중에도 각 발언의 화자와 문장을
-            수정할 수 있습니다. 앱에는 확인한 텍스트만 업로드하며, 브라우저 음성 인식 서비스가
-            사용될 수 있습니다.
-          </p>
-          <fieldset disabled={saving} className="space-y-2">
-            <legend className="mb-2 text-sm font-medium">참여자</legend>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {speakers.map((name, index) => (
-                <Input
-                  key={index}
-                  className="border-border"
-                  aria-label={`화자 ${index + 1} 이름`}
-                  value={name}
-                  maxLength={80}
-                  onChange={(event) =>
-                    setSpeakers((values) =>
-                      values.map((value, i) => (i === index ? event.target.value : value)),
-                    )
-                  }
-                />
-              ))}
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setSpeakers((values) => [...values, `화자 ${values.length + 1}`])}
-            >
-              화자 추가
-            </Button>
-          </fieldset>
-          <div className="sticky top-0 z-10 space-y-2 rounded-lg border bg-background p-3">
-            <p className="text-xs font-medium">현재 화자 · 새 발언에 적용</p>
-            <div role="group" aria-label="현재 화자" className="flex flex-wrap gap-2">
-              {speakers.map((name, index) => (
-                <Button
-                  key={index}
-                  size="sm"
-                  variant="outline"
-                  className={`${speakerColor(index)} ${currentSpeaker === String(index) ? "ring-2 ring-current ring-offset-2" : ""}`}
-                  disabled={saving}
-                  aria-pressed={currentSpeaker === String(index)}
-                  onClick={() => {
-                    speakerRef.current = String(index);
-                    setCurrentSpeaker(String(index));
-                  }}
-                >
-                  {name || `화자 ${index + 1}`}
-                </Button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              자동 화자 구분은 지원하지 않습니다. 이미 표시된 발언의 화자는 해당 발언에서 바로 바꿀
-              수 있습니다.
-            </p>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground" role="status">
-                {speech.status === "idle"
-                  ? draft
-                    ? "받아쓰기 일시 종료 · 편집 가능"
-                    : "받아쓰기 준비"
-                  : `받아쓰기 ${Math.floor(duration) + speech.elapsed}초`}
-              </span>
-              {speech.status === "idle" ? (
-                <div className="flex gap-2">
-                  {!draft && (
-                    <Button variant="ghost" disabled={saving} onClick={addTurn}>
-                      대본 직접 작성
-                    </Button>
-                  )}
-                  <Button disabled={saving} onClick={start}>
-                    {draft ? "이어서 받아쓰기" : "받아쓰기 시작"}
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  disabled={speech.status === "stopping"}
-                  onClick={speech.stop}
-                >
-                  받아쓰기 종료
-                </Button>
-              )}
-            </div>
-          </div>
-          {speech.error && (
-            <p role="alert" className="text-sm text-destructive">
-              {speech.error}
-            </p>
-          )}
-          {draft && (
-            <section aria-label="대본 편집" className="space-y-4">
-              <h3 className="font-medium">
-                {active ? "실시간 대본 · 바로 편집" : "대본 검토 및 편집"}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                직접 수정한 문장은 이후 인식 결과가 덮어쓰지 않습니다. 인식 중인 문장은 아직 바뀔 수
-                있으므로 확정된 뒤 수정하면 더 편합니다.
-              </p>
-              <label className="block space-y-1 text-sm">
-                제목
-                <Input
-                  value={title}
-                  maxLength={255}
-                  disabled={saving}
-                  onChange={(event) => setTitle(event.target.value)}
-                />
-              </label>
-              {draft.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  말씀하시면 문장이 여기에 표시됩니다. 화자를 선택한 뒤 발언해 주세요.
-                </p>
-              )}
-              <div role="group" aria-label="발언 목록">
-                {draft.map((row, index) => (
-                  <div
-                    key={row.id}
-                    className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 py-0.5 sm:grid-cols-[8rem_minmax(0,1fr)]"
-                  >
-                    <select
-                      aria-label={`발언 ${index + 1} 화자`}
-                      className={`w-full min-w-0 rounded-sm bg-transparent py-0.5 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring ${speakerColor(row.speaker)}`}
-                      value={row.speaker}
-                      disabled={saving}
-                      onChange={(event) => update(row.id, { speaker: event.target.value })}
-                    >
-                      {speakers.map((name, i) => (
-                        <option key={i} value={i}>
-                          {name || `화자 ${i + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex min-w-0 items-start gap-1">
-                      <textarea
-                        ref={(element) => {
-                          if (element) grow(element);
-                        }}
-                        id={`${editorId}-${row.id}`}
-                        rows={1}
-                        onKeyDown={(event) => {
-                          if (event.key === "Tab" && event.shiftKey && index > 0) {
-                            event.preventDefault();
-                            document.getElementById(`${editorId}-${draft[index - 1].id}`)?.focus();
-                            return;
-                          }
-                          if (
-                            event.key === "Tab" &&
-                            !event.shiftKey &&
-                            !event.ctrlKey &&
-                            !event.altKey &&
-                            !event.metaKey &&
-                            !event.nativeEvent.isComposing &&
-                            index === draft.length - 1 &&
-                            row.text.trim() &&
-                            !saving
-                          ) {
-                            event.preventDefault();
-                            addTurn();
-                          }
-                        }}
-                        aria-label={`발언 ${index + 1} 내용`}
-                        title={
-                          row.edited
-                            ? "직접 수정됨"
-                            : row.isFinal
-                              ? "인식 확정"
-                              : active
-                                ? "인식 중"
-                                : "최종 확인 필요"
-                        }
-                        className="block min-h-6 min-w-0 flex-1 resize-none overflow-hidden bg-transparent py-0.5 text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        value={row.text}
-                        disabled={saving}
-                        onChange={(event) => {
-                          grow(event.target);
-                          update(row.id, { text: event.target.value, edited: true });
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-50 hover:bg-accent hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                        aria-label={`발언 ${index + 1} 삭제`}
-                        title="발언 삭제"
-                        disabled={saving}
-                        onClick={() => {
-                          deletedIds.current.add(row.id);
-                          setDraft((rows) => rows?.filter((item) => item.id !== row.id) ?? null);
-                        }}
-                      >
-                        <X className="size-3.5" aria-hidden />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                마지막 발언에서 Tab: 다음 발언 추가 · Shift+Tab: 이전 항목 이동. 새 발언에는 현재
-                선택한 화자가 적용됩니다.
-              </p>
-              <Button variant="outline" size="sm" disabled={saving} onClick={addTurn}>
-                발언 추가 (Tab)
-              </Button>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={active || saving || !draft.some((row) => row.text.trim())}
-                  onClick={() => void submit()}
-                >
-                  {saving ? "업로드 중…" : "검토한 텍스트 업로드"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={active || saving}
-                  onClick={() => {
-                    if (window.confirm("편집한 대본을 버릴까요?")) {
-                      setDraft(null);
-                      setDuration(0);
-                      previousSegments.current = [];
-                      deletedIds.current.clear();
-                    }
-                  }}
-                >
-                  대본 버리기
-                </Button>
-              </div>
-            </section>
-          )}
-        </>
-      )}
+  const addPerson = (person: WorkspacePerson) => {
+    if (speakers.some((item) => item.id === person.id)) return;
+    setSpeakers((items) => [...items, { id: person.id, name: person.name }]);
+  };
+  const discardFailedCapture = () => {
+    if (!window.confirm("녹음과 편집 중인 대본을 버릴까요?")) return;
+    pendingAudio.current = null;
+    setPendingAudioReady(false);
+    setAudioUploadError(undefined);
+    setRecordingFailed(false);
+    setAudioStarted(false);
+    setSpeechFinalized(true);
+    commitDraft(null);
+    setDuration(0);
+    previousSegments.current = [];
+    deletedIds.current.clear();
+  };
+  const cannotStartAudio = saving || pendingAudioReady || Boolean(pendingAudio.current) || Boolean(audioUploadError) || recordingFailed;
+  return <div className="space-y-4">
+    <fieldset disabled={active || saving || draft !== null} className="flex flex-wrap gap-4 text-sm">
+      <legend className="mb-2 font-medium">회의 저장 방식</legend>
+      <label className="flex items-center gap-2"><input type="radio" name="meeting-mode" checked={mode === "audio"} onChange={() => setMode("audio")} />오디오 녹음 + 실시간 받아쓰기</label>
+      <label className="flex items-center gap-2"><input type="radio" name="meeting-mode" checked={mode === "text"} onChange={() => setMode("text")} />텍스트만 작성</label>
+    </fieldset>
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between"><p className="text-sm font-medium">회의 프로젝트</p><Link href={workspacePath(workspaceId, "directory")} className="text-xs underline">프로젝트·참여자 관리</Link></div>
+      <select aria-label="회의 프로젝트" value={projectId} disabled={active || saving} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+        <option value="">검토 단계에서 선택</option>{projects.filter((item) => !item.archivedAt).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+      <p className="text-xs text-muted-foreground">여러 프로젝트 중 이 회의에 해당하는 하나를 고릅니다. 최종 확인 전에 변경할 수 있습니다.</p>
     </div>
-  );
+    <div className="space-y-2">
+      <p className="text-sm font-medium">참여자 · 현재 화자</p>
+      <div className="flex flex-wrap gap-1.5">{speakers.map((item) => <Button key={item.id} size="sm" variant="outline" aria-pressed={currentSpeaker === item.id} className={currentSpeaker === item.id ? "ring-2 ring-current" : ""} onClick={() => { speakerRef.current = item.id; setCurrentSpeaker(item.id); }}>{item.name}</Button>)}</div>
+      <div className="flex flex-wrap gap-2"><select aria-label="저장된 참여자 불러오기" defaultValue="" onChange={(event) => { const person = people.find((item) => item.id === event.target.value); if (person) addPerson(person); event.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-sm"><option value="">저장된 참여자 불러오기</option>{people.filter((item) => !item.archivedAt && !speakers.some((speaker) => speaker.id === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}{item.role ? ` · ${item.role}` : ""}</option>)}</select><Button size="sm" variant="outline" onClick={() => setSpeakers((items) => [...items, { id: `local-${Date.now()}-${items.length}`, name: `화자 ${items.length + 1}` }])}>화자 추가</Button></div>
+      <div className="grid gap-2 sm:grid-cols-2">{speakers.filter((item) => item.id.startsWith("local-")).map((item) => <Input key={item.id} aria-label={`${item.name} 이름`} value={item.name} maxLength={80} onChange={(event) => setSpeakers((items) => items.map((speaker) => speaker.id === item.id ? { ...speaker, name: event.target.value } : speaker))} />)}</div>
+    </div>
+    {mode === "audio" ? <><RecordingControls {...recorder} disableStart={cannotStartAudio} onStart={() => { if (cannotStartAudio) return; stopRequested.current = false; setRecordingFailed(false); setAudioStarted(false); void recorder.start(); }} onStop={stopAudio} /><p className="text-xs text-muted-foreground">녹음과 동시에 브라우저 받아쓰기를 시도합니다. 지원되지 않거나 권한이 없어도 오디오 녹음은 계속됩니다. 오디오 업로드 후 서버 대본을 검토하고 명시적으로 확인해야 분석됩니다.</p>{speech.error && <p role="status" className="text-xs text-muted-foreground">실시간 받아쓰기: {speech.error}</p>}{pendingAudioReady && <p role="status" className="text-xs text-muted-foreground">마지막 받아쓰기 결과를 기다린 뒤 오디오와 초안을 올립니다.</p>}{audioUploadError && <p role="alert" className="space-x-2 text-sm text-destructive"><span>{audioUploadError} 오디오와 편집 내용은 이 화면에 남아 있습니다.</span><Button size="sm" variant="outline" disabled={saving} onClick={() => setPendingAudioReady(true)}>업로드 다시 시도</Button><Button size="sm" variant="ghost" disabled={saving} onClick={discardFailedCapture}>녹음 버리기</Button></p>}{recordingFailed && !audioUploadError && <div role="alert" className="space-x-2 text-sm text-destructive"><span>녹음 오류로 오디오를 올리지 못했습니다. 받아쓴 대본은 유지됩니다.</span>{draft?.some((row) => row.text.trim()) && <Button size="sm" variant="outline" disabled={speech.status !== "idle" || saving} onClick={() => void submit()}>텍스트 초안 업로드</Button>}<Button size="sm" variant="ghost" disabled={speech.status !== "idle" || saving} onClick={discardFailedCapture}>초안 버리기</Button></div>}</> : <div className="flex gap-2">{speech.status === "idle" ? <><Button variant="outline" onClick={addTurn}>직접 작성</Button><Button onClick={() => { previousSegments.current = draftRef.current ?? []; if (speech.start()) commitDraft(draftRef.current ?? []); }}>받아쓰기 시작</Button></> : <Button variant="outline" onClick={speech.stop}>받아쓰기 종료</Button>}</div>}
+    {draft && <section aria-label="대본 편집" className="space-y-3"><h3 className="font-medium">{active ? "실시간 대본 · 바로 편집" : "대본 초안"}</h3><p className="text-xs text-muted-foreground">직접 수정한 내용은 이후 인식 결과가 덮어쓰지 않습니다. 서버 대본은 업로드 후 별도로 보존됩니다.</p><label className="block space-y-1 text-sm">제목<Input value={title} maxLength={255} disabled={saving} onChange={(event) => setTitle(event.target.value)} /></label><TranscriptEditor rows={draft} speakers={speakers} activeSpeaker={currentSpeaker} disabled={saving} listening={active} onChange={update} onDelete={(id) => { deletedIds.current.add(id); commitDraft(draftRef.current?.filter((item) => item.id !== id) ?? null); }} onAdd={addTurn} />{mode === "text" && <Button disabled={active || saving || !draft.some((row) => row.text.trim())} onClick={() => void submit()}>{saving ? "업로드 중…" : "대본 초안 업로드 · 검토로 이동"}</Button>}</section>}
+  </div>;
 }

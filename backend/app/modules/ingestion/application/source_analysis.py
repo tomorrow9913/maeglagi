@@ -10,6 +10,9 @@ from app.modules.context_engine.application.context_store import (
     ContextStoreService,
     ContextStoreUpdater,
 )
+from app.modules.context_engine.application.directory_resolution import (
+    canonicalize_directory_entities,
+)
 from app.modules.context_engine.application.entity_resolution import resolve_extraction
 from app.modules.context_engine.application.extraction import ExtractionPipeline
 from app.modules.context_engine.application.model_roles import ModelRole
@@ -38,6 +41,7 @@ async def analyze_source(
     title: str,
     subject: str,
     text: str,
+    directory_snapshot: dict | None = None,
 ) -> list[str]:
     """One extraction per source, read three ways: timeline, Context Store, graph.
 
@@ -48,7 +52,32 @@ async def analyze_source(
     # stage may pick a `supersedes` from.
     known = await context_store.current_decisions(workspace_id)
     pipeline = ExtractionPipeline(adapter, api_key, model=model)
-    result = await pipeline.extract(text, title=title, known_decisions=known)
+    hint = None
+    if directory_snapshot:
+        project = directory_snapshot.get("project") or {}
+        hint = {
+            "people": [
+                {
+                    "name": item.get("name"),
+                    "role": item.get("role"),
+                    "aliases": item.get("aliases", []),
+                }
+                for item in directory_snapshot.get("people", [])
+            ],
+            "project": {
+                "name": project.get("name"),
+                "goal": project.get("goal"),
+                "description": project.get("description"),
+                "ownerName": project.get("ownerName"),
+                "ownerRole": project.get("ownerRole"),
+            },
+        }
+    result = await pipeline.extract(
+        text, title=title, known_decisions=known, directory_context=hint
+    )
+    trusted_directory_identifiers = canonicalize_directory_entities(
+        result, directory_snapshot, text
+    )
     warnings = list(result.warnings)
 
     warnings += await context_store.apply(
@@ -66,7 +95,12 @@ async def analyze_source(
         return warnings
     # The upload date says nothing about when the document's facts started, so no fallback
     # start is passed: a relation without a stated start keeps an unknown valid_from.
-    graph = resolve_extraction(result, workspace_id=workspace_id, source_id=source_id)
+    graph = resolve_extraction(
+        result,
+        workspace_id=workspace_id,
+        source_id=source_id,
+        trusted_directory_identifiers=trusted_directory_identifiers,
+    )
     warnings += graph.warnings
     warnings += await GraphWriter(graph_store).write(graph)
     return warnings
@@ -86,6 +120,8 @@ class SourceAnalysisService:
         self.repository_factory = repository_factory or SqlContextStoreRepository
 
     async def run(self, session: AsyncSession, *, source: Source, text: str) -> list[str]:
+        if source.kind == "meeting" and source.review_state in {"transcribing", "awaiting_review"}:
+            return self._skip(source, "대본 확인이 끝나지 않았습니다.")
         try:
             adapter, api_key, model = await self.ingestion.provider_with_model(
                 session,
@@ -117,6 +153,7 @@ class SourceAnalysisService:
                 title=source.title,
                 subject=workspace.name if workspace else source.title,
                 text=text,
+                directory_snapshot=source.confirmed_snapshot,
             )
             # Release the Context Store row lock (SELECT ... FOR UPDATE) as soon as we are done.
             await session.commit()

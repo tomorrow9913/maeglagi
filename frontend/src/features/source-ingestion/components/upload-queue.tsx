@@ -21,12 +21,14 @@ export function UploadQueue({
   items,
   jobs,
   onDismiss,
+  onReview,
   className,
 }: {
   items: UploadItem[];
   /** jobId → 폴링으로 갱신되는 최신 처리 상태 */
   jobs: Record<string, ProcessingJob>;
   onDismiss: (id: string) => void;
+  onReview?: (sourceId: string) => void;
   className?: string;
 }) {
   if (items.length === 0) return null;
@@ -73,7 +75,7 @@ export function UploadQueue({
             ) : item.status === "failed" ? (
               <p className="mt-1.5 text-xs text-destructive">{item.errorMessage}</p>
             ) : job ? (
-              <ProcessingTracker job={job} className="mt-2" />
+              <><ProcessingTracker job={job} className="mt-2" />{job.status === "awaiting_review" && onReview && <Button size="sm" className="mt-2" onClick={() => onReview(job.sourceId)}>대본 검토</Button>}</>
             ) : null}
           </li>
         );

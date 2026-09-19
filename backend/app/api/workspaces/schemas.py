@@ -38,6 +38,9 @@ class SourceResponse(BaseModel):
     size_bytes: int | None = Field(default=None, serialization_alias="sizeBytes")
     duration_seconds: float | None = Field(default=None, serialization_alias="durationSeconds")
     transcript_source: str | None = Field(default=None, serialization_alias="transcriptSource")
+    review_state: str | None = Field(default=None, serialization_alias="reviewState")
+    review_revision: int = Field(default=0, serialization_alias="reviewRevision")
+    project_id: UUID | None = Field(default=None, serialization_alias="projectId")
 
 
 class TranscriptSourceRequest(BaseModel):
@@ -46,6 +49,8 @@ class TranscriptSourceRequest(BaseModel):
     text: str = Field(min_length=1)
     title: str | None = Field(default=None, max_length=255)
     duration_seconds: float | None = Field(default=None, ge=0, validation_alias="durationSeconds")
+    project_id: UUID | None = Field(default=None, validation_alias="projectId")
+    utterances: list[dict] | None = None
 
 
 class SimilarChunkResponse(BaseModel):

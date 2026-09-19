@@ -142,6 +142,9 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
       if (recorderRef.current !== recorder || !mountedRef.current) return;
       recorderRef.current = null;
       activeRef.current = false;
+      if (recorder.state !== "inactive") {
+        try { recorder.stop(); } catch { /* the recorder is already unusable */ }
+      }
       releaseMic();
       setStatus("error");
       setErrorMessage("녹음 중 오류가 발생했습니다. 다시 시도해 주세요.");
@@ -150,6 +153,7 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
       recorder.start();
     } catch {
       activeRef.current = false;
+      recorderRef.current = null;
       releaseMic();
       setStatus("error");
       setErrorMessage("녹음을 시작하지 못했습니다.");

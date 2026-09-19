@@ -4,9 +4,10 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials
 from kombu.exceptions import OperationalError
+from pydantic import ValidationError
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -14,7 +15,17 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.jobs.schemas import JobResponse
 from app.api.workspaces.context import router as context_router
 from app.api.workspaces.credentials import router as credentials_router
+from app.api.workspaces.directory import active_project
+from app.api.workspaces.directory import router as directory_router
 from app.api.workspaces.graph import router as graph_router
+from app.api.workspaces.review import (
+    LiveDraft,
+    ReviewUtterance,
+    validate_unique_utterances,
+)
+from app.api.workspaces.review import (
+    router as review_router,
+)
 from app.api.workspaces.schemas import (
     CreateWorkspaceRequest,
     SimilarChunkResponse,
@@ -203,9 +214,24 @@ async def upload_recording(
     user: CurrentUser,
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
+    live_draft: Annotated[str | None, Form(alias="liveDraft")] = None,
+    project_id: Annotated[UUID | None, Form(alias="projectId")] = None,
 ) -> JobResponse:
+    await active_project(session, project_id, workspace_id, user.id)
+    draft = None
+    if live_draft is not None:
+        try:
+            draft = LiveDraft.model_validate_json(live_draft)
+            validate_unique_utterances(draft.utterances)
+        except ValidationError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid live draft") from exc
     source, _ = await _upload_source(workspace_id, audio, "meeting", user, session, credentials)
     source.transcript_source = "server"
+    source.review_state = "transcribing"
+    source.project_id = project_id
+    source.review_utterances = (
+        [item.model_dump(by_alias=True, mode="json") for item in draft.utterances] if draft else []
+    )
     source.status = "queued"
     source.processing_stage = "uploaded"
     source.progress = 0
@@ -229,6 +255,7 @@ async def create_transcript_source(
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    await active_project(session, body.project_id, workspace_id, user.id)
     text_value = body.text.strip()
     if not text_value:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Transcript text is required")
@@ -239,6 +266,17 @@ async def create_transcript_source(
         else now.strftime("회의 대본 %Y-%m-%d %H:%M")
     )
     content = text_value.encode()
+    try:
+        utterances = (
+            [ReviewUtterance.model_validate(item) for item in body.utterances]
+            if body.utterances is not None
+            else [ReviewUtterance(id="initial", speakerName="화자 1", text=text_value)]
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid transcript draft"
+        ) from exc
+    validate_unique_utterances(utterances)
     source = Source(
         workspace_id=workspace.id,
         owner_id=user.id,
@@ -248,17 +286,19 @@ async def create_transcript_source(
         content_type="text/plain; charset=utf-8",
         size_bytes=len(content),
         transcript_source="browser",
+        project_id=body.project_id,
         duration_seconds=body.duration_seconds,
         transcript_text=text_value,
-        status="queued",
-        processing_stage="uploaded",
-        progress=0,
+        review_utterances=[item.model_dump(by_alias=True, mode="json") for item in utterances],
+        review_state="awaiting_review",
+        status="awaiting_review",
+        processing_stage="awaiting_review",
+        progress=0.45,
     )
     source.object_path = f"{user.id}/{workspace.id}/{source.id}/transcript.txt"
     await _upload_object(source, content, credentials)
     session.add(source)
     await session.commit()
-    await _enqueue_source(source, session)
     return _job_response(source)
 
 
@@ -369,4 +409,6 @@ async def _upload_object(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Storage upload failed")
 
 
+workspaces.include_router(directory_router)
+workspaces.include_router(review_router)
 router.include_router(workspaces)
