@@ -15,8 +15,11 @@ from uuid import UUID
 
 from app.modules.context_engine.application.entity_resolution import normalize_name
 from app.modules.context_engine.infrastructure.models import Chunk
+from app.modules.ingestion.application.pipeline import IngestionError
+from app.modules.retrieval.application.lexical import MAX_TEXT, LexicalMatch
 from app.modules.retrieval.domain.answer import AnswerSource
 from app.modules.retrieval.infrastructure.graph_neighborhood import GraphNeighborhood
+from app.modules.workspaces.domain.source_state import ReviewState, SourceStatus
 from app.modules.workspaces.infrastructure.models import Source
 
 logger = logging.getLogger(__name__)
@@ -24,6 +27,7 @@ logger = logging.getLogger(__name__)
 EmbedFn = Callable[[str], Awaitable[list[float]]]
 SearchFn = Callable[[list[float], list[UUID] | None, int], Awaitable[list[tuple[Chunk, float]]]]
 LoadSources = Callable[[list[UUID]], Awaitable[dict[UUID, Source]]]
+LexicalSearch = Callable[[str, list[UUID] | None, int], Awaitable[list[LexicalMatch]]]
 
 EXCERPT_CHARS = 300
 MIN_KEY_CHARS = 2  # a one-letter key would match almost any question
@@ -75,6 +79,7 @@ class HybridRetriever:
         search: SearchFn,
         load_sources: LoadSources,
         graph: GraphNeighborhood | None = None,
+        lexical_search: LexicalSearch | None = None,
         vector_limit: int = 6,
         graph_limit: int = 4,
         max_evidence: int = 8,
@@ -83,6 +88,7 @@ class HybridRetriever:
         self.search = search
         self.load_sources = load_sources
         self.graph = graph
+        self.lexical_search = lexical_search
         self.vector_limit = vector_limit
         self.graph_limit = graph_limit
         self.max_evidence = max_evidence
@@ -91,13 +97,21 @@ class HybridRetriever:
         self, workspace_id: UUID, question: str, *, now: datetime | None = None
     ) -> RetrievalResult:
         # One embedding serves both the plain search and the graph-scoped one.
-        embedding = await self.embed(question)
-        hits = await self.search(embedding, None, self.vector_limit)
+        try:
+            embedding = await self.embed(question)
+        except IngestionError:
+            if self.lexical_search is None:
+                raise
+            logger.info("embedding unavailable; using keyword evidence")
+            embedding = None
+        hits = (
+            await self.search(embedding, None, self.vector_limit) if embedding is not None else []
+        )
         facts: list[GraphFact] = []
         entity_names: list[str] = []
 
         graph_sources = await self._graph_sources(workspace_id, question, now, facts, entity_names)
-        if graph_sources:
+        if graph_sources and embedding is not None:
             hits += await self.search(embedding, graph_sources, self.graph_limit)
 
         chunks: dict[UUID, Chunk] = {}
@@ -105,6 +119,12 @@ class HybridRetriever:
             chunks.setdefault(chunk.id, chunk)
         ordered = list(chunks.values())[: self.max_evidence]
         sources = await self.load_sources(list({c.source_id for c in ordered})) if ordered else {}
+        sources = {
+            identifier: source
+            for identifier, source in sources.items()
+            if source.status == SourceStatus.SUCCEEDED
+            and source.review_state in (None, ReviewState.CONFIRMED)
+        }
 
         # A chunk whose source is gone is not evidence; numbering stays contiguous without it.
         evidence = [
@@ -118,10 +138,39 @@ class HybridRetriever:
                     excerpt=chunk.content.strip()[:EXCERPT_CHARS],
                     timestamp=chunk.start_seconds,
                 ),
-                text=chunk.content.strip(),
+                text=chunk.content.strip()[:MAX_TEXT],
             )
             for index, chunk in enumerate((c for c in ordered if c.source_id in sources), start=1)
         ]
+        if not evidence and self.lexical_search is not None:
+            matches = await self.lexical_search(question, None, self.max_evidence)
+            if graph_sources and len(matches) < self.max_evidence:
+                matches += await self.lexical_search(
+                    question, graph_sources, self.max_evidence - len(matches)
+                )
+            seen: set[tuple[UUID, UUID | None]] = set()
+            for match in matches:
+                key = (match.source_id, match.chunk_id)
+                if key in seen or not match.text.strip():
+                    continue
+                seen.add(key)
+                text = match.text.strip()[:MAX_TEXT]
+                evidence.append(
+                    Evidence(
+                        source=AnswerSource(
+                            index=len(evidence) + 1,
+                            source_id=match.source_id,
+                            chunk_id=match.chunk_id,
+                            kind=match.kind,
+                            title=match.title,
+                            excerpt=text[:EXCERPT_CHARS],
+                            timestamp=match.timestamp,
+                        ),
+                        text=text,
+                    )
+                )
+                if len(evidence) >= self.max_evidence:
+                    break
         return RetrievalResult(evidence=evidence, facts=facts, entities=entity_names)
 
     async def _graph_sources(

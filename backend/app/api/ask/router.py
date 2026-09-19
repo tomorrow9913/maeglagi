@@ -20,6 +20,7 @@ from app.modules.context_engine.infrastructure.models import Chunk, ContextStore
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
 from app.modules.retrieval.application.answer import answer_events
 from app.modules.retrieval.application.hybrid import HybridRetriever
+from app.modules.retrieval.application.lexical import search_lexically
 from app.modules.retrieval.domain.answer import error_event
 from app.modules.retrieval.infrastructure.graph_neighborhood import GraphNeighborhood
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
@@ -128,12 +129,23 @@ async def ask(
     async def load_sources(ids: list[UUID]) -> dict[UUID, Source]:
         return await _load_sources(session, workspace_id, user.id, ids)
 
+    async def lexical(question: str, source_ids: list[UUID] | None, limit: int):
+        return await search_lexically(
+            session,
+            workspace_id=workspace_id,
+            owner_id=user.id,
+            question=question,
+            source_ids=source_ids,
+            limit=limit,
+        )
+
     graph_store = Neo4jGraphStore.from_settings(settings) if settings.neo4j_enabled else None
     try:
         retriever = HybridRetriever(
             embed=embed,
             search=search,
             load_sources=load_sources,
+            lexical_search=lexical,
             graph=GraphNeighborhood(graph_store) if graph_store else None,
         )
         retrieval = await retriever.retrieve(workspace_id, body.question)

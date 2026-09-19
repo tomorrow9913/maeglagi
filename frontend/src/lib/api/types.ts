@@ -341,7 +341,8 @@ export type AnswerSource = {
   /** 답변 본문의 [n]과 대응 */
   index: number;
   sourceId: string;
-  chunkId: string;
+  /** 본문 검색 근거는 색인 청크 없이 소스 자체를 인용할 수 있습니다. */
+  chunkId?: string;
   kind: SourceKind;
   title: string;
   excerpt: string;

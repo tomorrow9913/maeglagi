@@ -35,7 +35,9 @@ from app.modules.retrieval.application.hybrid import (
     RetrievalResult,
     understand_query,
 )
+from app.modules.retrieval.application.lexical import LexicalMatch
 from app.modules.retrieval.domain.answer import AnswerSource
+from app.modules.workspaces.domain.source_state import SourceStatus
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 
 # The package re-exports the APIRouter as `router`, which shadows the submodule attribute.
@@ -184,6 +186,7 @@ SOURCE_A = Source(
     object_path="a",
     content_type="text/plain",
     size_bytes=1,
+    status=SourceStatus.SUCCEEDED,
 )
 SOURCE_B = Source(
     id=uuid4(),
@@ -194,6 +197,7 @@ SOURCE_B = Source(
     object_path="b",
     content_type="text/plain",
     size_bytes=1,
+    status=SourceStatus.SUCCEEDED,
 )
 
 
@@ -559,6 +563,17 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     )
     monkeypatch.setattr(ask_module, "IngestionPipeline", FakeIngestion)
 
+    async def lexical(session: Any, **kwargs: Any) -> list[LexicalMatch]:
+        return [
+            LexicalMatch(
+                c.source_id, c.id, SOURCE_A.kind, SOURCE_A.title, c.content, c.start_seconds
+            )
+            for c in FakeIngestion.chunks
+            if "redis" in c.content.lower()
+        ]
+
+    monkeypatch.setattr(ask_module, "search_lexically", lexical)
+
     async def session() -> Any:
         yield FakeSession(USER)
 
@@ -653,16 +668,39 @@ def test_someone_elses_or_an_unknown_workspace_is_a_404(client: TestClient) -> N
     assert ask(client).status_code == 404
 
 
-def test_a_workspace_without_a_usable_key_is_a_422_before_any_streaming(
+def test_a_workspace_without_an_answer_key_is_a_422_before_any_streaming(
     client: TestClient,
 ) -> None:
     FakeIngestion.no_chat_key = True
     chat = ask(client)
-    FakeIngestion.no_chat_key, FakeIngestion.no_embedding_key = False, True
-    embed = ask(client)
-
     assert chat.status_code == 422 and "chat" in chat.json()["detail"]
-    assert embed.status_code == 422 and "embedding" in embed.json()["detail"]
+
+
+def test_answer_only_key_uses_keyword_evidence(client: TestClient) -> None:
+    FakeIngestion.no_embedding_key = True
+
+    events = read_events(ask(client))
+
+    assert [event["type"] for event in events] == ["sources", "token", "token", "done"]
+    assert events[0]["sources"][0]["sourceId"] == str(SOURCE_A.id)
+    assert len(FakeIngestion.adapter.requests) == 1
+
+
+def test_processed_source_text_has_a_valid_source_only_citation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeIngestion.chunks = []
+
+    async def source_text(session: Any, **kwargs: Any) -> list[LexicalMatch]:
+        return [LexicalMatch(SOURCE_A.id, None, SOURCE_A.kind, SOURCE_A.title, "Redis 도입 결정")]
+
+    monkeypatch.setattr(ask_module, "search_lexically", source_text)
+    events = read_events(ask(client))
+
+    assert [event["type"] for event in events] == ["sources", "token", "token", "done"]
+    assert events[0]["sources"][0]["sourceId"] == str(SOURCE_A.id)
+    assert "chunkId" not in events[0]["sources"][0]
+    assert "Redis 도입 결정" in FakeIngestion.adapter.requests[0].messages[1].content
 
 
 @pytest.mark.parametrize("question", ["", "   ", "x" * 2001])
@@ -690,6 +728,52 @@ async def test_the_question_is_embedded_once_and_both_searches_reuse_it() -> Non
     assert embed.questions == ["박지훈은 무엇을 했나요?"]  # embedded once, not once per search
     assert len(search.calls) == 2  # the plain search and the graph-scoped one
     assert [call[0] for call in search.calls] == [VECTOR, VECTOR]
+
+
+async def test_keyword_fallback_deduplicates_and_bounds_citations() -> None:
+    item = LexicalMatch(SOURCE_A.id, uuid4(), SOURCE_A.kind, SOURCE_A.title, "결정 내용")
+
+    async def unavailable(question: str) -> list[float]:
+        raise IngestionError("embedding unavailable")
+
+    async def lexical(
+        question: str, source_ids: list[UUID] | None, limit: int
+    ) -> list[LexicalMatch]:
+        return [
+            item,
+            item,
+            *[
+                LexicalMatch(SOURCE_A.id, uuid4(), SOURCE_A.kind, SOURCE_A.title, "결정 내용")
+                for _ in range(20)
+            ],
+        ]
+
+    retriever = HybridRetriever(
+        embed=unavailable,
+        search=Recorder([]),
+        load_sources=load_sources,
+        lexical_search=lexical,
+        max_evidence=4,
+    )
+    result = await retriever.retrieve(WORKSPACE, "결정은?")
+
+    assert len(result.evidence) == 4
+    assert [e.source.index for e in result.evidence] == [1, 2, 3, 4]
+    assert len({e.source.chunk_id for e in result.evidence}) == 4
+
+
+async def test_vector_evidence_from_unreviewed_source_is_excluded() -> None:
+    draft = SOURCE_A.model_copy(update={"status": SourceStatus.AWAITING_REVIEW})
+
+    async def draft_sources(ids: list[UUID]) -> dict[UUID, Source]:
+        return {draft.id: draft}
+
+    retriever = HybridRetriever(
+        embed=Embedder(),
+        search=Recorder([chunk(SOURCE_A, "비공개 초안")]),
+        load_sources=draft_sources,
+    )
+    assert (await retriever.retrieve(WORKSPACE, "초안")).evidence == []
 
 
 def test_the_endpoint_embeds_once_and_answers_with_the_model_the_workspace_chose(
