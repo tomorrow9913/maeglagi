@@ -33,6 +33,18 @@ async def test_vault_create_uses_bound_parameters_and_returns_secret_id() -> Non
 
 
 @pytest.mark.asyncio
+async def test_vault_delete_targets_only_the_given_secret_id() -> None:
+    secret_id = uuid4()
+    session = SimpleNamespace(execute=AsyncMock())
+
+    await SupabaseCredentialVault().delete(session, secret_id=secret_id)
+
+    statement, parameters = session.execute.await_args.args
+    assert str(statement) == "delete from vault.secrets where id = :secret_id"
+    assert parameters == {"secret_id": secret_id}
+
+
+@pytest.mark.asyncio
 async def test_resolver_reads_vault_secret_by_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     secret_id = uuid4()
     session = SimpleNamespace()

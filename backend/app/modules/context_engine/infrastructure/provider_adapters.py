@@ -313,27 +313,50 @@ class AnthropicAdapter:
             raise ProviderError(f"모델 목록을 가져오지 못했습니다 ({response.status_code}).")
         return sorted(item["id"] for item in response.json().get("data", []))
 
-    async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+    def _message_payload(self, request: ChatRequest, *, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {
             **request.provider_options,
             "model": request.model,
-            "messages": [message.model_dump() for message in request.messages],
-            "max_tokens": request.max_tokens or 1024,
+            "messages": [
+                message.model_dump() for message in request.messages if message.role != "system"
+            ],
+            "max_tokens": request.max_tokens if request.max_tokens is not None else 1024,
+            "stream": stream,
         }
+        system = [message.content for message in request.messages if message.role == "system"]
+        if system:
+            payload["system"] = "\n\n".join(system)
         if request.temperature is not None:
             payload["temperature"] = request.temperature
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{self.base_url}/messages", headers=self._headers(api_key), json=payload
-            )
+        return payload
+
+    async def chat(self, request: ChatRequest, api_key: str) -> ChatResponse:
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"{self.base_url}/messages",
+                    headers=self._headers(api_key),
+                    json=self._message_payload(request, stream=False),
+                )
+        except httpx.HTTPError as exc:
+            raise ProviderError("Provider에 연결하지 못했습니다.") from exc
         if not response.is_success:
             raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
-        body = response.json()
-        text = "".join(block.get("text", "") for block in body.get("content", []))
-        usage = {key: int(value) for key, value in body.get("usage", {}).items()}
-        return ChatResponse(
-            text=text, model=body.get("model", request.model), provider=self.id, usage=usage
-        )
+        try:
+            body = response.json()
+            text = "".join(
+                block["text"]
+                for block in body.get("content", [])
+                if block.get("type") == "text" and isinstance(block.get("text"), str)
+            )
+            usage = {
+                key: value for key, value in body.get("usage", {}).items() if isinstance(value, int)
+            }
+            return ChatResponse(
+                text=text, model=body.get("model", request.model), provider=self.id, usage=usage
+            )
+        except (ValueError, TypeError, AttributeError, KeyError) as exc:
+            raise ProviderError("Provider가 유효한 답변을 반환하지 않았습니다.") from exc
 
     async def embedding(self, request: EmbeddingRequest, api_key: str) -> EmbeddingResponse:
         raise ProviderCapabilityError("Anthropic은 embedding을 지원하지 않습니다.")
@@ -349,4 +372,57 @@ class AnthropicAdapter:
         raise ProviderCapabilityError("Anthropic structuredOutput은 아직 구현되지 않았습니다.")
 
     async def stream(self, request: ChatRequest, api_key: str) -> AsyncIterator[str]:
-        raise NotImplementedError("Streaming adapter는 후속 단계에서 구현합니다.")
+        """Translate Messages SSE text deltas, requiring a successful terminal event."""
+        try:
+            async with (
+                httpx.AsyncClient(timeout=httpx.Timeout(30, read=120)) as client,
+                client.stream(
+                    "POST",
+                    f"{self.base_url}/messages",
+                    headers=self._headers(api_key),
+                    json=self._message_payload(request, stream=True),
+                ) as response,
+            ):
+                if not response.is_success:
+                    raise ProviderError(f"모델 요청에 실패했습니다 ({response.status_code}).")
+                async for event in self._events(response):
+                    event_type = event.get("type")
+                    if event_type == "error":
+                        # Provider error bodies can echo prompts/credentials; never forward them.
+                        raise ProviderError("Provider 스트리밍 중 오류가 발생했습니다.")
+                    if event_type == "message_stop":
+                        return
+                    block = None
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta")
+                        if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                            block = delta
+                    elif event_type == "content_block_start":
+                        content = event.get("content_block")
+                        if isinstance(content, dict) and content.get("type") == "text":
+                            block = content
+                    if block is not None:
+                        text = block.get("text")
+                        if not isinstance(text, str):
+                            raise ProviderError("Provider가 유효하지 않은 스트림을 반환했습니다.")
+                        if text:
+                            yield text
+                raise ProviderError("Provider 답변 스트림이 완료 전에 종료됐습니다.")
+        except httpx.HTTPError as exc:
+            raise ProviderError("Provider에 연결하지 못했습니다.") from exc
+
+    @staticmethod
+    async def _events(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+        data: list[str] = []
+        async for line in response.aiter_lines():
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif not line and data:
+                try:
+                    event = json.loads("\n".join(data))
+                except ValueError as exc:
+                    raise ProviderError("Provider가 유효하지 않은 스트림을 반환했습니다.") from exc
+                data.clear()
+                if not isinstance(event, dict):
+                    raise ProviderError("Provider가 유효하지 않은 스트림을 반환했습니다.")
+                yield event

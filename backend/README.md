@@ -49,3 +49,26 @@ LiteLLM의 공개 가격 맵을 6시간 캐시해 입력·출력 토큰 단가 �
 참고용이며 실제 청구액과 다를 수 있습니다. 가격이 없거나 가격 맵 조회에 실패해도
 모델을 숨기지 않고, 가격을 모르는 모델은 확인된 모델 뒤에 보여줍니다. API 키는 가격
 맵 제공처로 전송하지 않습니다.
+
+## Provider credential management
+
+`/api/v1/workspaces/{workspace_id}/provider-credentials`의 POST는 이름이 있는 추가 키를
+등록합니다. 기존 기본 키나 모델 설정은 바꾸지 않습니다. `/{credential_id}`의 PUT은
+해당 키만 교체하고 DELETE는 저장된 키와 Vault secret을 함께 삭제합니다.
+`/{credential_id}/default`의 PUT으로 기본 키를 명시적으로 선택합니다.
+
+다른 키가 있는 경우 기본 키를 먼저 변경해야 현재 기본 키를 삭제할 수 있습니다.
+선택된 모델 provider의 마지막 활성 키 삭제는 409로 거절하므로 모델 설정을 먼저
+변경해야 합니다. 기존 `/llm-key` API는 호환성을 유지합니다.
+
+## Streaming and upload validation
+
+Claude 답변은 [Messages 스트리밍 규약](https://platform.claude.com/docs/en/build-with-claude/streaming)에
+따라 텍스트 이벤트를 즉시 전달합니다. 시스템 지시문은 별도 `system` 파라미터로 보내며,
+정상 종료 이벤트 없이 연결이 끊기거나 provider 오류가 발생하면 Ask에 오류를 전달합니다.
+근거 목록과 인용 번호 처리에는 기존 Ask 이벤트 계약을 사용합니다.
+
+문서 및 녹음 업로드는 저장·큐 등록 전에 용량, MIME, 파일 형식 시그니처를 검사합니다.
+DOCX는 ZIP 내 필수 문서 항목, 텍스트는 UTF-8 여부를 확인합니다. 이는 전체 파일의
+파싱 성공을 보장하지 않으며 실제 파싱은 worker가 수행합니다. 브라우저가 MP4 녹음을
+`recording.webm`으로 보내면 검증된 MP4 형식에 맞게 파일명을 보정합니다.

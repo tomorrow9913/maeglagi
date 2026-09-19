@@ -85,9 +85,17 @@ async def _locked_roles(session: AsyncSession, workspace: Workspace) -> set[Mode
 
 
 async def _owned_workspace(
-    workspace_id: UUID, user: CurrentUser, session: AsyncSession
+    workspace_id: UUID, user: CurrentUser, session: AsyncSession, *, for_update: bool = False
 ) -> Workspace:
-    workspace = await session.get(Workspace, workspace_id)
+    # The model writer shares this lock with credential mutations. Refresh the
+    # identity map so selections and key options are read after earlier writers.
+    workspace = (
+        await session.get(
+            Workspace, workspace_id, with_for_update=True, populate_existing=True
+        )
+        if for_update
+        else await session.get(Workspace, workspace_id)
+    )
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
     return workspace
@@ -121,7 +129,7 @@ async def update_workspace_models(
     session: Session,
     settings: AppSettings,
 ) -> WorkspaceModelsResponse:
-    workspace = await _owned_workspace(workspace_id, user, session)
+    workspace = await _owned_workspace(workspace_id, user, session, for_update=True)
     options = await options_for_workspace(session, workspace.id, user.id)
     problems = invalid_selections(body.selections, options)
     if problems:
