@@ -62,6 +62,7 @@ class FakeSession:
         self.commits = 0
         self.get_calls: list[dict[str, Any]] = []
         self.workspace_locked = False
+        self.flushed: list[list[Any]] = []
 
     async def get(self, model: Any, identifier: Any, **kwargs: Any) -> Workspace | None:
         self.get_calls.append(kwargs)
@@ -70,6 +71,9 @@ class FakeSession:
 
     def add(self, obj: Any) -> None:
         self.added.append(obj)
+
+    async def flush(self) -> None:
+        self.flushed.append(self.added.copy())
 
     async def commit(self) -> None:
         self.commits += 1
@@ -383,6 +387,8 @@ def test_the_chosen_models_are_stored_and_the_rest_get_the_recommended_one(env: 
     response = create({"embedding": EMBED_LARGE})
 
     assert response.status_code == 201
+    assert len(env.session.flushed) == 1
+    assert [type(item).__name__ for item in env.session.flushed[0]] == ["Workspace"]
     settings = created_workspace(env).model_settings
     assert settings["embedding"] == EMBED_LARGE  # what the user chose wins
     assert settings["answer"]["model"] == "gpt-4o-mini"  # recommended alias, not the dated one
