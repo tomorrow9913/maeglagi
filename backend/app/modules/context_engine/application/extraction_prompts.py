@@ -87,3 +87,18 @@ PLANNING_PROMPT = (
     "- related_systems: 연동하거나 영향을 받는 시스템·기술 이름\n"
     "찾지 못한 값은 null 또는 빈 목록으로 둡니다. 채우려고 추측하지 않습니다.\n" + COMMON_RULES
 )
+
+CONTEXT_UPDATE_PROMPT = (
+    "당신은 프로젝트 맥락 갱신기입니다. 새 자료가 들어왔을 때 프로젝트의 현재 상황을 갱신합니다.\n"
+    "입력의 existing은 갱신 전 상태(summary, current_state, 열린 이슈·결정·할 일)이고, "
+    "new_source는 새 자료에서 뽑은 결과입니다.\n"
+    "- summary: 프로젝트가 무엇이고 어디까지 왔는지 두세 문장. 이전 요약을 바탕으로 새 자료가 "
+    "바꾼 것만 고칩니다.\n"
+    "- current_state: 지금 시점의 상황을 세 문장 이내로. 이미 대체된 결정을 현재 방침처럼 "
+    "쓰지 않습니다.\n"
+    "- resolved_issues: 새 자료가 해결됐다고 명시한 열린 이슈만, existing 또는 new_source의 "
+    "이슈 title과 정확히 같게 적습니다. 해결됐다는 문장을 source_refs에 그대로 옮깁니다.\n"
+    "- completed_actions: 새 자료가 끝났다고 명시한 할 일만 같은 방식으로 적습니다.\n"
+    "이슈나 할 일을 지우는 것은 원문이 끝났다고 말할 때뿐이며, 추측으로 닫지 않습니다. "
+    "원문에 없는 내용은 만들지 않습니다."
+)

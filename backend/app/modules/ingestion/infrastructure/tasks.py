@@ -9,8 +9,8 @@ from app.core.celery import celery_app
 from app.core.config import get_settings
 from app.core.database import session_factory
 from app.modules.ingestion.application.document_parser import DocumentParser
-from app.modules.ingestion.application.graph_extraction import GraphExtractionService
 from app.modules.ingestion.application.pipeline import IngestionPipeline
+from app.modules.ingestion.application.source_analysis import SourceAnalysisService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
 from app.modules.workspaces.infrastructure.models import Source
 
@@ -131,7 +131,7 @@ async def _process_source(source_id: UUID) -> None:
         source.progress = 0.7
         session.add(source)
         await session.commit()
-        await GraphExtractionService().run(session, source=source, text=graph_text)
+        await SourceAnalysisService().run(session, source=source, text=graph_text)
 
         source.status = "processing"
         source.processing_stage = "graphing"
