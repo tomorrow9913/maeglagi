@@ -170,6 +170,19 @@ Ollama API 규약: [소개](https://docs.ollama.com/api/introduction),
 
 ## 설계 원칙
 
+NIM 비스트리밍 요청의 읽기 제한은 `NVIDIA_CHAT_READ_TIMEOUT_SECONDS`로 조절합니다
+(기본 180초, 허용 범위 60–600초). `z-ai/glm-5.3-flash`의 추출 단계는
+`NVIDIA_GLM_EXTRACTION_REASONING_EFFORT=low`를 기본으로 사용하며 `high`, `max`도
+설정할 수 있습니다. 다른 모델과 Ask의 추론 설정에는 적용하지 않습니다.
+[NVIDIA 모델 문서](https://docs.api.nvidia.com/nim/re/reference/z-ai-glm-5-3-flash)에 따르면
+이 모델의 공급자 기본 추론 강도는 `max`입니다.
+
+실패한 서버 음성 인식은 저장된 녹음으로 브라우저 받아쓰기를 다시 시도할 수 있습니다.
+오디오 트랙 입력을 지원하는 데스크톱 Chrome/Edge 135 이상에서 제공하며,
+브라우저의 음성 인식 서비스에 녹음이 전송될 수 있습니다. 결과는 같은 소스의 초안으로
+저장하고 사용자가 편집·확정한 뒤 분석합니다. 실제 음성 서비스와 긴 녹음의 재생 URL
+만료 동작은 [후속 검증 항목](https://github.com/tomorrow9913/maeglagi/issues/80)입니다.
+
 - 원문, 관계형 메타데이터, 임베딩, 그래프를 각각 Object Storage, PostgreSQL, Vector Store, Graph DB에 저장합니다.
 - LLM 호출은 `context_engine` 모듈의 provider port 뒤로 격리합니다.
 - 라우터는 입력 검증과 HTTP 변환만 맡고 비즈니스 흐름은 application service가 담당합니다.

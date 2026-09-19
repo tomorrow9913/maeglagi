@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.core.api_key_format import api_key_format_error
+from app.core.config import get_settings
 from app.modules.context_engine.application.provider import (
     ChatRequest,
     ChatResponse,
@@ -150,7 +151,16 @@ class OpenAICompatibleAdapter:
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            timeout = (
+                httpx.Timeout(
+                    60,
+                    connect=10,
+                    read=get_settings().nvidia_chat_read_timeout_seconds,
+                )
+                if self.id == "nvidia"
+                else 60
+            )
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers=self._headers(api_key),

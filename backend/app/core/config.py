@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     transcription_model: str = "whisper-1"
     extraction_model: str = "gpt-4o-mini"
     answer_model: str = "gpt-4o-mini"
+    # Non-streaming NIM extraction can take longer than ordinary chat requests.
+    nvidia_chat_read_timeout_seconds: int = Field(default=180, ge=60, le=600)
+    nvidia_glm_extraction_reasoning_effort: Literal["low", "high", "max"] = "low"
     # The model each provider preselects per job, before and after a key is entered. Operators
     # keep it current (env PROVIDER_DEFAULT_MODELS takes JSON). A default the key does not offer,
     # or that the provider has retired, is simply skipped.

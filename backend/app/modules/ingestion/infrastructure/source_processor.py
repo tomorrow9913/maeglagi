@@ -13,6 +13,7 @@ from sqlmodel import select
 
 from app.core.config import get_settings
 from app.core.database import engine, session_factory
+from app.modules.context_engine.application.extraction import ExtractionError
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.ingestion.application.document_parser import DocumentParser
 from app.modules.ingestion.application.pipeline import (
@@ -31,6 +32,9 @@ from app.modules.workspaces.infrastructure.models import Source
 
 _CAPABILITIES = frozenset({"chat", "embedding", "transcription", "structuredOutput"})
 _PROVIDERS = frozenset({"openai", "anthropic", "nvidia", "ollama"})
+_EXTRACTION_STAGES = frozenset(
+    {"classification", "entity", "event", "relation", "context", "context_update"}
+)
 _MISSING_TRANSCRIPTION_MESSAGE = "음성 변환을 지원하는 프로바이더 연결 및 모델 설정이 필요합니다."
 _GENERIC_FAILURE_MESSAGE = "소스 처리에 실패했습니다. 설정을 확인한 뒤 다시 시도해 주세요."
 
@@ -48,6 +52,7 @@ class SafeAttemptError(RuntimeError):
         http_status: int | None = None,
         capability: str | None = None,
         provider: str | None = None,
+        extraction_stage: str | None = None,
         terminal: bool = False,
     ) -> None:
         message = (
@@ -63,6 +68,7 @@ class SafeAttemptError(RuntimeError):
         self.http_status = http_status
         self.capability = capability
         self.provider = provider
+        self.extraction_stage = extraction_stage
         self.terminal = terminal
 
 
@@ -87,6 +93,14 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         None,
     )
     provider = None
+    extraction_stage = next(
+        (
+            item.stage
+            for item in chain
+            if isinstance(item, ExtractionError) and item.stage in _EXTRACTION_STAGES
+        ),
+        None,
+    )
     for item in chain:
         value = getattr(item, "provider", None)
         if isinstance(item, MissingCapabilityCredentialError) and item.providers:
@@ -136,6 +150,7 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         http_status=status,
         capability=capability if code == "missing_capability_credential" else None,
         provider=provider,
+        extraction_stage=extraction_stage,
         terminal=code == "missing_capability_credential" or status in {401, 403, 404},
     )
     # Preserve source locations for Sentry without retaining the original
