@@ -19,8 +19,9 @@ import { useAsync } from "@/hooks/use-async";
 import { api, BOOTSTRAP_AI_PROVIDERS, pickDefaultProvider } from "@/lib/api";
 import type { LlmProvider, Workspace } from "@/lib/api";
 
+import { useKeyModels } from "../hooks/use-key-models";
 import { ApiKeyField } from "./api-key-field";
-import { ProviderCapabilities } from "./provider-capabilities";
+import { KeyModelSection } from "./key-model-section";
 import { ProviderSelect } from "./provider-select";
 
 /**
@@ -41,14 +42,17 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
       ? chosen
       : pickDefaultProvider(providers);
   const [apiKey, setApiKey] = useState("");
-  const [isKeyValid, setIsKeyValid] = useState(false);
+  // 검증을 통과한 키. 이 키로만 모델 목록을 받아 오므로, 없으면 아직 확인 전이라는 뜻입니다.
+  const [validatedKey, setValidatedKey] = useState<string>();
+  const isKeyValid = Boolean(validatedKey);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const keyModels = useKeyModels(provider, validatedKey);
 
   const reset = () => {
     setName("");
     setChosen(undefined);
     setApiKey("");
-    setIsKeyValid(false);
+    setValidatedKey(undefined);
   };
 
   const submit = async () => {
@@ -58,6 +62,8 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
         name,
         llmProvider: provider,
         llmApiKey: apiKey,
+        // 목록을 받았을 때만 보냅니다. 못 받았다면 서버가 정한 기본을 씁니다.
+        ...(keyModels.roles ? { models: keyModels.selections } : {}),
       });
 
       toast.success(`${created.name} 워크스페이스를 만들었습니다.`);
@@ -120,13 +126,13 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
             <ProviderSelect
               id="workspace-provider"
               value={provider}
-              onChange={setChosen}
+              onChange={(next) => {
+                // 다른 provider에 이전 키로 모델을 요청하지 않도록, 키는 다시 확인될 때까지 비웁니다.
+                setValidatedKey(undefined);
+                setChosen(next);
+              }}
               providers={providers}
               disabled={isSubmitting}
-            />
-            <ProviderCapabilities
-              provider={providers.find((item) => item.id === provider)}
-              className="pt-1"
             />
           </div>
 
@@ -139,13 +145,27 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
               provider={provider}
               value={apiKey}
               onChange={setApiKey}
-              onValidated={(result) => setIsKeyValid(Boolean(result?.valid))}
+              onValidated={(_result, key) => setValidatedKey(key)}
               disabled={isSubmitting}
             />
           </div>
 
+          <KeyModelSection
+            idPrefix="workspace-model"
+            hasValidKey={isKeyValid}
+            roles={keyModels.roles}
+            selections={keyModels.selections}
+            onSelect={keyModels.select}
+            isLoading={keyModels.isLoading}
+            error={keyModels.error}
+            disabled={isSubmitting}
+          />
+
           <DialogFooter>
-            <Button type="submit" disabled={!name.trim() || !isKeyValid || isSubmitting}>
+            <Button
+              type="submit"
+              disabled={!name.trim() || !isKeyValid || keyModels.isLoading || isSubmitting}
+            >
               {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
               만들기
             </Button>
