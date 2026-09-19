@@ -26,6 +26,9 @@ class AsyncSessionAdapter:
     def add(self, obj: object) -> None:
         self.session.add(obj)
 
+    async def exec(self, statement: object):
+        return self.session.execute(statement).scalars()
+
     async def flush(self) -> None:
         self.session.flush()
 

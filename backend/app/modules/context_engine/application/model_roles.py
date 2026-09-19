@@ -8,8 +8,9 @@ fact about the models its key offers, not about the provider's name.
 import re
 from datetime import date
 from enum import StrEnum
+from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.context_engine.application.provider import ModelInfo, ProviderAdapter
 
@@ -47,8 +48,13 @@ _LIGHT = re.compile(r"mini|nano|small|haiku|flash|lite")
 
 
 class ModelOption(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     provider: str
     model: str
+    credential_id: UUID | None = Field(
+        default=None, alias="credentialId", exclude_if=lambda v: v is None
+    )
 
 
 def roles_for_model(model_id: str, capabilities: tuple[str, ...]) -> set[ModelRole]:
@@ -78,16 +84,18 @@ def options_by_role(
     *,
     defaults: dict[str, dict[str, str]] | None = None,
     today: date | None = None,
+    credential_ids: list[UUID | None] | None = None,
 ) -> dict[ModelRole, list[ModelOption]]:
     """Exclude retired models, put offered defaults first, then sort other models by price."""
     today = today or date.today()
     options: dict[ModelRole, list[ModelOption]] = {role: [] for role in ROLE_ORDER}
-    for adapter, infos in listings:
+    for index, (adapter, infos) in enumerate(listings):
+        credential_id = credential_ids[index] if credential_ids is not None else None
         live = {i.id: i for i in infos if i.shutdown_date is None or i.shutdown_date > today}
         preferred = (defaults or {}).get(adapter.id, {})
         for role in ROLE_ORDER:
             offered = [
-                ModelOption(provider=adapter.id, model=model)
+                ModelOption(provider=adapter.id, model=model, credential_id=credential_id)
                 for model in live
                 if (
                     role.value in live[model].roles
@@ -131,7 +139,13 @@ def invalid_selections(
         except ValueError:
             problems.append(f"알 수 없는 용도입니다: {name}")
             continue
-        if choice not in options[role]:
+        if choice not in options[role] and not (
+            choice.credential_id is None
+            and any(
+                option.provider == choice.provider and option.model == choice.model
+                for option in options[role]
+            )
+        ):
             problems.append(
                 f"{choice.provider}/{choice.model}은(는) {name} 용도로 쓸 수 없는 모델입니다."
             )

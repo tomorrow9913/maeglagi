@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
+from app.modules.context_engine.application.model_catalog import has_indexed_chunks
 from app.modules.context_engine.application.model_roles import (
     ROLE_CAPABILITY,
     ModelRole,
@@ -21,7 +22,10 @@ from app.modules.context_engine.application.provider import (
 )
 from app.modules.context_engine.infrastructure.models import Chunk
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
-from app.modules.context_engine.infrastructure.provider_registry import provider_registry
+from app.modules.context_engine.infrastructure.provider_registry import (
+    adapter_for_credential,
+    provider_registry,
+)
 from app.modules.ingestion.application.chunking import CharacterOverlapChunker
 from app.modules.ingestion.application.normalization import NormalizationService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
@@ -30,6 +34,25 @@ from app.modules.workspaces.infrastructure.models import ProviderCredential, Sou
 
 class IngestionError(RuntimeError):
     pass
+
+
+class MissingCapabilityCredentialError(IngestionError):
+    """No usable account credential can perform a workspace model role."""
+
+    code = "missing_capability_credential"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        capability: str,
+        providers: tuple[str, ...] | None = None,
+        selected: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.capability = capability
+        self.providers = providers
+        self.selected = selected
 
 
 class ResolvedProvider(NamedTuple):
@@ -80,25 +103,39 @@ class IngestionPipeline:
         owner_id: UUID,
         role: ModelRole,
     ) -> ResolvedProvider:
-        """The key and model for `role`: what the owner chose, else the first key that can."""
+        """The account connection and model selected by this workspace's owner."""
         capability = ROLE_CAPABILITY[role]
         workspace = await session.get(Workspace, workspace_id)
         chosen = selection_of(workspace.model_settings if workspace else None, role)
         result = await session.exec(
             select(ProviderCredential)
             .where(
-                ProviderCredential.workspace_id == workspace_id,
                 ProviderCredential.owner_id == owner_id,
                 ProviderCredential.status == "active",
             )
-            .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
+            .order_by(
+                (ProviderCredential.workspace_id == workspace_id).desc(),
+                ProviderCredential.is_default.desc(),
+                ProviderCredential.created_at,
+            )
         )
         credentials = list(result.all())
         if chosen is not None:
-            credentials = [c for c in credentials if c.provider == chosen.provider]
-        needs_key_match = chosen is not None and len(credentials) > 1
+            credentials = [
+                c
+                for c in credentials
+                if c.provider == chosen.provider
+                and (chosen.credential_id is None or c.id == chosen.credential_id)
+            ]
+        needs_key_match = (
+            chosen is not None and chosen.credential_id is None and len(credentials) > 1
+        )
         for credential in credentials:
-            adapter = provider_registry.get(credential.provider)
+            adapter = (
+                adapter_for_credential(credential)
+                if credential.provider == "ollama"
+                else provider_registry.get(credential.provider)
+            )
             if adapter is None or capability not in adapter.capabilities:
                 continue
             try:
@@ -122,8 +159,15 @@ class IngestionPipeline:
                 model = self._default_model(credential.provider, role)
             return ResolvedProvider(adapter, api_key, model)
         if chosen is not None:
-            raise IngestionError("선택한 모델을 제공하는 API key가 없습니다.")
-        raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
+            raise MissingCapabilityCredentialError(
+                "선택한 모델을 제공하는 API key가 없습니다.",
+                capability=capability,
+                providers=(chosen.provider,),
+                selected=True,
+            )
+        raise MissingCapabilityCredentialError(
+            f"{capability}을 지원하는 API key가 없습니다.", capability=capability
+        )
 
     async def transcribe(
         self,
@@ -173,35 +217,45 @@ class IngestionPipeline:
         chunks = self.chunker.chunk(normalized)
         if not chunks:
             raise IngestionError("처리할 transcript 내용이 없습니다.")
-        provider = await self.provider_with_model(
-            session,
-            workspace_id=source.workspace_id,
-            owner_id=source.owner_id,
-            role=ModelRole.EMBEDDING,
-        )
         try:
-            response = await provider.adapter.embedding(
-                EmbeddingRequest(
-                    input=[chunk.content for chunk in chunks],
-                    model=provider.model,
-                    dimensions=embedding_dimensions_argument(
-                        provider.model, self.settings.embedding_dimensions
-                    ),
-                ),
-                provider.api_key,
+            provider = await self.provider_with_model(
+                session,
+                workspace_id=source.workspace_id,
+                owner_id=source.owner_id,
+                role=ModelRole.EMBEDDING,
             )
-        except ProviderError as exc:
-            raise IngestionError(str(exc)) from exc
-        if len(response.embeddings) != len(chunks):
-            raise IngestionError("임베딩 응답 개수가 chunk 개수와 다릅니다.")
-        if any(
-            len(embedding) != self.settings.embedding_dimensions
-            for embedding in response.embeddings
-        ):
-            raise IngestionError("임베딩 차원이 Vector Store schema와 다릅니다.")
+        except MissingCapabilityCredentialError as exc:
+            # A selected model or existing vectors must not be silently replaced by
+            # text-only chunks when its credential becomes unavailable.
+            if exc.selected or await has_indexed_chunks(session, source.workspace_id):
+                raise
+            # New text remains searchable by the lexical path and available for extraction.
+            embeddings: list[list[float] | None] = [None] * len(chunks)
+        else:
+            try:
+                response = await provider.adapter.embedding(
+                    EmbeddingRequest(
+                        input=[chunk.content for chunk in chunks],
+                        model=provider.model,
+                        dimensions=embedding_dimensions_argument(
+                            provider.model, self.settings.embedding_dimensions
+                        ),
+                    ),
+                    provider.api_key,
+                )
+            except ProviderError as exc:
+                raise IngestionError(str(exc)) from exc
+            if len(response.embeddings) != len(chunks):
+                raise IngestionError("임베딩 응답 개수가 chunk 개수와 다릅니다.")
+            if any(
+                len(embedding) != self.settings.embedding_dimensions
+                for embedding in response.embeddings
+            ):
+                raise IngestionError("임베딩 차원이 Vector Store schema와 다릅니다.")
+            embeddings = response.embeddings
 
         await session.execute(delete(Chunk).where(Chunk.source_id == source.id))
-        for chunk, embedding in zip(chunks, response.embeddings, strict=True):
+        for chunk, embedding in zip(chunks, embeddings, strict=True):
             session.add(
                 Chunk(
                     workspace_id=source.workspace_id,

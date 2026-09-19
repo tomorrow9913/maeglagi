@@ -47,7 +47,7 @@ async def pg(monkeypatch: pytest.MonkeyPatch):
     await engine.dispose()
 
 
-def test_terminal_error_report_uses_only_job_identifiers(monkeypatch) -> None:
+def test_terminal_error_report_uses_only_safe_diagnostics(monkeypatch) -> None:
     tags = {}
     captured = []
     warnings = []
@@ -72,9 +72,16 @@ def test_terminal_error_report_uses_only_job_identifiers(monkeypatch) -> None:
     )
     source_id = uuid4()
     pg_executor._report_terminal_failure(source_id, 4)
-    assert tags == {"source_id": str(source_id), "job_generation": "4"}
+    assert tags == {
+        "source_id": str(source_id),
+        "job_generation": "4",
+        "failure_stage": "unknown",
+        "failure_code": "recovered_terminal",
+        "error_type": "Unknown",
+    }
     assert len(captured) == 1
-    assert str(captured[0]) == "Ingestion provider retries exhausted"
+    assert isinstance(captured[0], source_processor.SafeAttemptError)
+    assert "provider" not in str(captured[0]).lower()
     assert len(warnings) == 1
 
 
@@ -283,7 +290,9 @@ async def test_terminal_source_failure_survives_crash_before_job_completion(
 
     monkeypatch.setattr(pg_executor, "process_source_attempt", should_not_run)
     reports = []
-    monkeypatch.setattr(pg_executor, "_report_terminal_failure", lambda *args: reports.append(args))
+    monkeypatch.setattr(
+        pg_executor, "_report_terminal_failure", lambda *args, **_kwargs: reports.append(args)
+    )
     owner = uuid4()
     claim = await pg_executor.claim_job(owner, 60)
     assert claim is not None
@@ -344,7 +353,9 @@ async def test_provider_retries_are_bounded_and_review_gate_is_preserved(pg, mon
         job = await session.get(ProcessingJob, source.id)
         assert job.status == "failed"
         assert job.provider_attempts == 4
-    assert reports == [(source.id, claim[1])]
+    assert len(reports) == 1
+    assert reports[0][:2] == (source.id, claim[1])
+    assert isinstance(reports[0][2], source_processor.SafeAttemptError)
 
 
 @pytest.mark.asyncio
@@ -419,6 +430,111 @@ async def test_executor_start_wake_stop_and_recovery(pg, monkeypatch) -> None:
         await asyncio.wait_for(completed(), timeout=3)
     finally:
         await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_executor_startup_commits_missing_job_before_first_claim(pg, monkeypatch) -> None:
+    owner = uuid4()
+    workspace = Workspace(owner_id=owner, name="Startup recovery")
+    source = Source(
+        workspace_id=workspace.id,
+        owner_id=owner,
+        kind="document",
+        title="test.txt",
+        object_path=str(uuid4()),
+        content_type="text/plain",
+        size_bytes=1,
+        status="queued",
+        processing_stage="uploaded",
+    )
+    async with pg() as session:
+        session.add(workspace)
+        await session.flush()
+        session.add(source)
+        await session.commit()
+
+    saw_claim = asyncio.Event()
+
+    async def inspect_claim(_owner, _lease_seconds):
+        async with pg() as session:
+            assert (await session.get(ProcessingJob, source.id)).status == "pending"
+        saw_claim.set()
+        return None
+
+    monkeypatch.setattr(pg_executor, "claim_job", inspect_claim)
+    monkeypatch.setattr(
+        pg_executor,
+        "process_source_attempt",
+        lambda *_args, **_kwargs: pytest.fail("Recovery must not call providers"),
+    )
+    settings = Settings(
+        _env_file=None, processing_executor="postgres", pg_executor_poll_seconds=0.2
+    )
+    executor = pg_executor.PostgresExecutor(settings)
+    executor.start()
+    try:
+        await asyncio.wait_for(saw_claim.wait(), timeout=3)
+        assert executor._reconciled
+    finally:
+        await executor.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_step", ["recovery", "commit"])
+async def test_executor_retries_recovery_after_database_failure_before_claim(
+    monkeypatch, failure_step
+) -> None:
+    attempts = 0
+    commits = 0
+    commit_attempts = 0
+    claimed = asyncio.Event()
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def commit(self):
+            nonlocal commits, commit_attempts
+            commit_attempts += 1
+            if failure_step == "commit" and commit_attempts == 1:
+                raise DBAPIError("recovery commit", {}, RuntimeError("synthetic database outage"))
+            commits += 1
+
+    async def recover(_session):
+        nonlocal attempts
+        attempts += 1
+        if failure_step == "recovery" and attempts == 1:
+            raise DBAPIError("recovery", {}, RuntimeError("synthetic database outage"))
+        return 1
+
+    async def claim(_owner, _lease_seconds):
+        assert attempts == 2
+        assert commits == 1
+        claimed.set()
+        return None
+
+    monkeypatch.setattr(pg_executor, "session_factory", Session)
+    monkeypatch.setattr(pg_executor, "recover_missing_jobs", recover)
+    monkeypatch.setattr(pg_executor, "claim_job", claim)
+    monkeypatch.setattr(
+        pg_executor,
+        "process_source_attempt",
+        lambda *_args, **_kwargs: pytest.fail("Recovery must not call providers"),
+    )
+    settings = Settings(
+        _env_file=None, processing_executor="postgres", pg_executor_poll_seconds=0.2
+    )
+    executor = pg_executor.PostgresExecutor(settings)
+    executor.start()
+    try:
+        await asyncio.wait_for(claimed.wait(), timeout=3)
+        assert executor._reconciled
+        assert attempts == 2
+    finally:
+        await executor.stop()
 
 
 @pytest.mark.asyncio

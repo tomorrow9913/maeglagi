@@ -18,14 +18,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         structlog.contextvars.bind_contextvars(
             request_id=request_id,
             method=request.method,
-            path=request.url.path,
         )
         started = perf_counter()
         try:
             response = await call_next(request)
-        except Exception:
-            logger.exception(
-                "request.failed", duration_ms=round((perf_counter() - started) * 1000, 2)
+        except Exception as exc:
+            # FastAPI/Sentry captures the actual exception once. Logging only
+            # stable fields avoids copying exception messages or request data.
+            logger.warning(
+                "request.failed",
+                error_type=type(exc).__name__,
+                duration_ms=round((perf_counter() - started) * 1000, 2),
             )
             raise
         logger.info(

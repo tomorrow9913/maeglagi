@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { KeyRound, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -10,17 +10,19 @@ import { useApi } from "@/lib/api/context";
 import type { AiProvider, LlmProvider, WorkspaceSecrets } from "@/lib/api";
 
 import { ApiKeyField } from "./api-key-field";
+import { OllamaBaseUrlField } from "./ollama-base-url-field";
 import { ProviderSelect } from "./provider-select";
 
+const hasOllamaKey = (credential: WorkspaceSecrets) =>
+  credential.keyHint !== "none" && credential.keyHint !== "local";
+
 export function ApiKeyCard({
-  workspaceId,
   credentials,
   providers,
   provider,
   onProviderChange,
   onUpdated,
 }: {
-  workspaceId: string;
   credentials: WorkspaceSecrets[];
   providers: AiProvider[];
   provider: LlmProvider;
@@ -32,53 +34,26 @@ export function ApiKeyCard({
   const [editingCredential, setEditingCredential] = useState<WorkspaceSecrets>();
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [keyAction, setKeyAction] = useState<"keep" | "replace" | "remove">("replace");
   const [validatedKey, setValidatedKey] = useState<string>();
   const [isSaving, setIsSaving] = useState(false);
-  const [localStatus, setLocalStatus] = useState("연결 확인 중…");
   const formRef = useRef<HTMLFormElement>(null);
   const selectedCredentials = credentials.filter((item) => item.provider === provider);
-  const isLocal = providers.find((item) => item.id === provider)?.authMode === "none";
-  useEffect(() => {
-    if (!isLocal) return;
-    const controller = new AbortController();
-    api.validateApiKey({ provider, apiKey: "" }, controller.signal)
-      .then(async (result) => {
-        if (!result.valid) throw new Error(result.message);
-        const models = await api.listKeyModels({ provider, apiKey: "" }, controller.signal);
-        if (!controller.signal.aborted) setLocalStatus(`서버 연결됨 · 사용 가능한 모델 ${models.roles.reduce((count, role) => count + role.options.length, 0)}개`);
-      })
-      .catch((error) => { if (!controller.signal.aborted) setLocalStatus(error instanceof Error ? error.message : "로컬 연결을 확인하지 못했습니다."); });
-    return () => controller.abort();
-  }, [api, isLocal, provider]);
-
-  if (isLocal) return <section className="space-y-4 rounded-xl border border-border bg-card p-5">
-    <h2 className="text-sm font-medium">서버 관리 로컬 AI 연결</h2>
-    <p className="text-xs text-muted-foreground">이 연결의 주소와 모델은 서버가 관리합니다. API 키나 URL을 입력하지 않습니다.</p>
-    <p aria-live="polite" className="text-xs text-muted-foreground">{localStatus}</p>
-    <ProviderSelect id="settings-provider" value={provider} providers={providers} disabled={isSaving} onChange={(next) => { setIsEditing(false); setEditingCredential(undefined); setApiKey(""); setValidatedKey(undefined); setLocalStatus("연결 확인 중…"); onProviderChange(next); }} />
-    <Button type="button" size="sm" disabled={isSaving} onClick={() => { void (async () => {
-      setIsSaving(true);
-      try {
-        const result = await api.validateApiKey({ provider, apiKey: "" });
-        if (!result.valid) throw new Error(result.message);
-        await api.updateApiKey(workspaceId, { provider, label: "Local", apiKey: "" });
-        onUpdated();
-        toast.success("서버의 로컬 AI 연결을 확인했습니다.");
-      } catch (error) { toast.error(error instanceof Error ? error.message : "로컬 연결을 확인하지 못했습니다."); }
-      finally { setIsSaving(false); }
-    })(); }}>{isSaving ? "확인 중…" : selectedCredentials.length ? "로컬 연결 다시 확인" : "로컬 연결 사용"}</Button>
-  </section>;
+  const isOllama = provider === "ollama";
 
   const beginEdit = (credential?: WorkspaceSecrets) => {
     setEditingCredential(credential);
     setLabel(credential?.label ?? "");
     setApiKey("");
+    setBaseUrl(credential?.baseUrl ?? "");
+    setKeyAction(credential && hasOllamaKey(credential) ? "keep" : "remove");
     setValidatedKey(undefined);
     setIsEditing(true);
     window.requestAnimationFrame(() => {
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       formRef.current
-        ?.querySelector<HTMLInputElement>(credential ? "#settings-key" : "#settings-label")
+        ?.querySelector<HTMLInputElement>(credential?.provider === "ollama" ? "#settings-base-url" : credential ? "#settings-key" : "#settings-label")
         ?.focus({ preventScroll: true });
     });
   };
@@ -88,28 +63,44 @@ export function ApiKeyCard({
     setIsEditing(false);
     setEditingCredential(undefined);
     setApiKey("");
+    setBaseUrl("");
+    setKeyAction("replace");
     setValidatedKey(undefined);
   };
 
   const save = async () => {
     const trimmedLabel = label.trim();
+    const needsValidation = !isOllama || !editingCredential || keyAction === "replace";
     if (
       !trimmedLabel ||
-      validatedKey !== apiKey.trim() ||
+      (isOllama && !baseUrl.trim()) ||
+      (needsValidation && validatedKey !== apiKey.trim()) ||
       (!editingCredential &&
         credentials.some((item) => item.provider === provider && item.label === trimmedLabel))
     )
       return;
     setIsSaving(true);
     try {
-      await api.updateApiKey(workspaceId, { provider, label: trimmedLabel, apiKey: apiKey.trim() });
+      if (editingCredential) {
+        await api.rotateAccountCredential(editingCredential.id, {
+          ...(isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "") ? { baseUrl: baseUrl.trim() } : {}),
+          ...(isOllama && keyAction === "keep" ? {} : { apiKey: isOllama && keyAction === "remove" ? "" : apiKey.trim() }),
+        });
+      } else {
+        await api.createAccountCredential({
+          provider,
+          label: trimmedLabel,
+          apiKey: apiKey.trim(),
+          ...(isOllama ? { baseUrl: baseUrl.trim() } : {}),
+        });
+      }
       setIsEditing(false);
       setApiKey("");
       setValidatedKey(undefined);
       onUpdated();
-      toast.success("API key를 저장하고 기본 키로 지정했습니다.");
+      toast.success(editingCredential ? "계정 AI 연결을 수정했습니다." : "계정 AI 연결을 등록했습니다.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "키를 저장하지 못했습니다.");
+      toast.error(error instanceof Error ? error.message : "AI 연결을 저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
     }
@@ -121,10 +112,10 @@ export function ApiKeyCard({
         <div className="flex items-start gap-3">
           <KeyRound className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-medium">LLM API key</h2>
+            <h2 className="text-sm font-medium">AI 연결</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              등록된 키의 provider와 이름을 확인하고 새 키를 추가하거나 교체할 수 있습니다. 아래
-              provider 선택은 키 등록에만 적용됩니다. 키 원문은 저장 후 다시 보여주지 않습니다.
+              이 계정의 AI 연결은 여러 워크스페이스에서 함께 사용합니다. 아래 공급자 선택은 연결 등록에만
+              적용됩니다. 키 원문은 저장 후 다시 보여주지 않습니다.
             </p>
             <form
               ref={formRef}
@@ -137,13 +128,13 @@ export function ApiKeyCard({
               {isEditing ? (
                 <p className="text-xs text-muted-foreground">
                   {editingCredential
-                    ? "기존 키를 교체하고 기본 키로 지정합니다."
-                    : "새 키를 추가하고 기본 키로 지정합니다."}
+                    ? isOllama ? "계정의 Ollama 서버 주소와 키를 수정합니다." : "계정의 기존 키를 교체합니다."
+                    : "계정에 새 연결을 추가합니다."}
                 </p>
               ) : null}
               <div className="space-y-1.5">
                 <label htmlFor="settings-provider" className="text-sm font-medium">
-                  API key provider
+                  AI 공급자
                 </label>
                 <ProviderSelect
                   id="settings-provider"
@@ -155,13 +146,13 @@ export function ApiKeyCard({
               </div>
               {!isEditing ? (
                 <Button type="button" size="sm" variant="outline" onClick={() => beginEdit()}>
-                  {selectedCredentials.length ? "다른 키 추가" : "API key 등록"}
+                  {selectedCredentials.length ? "다른 연결 추가" : "연결 등록"}
                 </Button>
               ) : (
                 <>
                   <div className="space-y-1.5">
                     <label htmlFor="settings-label" className="text-sm font-medium">
-                      키 이름
+                      연결 이름
                     </label>
                     <Input
                       id="settings-label"
@@ -177,18 +168,39 @@ export function ApiKeyCard({
                       (item) => item.provider === provider && item.label === label.trim(),
                     ) ? (
                       <p className="text-xs text-warning">
-                        이 이름의 키가 이미 있습니다. 목록에서 키 교체를 선택하거나 다른 이름을
+                        이 이름의 연결이 이미 있습니다. 목록에서 수정을 선택하거나 다른 이름을
                         입력해 주세요.
                       </p>
                     ) : null}
                   </div>
-                  <div className="space-y-1.5">
+                  {isOllama ? (
+                    <OllamaBaseUrlField
+                      id="settings-base-url"
+                      value={baseUrl}
+                      disabled={isSaving}
+                      onChange={(value) => { setBaseUrl(value); setValidatedKey(undefined); }}
+                    />
+                  ) : null}
+                  {isOllama && editingCredential ? (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">기존 API key</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" variant={keyAction === "keep" ? "default" : "outline"} disabled={isSaving} onClick={() => { setKeyAction("keep"); setApiKey(""); setValidatedKey(undefined); }}>유지</Button>
+                        <Button type="button" size="sm" variant={keyAction === "replace" ? "default" : "outline"} disabled={isSaving} onClick={() => { setKeyAction("replace"); setApiKey(""); setValidatedKey(undefined); }}>교체</Button>
+                        <Button type="button" size="sm" variant={keyAction === "remove" ? "default" : "outline"} disabled={isSaving} onClick={() => { setKeyAction("remove"); setApiKey(""); setValidatedKey(undefined); }}>제거</Button>
+                      </div>
+                      {keyAction !== "replace" ? <p className="text-xs text-muted-foreground">{keyAction === "keep" ? "저장된 키를 유지합니다. 저장할 때 서버 연결을 확인합니다." : "저장된 키를 제거합니다. 저장할 때 키 없이 서버 연결을 확인합니다."}</p> : null}
+                    </div>
+                  ) : null}
+                  {(!isOllama || !editingCredential || keyAction === "replace") ? <div className="space-y-1.5">
                     <label htmlFor="settings-key" className="text-sm font-medium">
-                      새 API key
+                      {isOllama ? "API key (선택 사항)" : "새 API key"}
                     </label>
                     <ApiKeyField
                       id="settings-key"
                       provider={provider}
+                      authMode={isOllama ? "optionalApiKey" : "apiKey"}
+                      baseUrl={isOllama ? baseUrl : undefined}
                       value={apiKey}
                       onChange={(value) => {
                         setApiKey(value);
@@ -199,14 +211,15 @@ export function ApiKeyCard({
                       }
                       disabled={isSaving}
                     />
-                  </div>
+                  </div> : null}
                   <div className="flex gap-2">
                     <Button
                       type="submit"
                       size="sm"
                       disabled={
                         !label.trim() ||
-                        validatedKey !== apiKey.trim() ||
+                        (isOllama && !baseUrl.trim()) ||
+                        ((!isOllama || !editingCredential || keyAction === "replace") && validatedKey !== apiKey.trim()) ||
                         isSaving ||
                         (!editingCredential &&
                           credentials.some(
@@ -225,6 +238,7 @@ export function ApiKeyCard({
                       onClick={() => {
                         setIsEditing(false);
                         setApiKey("");
+                        setValidatedKey(undefined);
                       }}
                     >
                       취소
@@ -237,10 +251,10 @@ export function ApiKeyCard({
         </div>
       </section>
       <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="text-sm font-medium">등록된 API 키</h2>
+        <h2 className="text-sm font-medium">계정에 등록된 AI 연결</h2>
         <div className="mt-4 space-y-2">
           {credentials.length === 0 ? (
-            <p className="text-sm text-muted-foreground">등록된 키가 없습니다.</p>
+            <p className="text-sm text-muted-foreground">등록된 연결이 없습니다.</p>
           ) : (
             credentials.map((credential) => (
               <div
@@ -252,9 +266,12 @@ export function ApiKeyCard({
                     credential.provider}
                 </span>
                 <span className="font-medium">{credential.label}</span>
-                <span className="font-mono text-muted-foreground">••••{credential.keyHint}</span>
+                {credential.baseUrl ? <span className="min-w-0 break-all text-xs text-muted-foreground">{credential.baseUrl}</span> : null}
+                {credential.provider === "ollama"
+                  ? <span className="text-xs text-muted-foreground">{hasOllamaKey(credential) ? "키 설정됨" : "키 없음"}</span>
+                  : credential.keyHint ? <span className="font-mono text-muted-foreground">••••{credential.keyHint}</span> : null}
                 <span className="text-xs text-muted-foreground">
-                  {credential.isDefault ? "기본 키 · " : ""}
+                  {credential.isDefault ? "기본 연결 · " : ""}
                   {credential.status === "active" ? "활성" : credential.status}
                 </span>
                 <Button
@@ -267,7 +284,7 @@ export function ApiKeyCard({
                     beginEdit(credential);
                   }}
                 >
-                  키 교체
+                  수정
                 </Button>
               </div>
             ))

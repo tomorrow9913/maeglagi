@@ -9,6 +9,7 @@ import { WorkspaceModelsCard } from "@/features/workspace/components/workspace-m
 import { useAsync } from "@/hooks/use-async";
 import { useApi } from "@/lib/api/context";
 import type { AiProvider, LlmProvider } from "@/lib/api";
+import { withOllamaProvider } from "@/lib/api";
 
 export default function SettingsPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -16,22 +17,27 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
   const { data, error, isLoading, reload } = useAsync(
     (signal) =>
       Promise.all([
-        api.listProviderCredentials(workspaceId, signal),
-        api.listWorkspaceProviders(workspaceId, signal),
+        api.listAccountCredentials(signal),
+        api.listProviders(signal),
       ]),
     [workspaceId],
   );
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>();
   const [modelRevision, setModelRevision] = useState(0);
   const credentials = data?.[0] ?? [];
-  const providers: AiProvider[] = data?.[1] ?? [];
+  const providers: AiProvider[] = data
+    ? withOllamaProvider(data[1]).map((item) => ({
+        ...item,
+        configured: credentials.some((credential) => credential.provider === item.id && credential.status === "active"),
+      }))
+    : [];
 
   useEffect(() => {
-    if (!data || data[1].length === 0) return;
+    if (!data) return;
     setSelectedProvider((current) =>
-      current && data[1].some((item) => item.id === current)
+      current && withOllamaProvider(data[1]).some((item) => item.id === current)
         ? current
-        : (data[0].find((item) => item.isDefault)?.provider ?? data[1][0].id),
+        : (data[0].find((item) => item.isDefault)?.provider ?? withOllamaProvider(data[1])[0].id),
     );
   }, [data]);
 
@@ -43,7 +49,7 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
 
   return (
     <>
-      <PageHeader title="설정" description="워크스페이스 정보와 BYOK API key를 관리합니다." />
+      <PageHeader title="설정" description="계정의 AI 연결과 이 워크스페이스의 모델 선택을 관리합니다." />
       {isLoading && !data ? (
         <ListSkeleton count={1} className="h-40" />
       ) : error ? (
@@ -56,7 +62,6 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
       ) : (
         <div className="space-y-4">
           <ApiKeyCard
-            workspaceId={workspaceId}
             credentials={credentials}
             providers={providers}
             provider={provider}
@@ -71,10 +76,11 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
               key={`${workspaceId}-${modelRevision}`}
               workspaceId={workspaceId}
               providers={providers}
+              credentials={credentials}
             />
           ) : (
             <section className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-              사용할 모델을 보려면 위에서 API key를 등록해 주세요.
+              사용할 모델을 보려면 위에서 AI 연결을 등록해 주세요.
             </section>
           )}
         </div>

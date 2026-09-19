@@ -23,8 +23,8 @@ from app.modules.context_engine.infrastructure.provider_adapters import (
 )
 from app.modules.ingestion.application import pipeline as pipeline_module
 from app.modules.ingestion.application.pipeline import (
-    IngestionError,
     IngestionPipeline,
+    MissingCapabilityCredentialError,
     embedding_dimensions_argument,
 )
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
@@ -249,8 +249,11 @@ async def test_the_key_of_the_chosen_models_provider_is_used_even_if_it_is_not_t
 
 
 async def test_a_job_the_only_key_cannot_do_is_an_error_not_a_guess(providers: None) -> None:
-    with pytest.raises(IngestionError, match="embedding"):
+    with pytest.raises(MissingCapabilityCredentialError, match="embedding") as caught:
         await resolve({}, ["anthropic"], ModelRole.EMBEDDING)
+    assert caught.value.code == "missing_capability_credential"
+    assert caught.value.capability == "embedding"
+    assert caught.value.providers is None
 
 
 async def test_a_choice_whose_key_is_gone_does_not_call_a_different_provider(
@@ -258,8 +261,10 @@ async def test_a_choice_whose_key_is_gone_does_not_call_a_different_provider(
 ) -> None:
     chosen = {"answer": {"provider": "openai", "model": "gpt-4o"}}
 
-    with pytest.raises(IngestionError, match="선택한 모델"):
+    with pytest.raises(MissingCapabilityCredentialError, match="선택한 모델") as caught:
         await resolve(chosen, ["anthropic"], ModelRole.ANSWER)
+    assert caught.value.capability == "chat"
+    assert caught.value.providers == ("openai",)
 
 
 async def test_an_unchosen_job_never_sends_one_providers_model_name_to_another(
@@ -539,6 +544,63 @@ async def test_first_and_later_indexes_keep_the_legacy_model_without_saving_a_ch
     assert adapter.models_used == ["text-embedding-legacy", "text-embedding-legacy"]
     assert session.workspace.model_settings == {}
     assert session.workspace not in session.added
+
+
+@pytest.mark.parametrize(
+    ("chosen", "has_vectors", "allowed"),
+    [
+        ({}, False, True),
+        ({"embedding": {"provider": "openai", "model": "text-embedding-3-small"}}, False, False),
+        ({}, True, False),
+    ],
+)
+async def test_indexing_without_embedding_credential_keeps_searchable_text_only_when_safe(
+    monkeypatch: pytest.MonkeyPatch,
+    chosen: dict[str, Any],
+    has_vectors: bool,
+    allowed: bool,
+) -> None:
+    class IndexSession(Session):
+        def __init__(self) -> None:
+            super().__init__(chosen, [], indexed=has_vectors)
+            self.added: list[Any] = []
+
+        async def execute(self, statement: Any) -> None:
+            pass
+
+        def add(self, item: Any) -> None:
+            self.added.append(item)
+
+    session = IndexSession()
+    indexer = pipeline()
+    monkeypatch.setattr(indexer.normalizer, "normalize", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        indexer.chunker,
+        "chunk",
+        lambda _: [
+            SimpleNamespace(content="confirmed edit", position=0, start_seconds=1, end_seconds=2)
+        ],
+    )
+    source = Source(
+        workspace_id=WORKSPACE,
+        owner_id=OWNER,
+        kind="meeting",
+        title="source",
+        object_path="test/source",
+        content_type="audio/mpeg",
+        size_bytes=4,
+    )
+
+    if not allowed:
+        with pytest.raises(MissingCapabilityCredentialError):
+            await indexer.index_source(session, source=source, segments=[])  # type: ignore[arg-type]
+        assert session.added == []
+        return
+    assert await indexer.index_source(session, source=source, segments=[]) == 1  # type: ignore[arg-type]
+    saved = [item for item in session.added if isinstance(item, Chunk)]
+    assert len(saved) == 1
+    assert saved[0].content == "confirmed edit"
+    assert saved[0].embedding is None
 
 
 def test_anthropic_metadata_is_read_from_the_models_list() -> None:

@@ -18,7 +18,7 @@ export default function WorkspacesPage() {
 
   // 만들자마자 바로 들어가는 편이 자연스러워 새 워크스페이스로 이동합니다.
   const onCreated = useCallback(
-    (created: Workspace) => router.push(workspacePath(created.id)),
+    (created: Workspace) => router.push(workspacePath(created.id, "ask")),
     [router],
   );
 

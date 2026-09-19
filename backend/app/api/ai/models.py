@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.workspaces.credentials import _base_url, _lock_account
 from app.auth import CurrentUser
 from app.core.config import Settings, get_settings
+from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
 from app.core.database import get_session
 from app.modules.context_engine.application.model_catalog import (
     has_indexed_chunks,
@@ -25,7 +27,7 @@ from app.modules.context_engine.infrastructure.credential_validation import (
 )
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
-from app.modules.workspaces.infrastructure.models import Workspace
+from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -48,9 +50,11 @@ class WorkspaceModelsResponse(BaseModel):
 class KeyModelsRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    provider: str
+    provider: str | None = None
+    credential_id: UUID | None = Field(default=None, validation_alias="credentialId")
     # Ollama uses the administrator configured server address and no user key.
     api_key: str = Field(default="", validation_alias="apiKey")
+    base_url: str | None = Field(default=None, validation_alias="baseUrl")
 
 
 class UpdateModelsRequest(BaseModel):
@@ -102,12 +106,47 @@ async def _owned_workspace(
 
 
 @router.post("/llm-keys/models", response_model=WorkspaceModelsResponse)
-async def list_key_models(body: KeyModelsRequest, _user: CurrentUser) -> WorkspaceModelsResponse:
+async def list_key_models(
+    body: KeyModelsRequest, user: CurrentUser, session: Session
+) -> WorkspaceModelsResponse:
     """The models a key can use, sorted into jobs, for choosing before a workspace exists."""
-    valid, message = await validate_provider_credential(body.provider, body.api_key)
+    if body.credential_id is not None:
+        credential = await session.get(ProviderCredential, body.credential_id)
+        if credential is None or credential.owner_id != user.id or credential.status != "active":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Credential not found")
+        if body.provider is not None and body.provider != credential.provider:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Provider mismatch")
+        provider = credential.provider
+        base_url = credential.base_url
+        try:
+            key = await resolve_credential_secret(session, credential)
+        except CredentialUnavailableError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Saved credential is unavailable"
+            ) from exc
+    else:
+        if body.provider is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "credentialId or provider is required"
+            )
+        provider = body.provider
+        base_url = _base_url(provider, body.base_url)
+        key = body.api_key
+    valid, message = await (
+        validate_provider_credential(provider, key, base_url)
+        if provider == "ollama"
+        else validate_provider_credential(provider, key)
+    )
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
-    return _response(await options_for_key(body.provider, body.api_key), None, set())
+    options = await (
+        options_for_key(provider, key, base_url, credential.id if body.credential_id else None)
+        if provider == "ollama"
+        else options_for_key(provider, key, credential_id=credential.id)
+        if body.credential_id is not None
+        else options_for_key(provider, key)
+    )
+    return _response(options, None, set())
 
 
 @router.get("/workspaces/{workspace_id}/ai/models", response_model=WorkspaceModelsResponse)
@@ -115,7 +154,7 @@ async def get_workspace_models(
     workspace_id: UUID, user: CurrentUser, session: Session, provider: str | None = None
 ) -> WorkspaceModelsResponse:
     workspace = await _owned_workspace(workspace_id, user, session)
-    if provider is not None and provider_registry.get(provider) is None:
+    if provider is not None and provider not in {adapter.id for adapter in provider_registry.all()}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown provider")
     options = await options_for_workspace(session, workspace.id, user.id, provider)
     return _response(options, workspace.model_settings, await _locked_roles(session, workspace))
@@ -129,6 +168,7 @@ async def update_workspace_models(
     session: Session,
     settings: AppSettings,
 ) -> WorkspaceModelsResponse:
+    await _lock_account(session, user.id)
     workspace = await _owned_workspace(workspace_id, user, session, for_update=True)
     options = await options_for_workspace(session, workspace.id, user.id)
     problems = invalid_selections(body.selections, options)
@@ -162,7 +202,10 @@ async def update_workspace_models(
 
     workspace.model_settings = {
         **workspace.model_settings,
-        **{role: choice.model_dump() for role, choice in body.selections.items()},
+        **{
+            role: choice.model_dump(mode="json", by_alias=True)
+            for role, choice in body.selections.items()
+        },
     }
     session.add(workspace)
     await session.commit()

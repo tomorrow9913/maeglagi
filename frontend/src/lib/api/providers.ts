@@ -9,6 +9,15 @@ import type { AiProvider, LlmProvider } from "./types";
  */
 export const BOOTSTRAP_AI_PROVIDERS: readonly AiProvider[] = [
   {
+    id: "ollama",
+    displayName: "Ollama",
+    authMode: "optionalApiKey",
+    requiresBaseUrl: true,
+    capabilities: ["chat", "embedding", "structuredOutput", "models"],
+    configured: false,
+    models: [],
+  },
+  {
     id: "openai",
     displayName: "OpenAI",
     capabilities: ["chat", "embedding", "structuredOutput", "transcription", "models"],
@@ -52,7 +61,18 @@ export function pickDefaultProvider(providers: readonly AiProvider[]): LlmProvid
   return providers[0]?.id ?? "";
 }
 
+/** Ollama 주소는 사용자별 연결이므로 서버 환경 변수 유무와 관계없이 선택할 수 있습니다. */
+export function withOllamaProvider(providers: readonly AiProvider[]): AiProvider[] {
+  const ollama = BOOTSTRAP_AI_PROVIDERS.find((provider) => provider.id === "ollama")!;
+  return providers.some((provider) => provider.id === "ollama")
+    ? providers.map((provider) => provider.id === "ollama"
+      ? { ...provider, authMode: "optionalApiKey", requiresBaseUrl: true }
+      : provider)
+    : [...providers, ollama];
+}
+
 export function providerKeyPlaceholder(provider: LlmProvider): string {
+  if (provider === "ollama") return "선택 사항: 서버에서 요구하는 키";
   if (provider === "anthropic") return "sk-ant-...";
   if (provider === "nvidia") return "nvapi-...";
   return "sk-...";

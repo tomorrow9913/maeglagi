@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings
+from app.modules.context_engine.application.model_catalog import has_indexed_chunks
 from app.modules.ingestion.application.pipeline import IngestionPipeline
 from app.modules.retrieval.application.hybrid import HybridRetriever
 from app.modules.retrieval.application.lexical import (
@@ -36,6 +37,39 @@ class Session:
     async def exec(self, statement: Any) -> Rows:
         self.statements.append(statement)
         return Rows(self.chunk_rows if "JOIN sources" in str(statement) else self.source_rows)
+
+
+async def test_text_only_chunks_do_not_lock_embedding_model() -> None:
+    url = os.environ.get("ASK_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("set ASK_TEST_DATABASE_URL to a local pgvector test database")
+    engine = create_async_engine(url)
+    workspace, other = uuid4(), uuid4()
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TEMP TABLE chunks (id uuid PRIMARY KEY, workspace_id uuid, "
+                    "embedding vector(2))"
+                )
+            )
+            await connection.execute(
+                text("INSERT INTO chunks VALUES (:id, :workspace, NULL)"),
+                {"id": uuid4(), "workspace": workspace},
+            )
+            await connection.execute(
+                text("INSERT INTO chunks VALUES (:id, :workspace, '[0.1,0.2]'::vector)"),
+                {"id": uuid4(), "workspace": other},
+            )
+            async with AsyncSession(connection) as session:
+                assert not await has_indexed_chunks(session, workspace)
+                await connection.execute(
+                    text("INSERT INTO chunks VALUES (:id, :workspace, '[0.1,0.2]'::vector)"),
+                    {"id": uuid4(), "workspace": workspace},
+                )
+                assert await has_indexed_chunks(session, workspace)
+    finally:
+        await engine.dispose()
 
 
 def test_korean_pairs_and_mixed_language_terms() -> None:

@@ -52,10 +52,10 @@ export interface MaeglagiApi {
    * BYOK 키가 실제로 쓸 수 있는 키인지 확인합니다.
    *
    * 서버가 provider에 가벼운 호출을 한 번 보내 확인하며, 키를 저장하지
-   * 않습니다. 저장은 createWorkspace나 updateApiKey가 합니다.
+   * 않습니다. 저장은 createAccountCredential이나 기존 인라인 등록 경로가 합니다.
    */
   validateApiKey(
-    input: { provider: LlmProvider; apiKey: string },
+    input: { provider: LlmProvider; apiKey?: string; baseUrl?: string; credentialId?: string },
     signal?: AbortSignal,
   ): Promise<ApiKeyValidation>;
   /**
@@ -63,7 +63,7 @@ export interface MaeglagiApi {
    * 키가 유효하지 않으면 422로 실패하며, 키를 저장하지 않습니다.
    */
   listKeyModels(
-    input: { provider: LlmProvider; apiKey: string },
+    input: { provider: LlmProvider; apiKey?: string; baseUrl?: string; credentialId?: string },
     signal?: AbortSignal,
   ): Promise<WorkspaceModels>;
   /** workspace가 쓸 수 있는 모델과 저장된 선택. 용도는 항상 answer, extraction, embedding, transcription 순입니다. */
@@ -81,14 +81,32 @@ export interface MaeglagiApi {
     selections: ModelSelections,
     signal?: AbortSignal,
   ): Promise<WorkspaceModels>;
-  /** 저장된 키의 provider와 마지막 4자. 키를 등록하지 않았으면 null입니다. */
+  /** 기존 워크스페이스 경로에서 기본 연결을 조회합니다. */
   getWorkspaceSecrets(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets | null>;
-  /** 등록된 provider와 label별 키 목록입니다. */
+  /** 기존 워크스페이스 경로의 계정 연결 목록입니다. */
   listProviderCredentials(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets[]>;
-  /** 같은 provider와 label은 교체하고 해당 키를 기본 키로 지정합니다. */
+  /** 로그인 계정에서 공유하는 AI 연결 목록입니다. */
+  listAccountCredentials(signal?: AbortSignal): Promise<WorkspaceSecrets[]>;
+  createAccountCredential(
+    input: { provider: LlmProvider; label: string; apiKey?: string; baseUrl?: string },
+    signal?: AbortSignal,
+  ): Promise<WorkspaceSecrets>;
+  rotateAccountCredential(
+    credentialId: string,
+    input: { apiKey?: string; baseUrl?: string },
+    signal?: AbortSignal,
+  ): Promise<WorkspaceSecrets>;
+  /** 기존 워크스페이스 경로의 계정 연결 등록 또는 교체입니다. */
   updateApiKey(
     workspaceId: string,
-    input: { provider: LlmProvider; apiKey: string; label: string },
+    input: { provider: LlmProvider; apiKey?: string; label: string; baseUrl?: string },
+    signal?: AbortSignal,
+  ): Promise<WorkspaceSecrets>;
+  /** 저장된 연결을 ID로 갱신합니다. 생략한 값은 그대로 두고 Ollama의 빈 키는 키를 제거합니다. */
+  rotateProviderCredential(
+    workspaceId: string,
+    credentialId: string,
+    input: { apiKey?: string; baseUrl?: string },
     signal?: AbortSignal,
   ): Promise<WorkspaceSecrets>;
 

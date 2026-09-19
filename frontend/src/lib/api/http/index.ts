@@ -93,8 +93,32 @@ export const httpApi: MaeglagiApi = {
   listProviderCredentials: (workspaceId, signal) =>
     apiFetch<WorkspaceSecrets[]>(`/workspaces/${workspaceId}/provider-credentials`, { signal }),
 
+  listAccountCredentials: (signal) =>
+    apiFetch<WorkspaceSecrets[]>("/provider-credentials", { signal }),
+
+  createAccountCredential: (input, signal) =>
+    apiFetch<WorkspaceSecrets>("/provider-credentials", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
+  rotateAccountCredential: (credentialId, input, signal) =>
+    apiFetch<WorkspaceSecrets>(`/provider-credentials/${credentialId}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
   updateApiKey: (workspaceId, input, signal) =>
     apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/llm-key`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
+  rotateProviderCredential: (workspaceId, credentialId, input, signal) =>
+    apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/provider-credentials/${credentialId}`, {
       method: "PUT",
       body: JSON.stringify(input),
       signal,

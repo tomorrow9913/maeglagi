@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     app_name: str = "Maeglagi API"
     app_version: str = "0.1.0"
     app_env: str = "local"
+    deployment_mode: Literal["saas", "self_hosted"] = "saas"
     api_v1_prefix: str = "/api/v1"
     app_secret_key: SecretStr = SecretStr("local-development-only-secret-key")
     database_url: str = "postgresql+asyncpg://maeglagi:maeglagi@localhost:5432/maeglagi"
@@ -34,6 +35,8 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     # Server-side Ollama address, shared by API and worker. Empty means disabled.
     ollama_base_url: str = ""
+    # Deployment-approved private hosts for workspace Ollama connections.
+    ollama_allowed_private_hosts: list[str] = []
     demo_workspace_id: str = ""
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536

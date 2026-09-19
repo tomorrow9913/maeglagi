@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.workspaces.review import ReviewUtterance
 from app.auth import CurrentUser
 from app.core.config import get_settings
 from app.core.database import get_session
@@ -37,6 +38,8 @@ class SourceContentResponse(BaseModel):
     title: str
     kind: str
     has_recording: bool = Field(serialization_alias="hasRecording")
+    original_text: str | None = Field(default=None, serialization_alias="originalText")
+    utterances: list[ReviewUtterance] = Field(default_factory=list)
     chunks: list[SourceChunkResponse]
 
 
@@ -132,12 +135,21 @@ async def export_meeting_markdown(source_id: UUID, user: CurrentUser, session: S
 async def get_source_content(
     source_id: UUID, user: CurrentUser, session: Session
 ) -> SourceContentResponse:
-    """The normalized text of a source, chunk by chunk, in reading order.
+    """The persisted source text and indexed evidence chunks in reading order.
 
     Chunk ids are the ones evidence points at (timeline, graph, answers), so the viewer can
     scroll to the exact passage. A source that has not been indexed yet has no chunks.
     """
     source = await _owned_source(source_id, user, session)
+    utterances = [ReviewUtterance.model_validate(item) for item in source.review_utterances]
+    edited_text = "\n\n".join(
+        f"{item.speaker_name}: {item.text}" for item in utterances if item.text
+    )
+    original_text = edited_text or (
+        source.transcript_text or source.raw_transcript_text
+        if source.kind == "meeting"
+        else source.content_text
+    )
     found = await session.exec(
         select(Chunk)
         .where(Chunk.source_id == source.id, Chunk.owner_id == user.id)
@@ -148,6 +160,8 @@ async def get_source_content(
         title=source.title,
         kind=source.kind,
         has_recording=has_recording(source),
+        original_text=original_text,
+        utterances=utterances,
         chunks=[
             SourceChunkResponse(
                 id=chunk.id,

@@ -60,7 +60,8 @@ def test_list_and_rotate_credentials_preserve_other_providers_and_models(monkeyp
         assert listed.status_code == 200
         assert [c["provider"] for c in listed.json()] == ["openai", "anthropic"]
         assert all(
-            set(c) == {"id", "provider", "label", "keyHint", "status", "isDefault", "updatedAt"}
+            set(c)
+            == {"id", "provider", "label", "baseUrl", "keyHint", "status", "isDefault", "updatedAt"}
             for c in listed.json()
         )
         original_secret = credentials[0].vault_secret_id

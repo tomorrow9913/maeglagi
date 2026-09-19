@@ -163,6 +163,10 @@ export function SourceViewer({
   }, [data, highlightChunkId]);
 
   const Icon = data?.kind === "meeting" ? Mic : FileText;
+  const utterances = data?.utterances?.filter((item) => item.text.trim()) ?? [];
+  const originalText = data?.originalText?.trim() ?? "";
+  const hasPersistedText = utterances.length > 0 || Boolean(originalText);
+  const hasHighlightedChunk = Boolean(highlightChunkId && data?.chunks.some((chunk) => chunk.id === highlightChunkId));
   sourceIdRef.current = sourceId;
   useEffect(() => {
     requestGenerationRef.current += 1;
@@ -262,9 +266,9 @@ export function SourceViewer({
             <span className="truncate">{data?.title ?? "원문"}</span>
           </SheetTitle>
           <SheetDescription>
-            {highlightChunkId
+            {hasHighlightedChunk
               ? "근거로 인용된 구간을 강조했습니다."
-              : "소스의 정규화된 원문입니다."}
+              : "저장된 원문입니다."}
           </SheetDescription>
         </SheetHeader>
 
@@ -299,11 +303,33 @@ export function SourceViewer({
                 다시 시도
               </Button>
             </div>
-          ) : !data || data.chunks.length === 0 ? (
+          ) : !data || (!hasPersistedText && data.chunks.length === 0) ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
               표시할 원문이 없습니다.
             </p>
           ) : (
+            <div className="space-y-5">
+              {hasPersistedText && <section aria-label="저장된 원문" className="space-y-2">
+                {hasHighlightedChunk && <h3 className="text-sm font-medium">저장된 원문</h3>}
+                {utterances.length > 0 ? (
+                  <ol className="space-y-1">
+                    {utterances.map((utterance) => (
+                      <li key={utterance.id} className="px-1 py-1 text-sm leading-relaxed">
+                        {utterance.startSeconds != null && <button type="button" disabled={!data.hasRecording || audioBusy} onClick={() => void loadAudio(utterance.startSeconds ?? undefined)} className="mb-1 block font-mono text-xs text-muted-foreground hover:underline disabled:cursor-default disabled:no-underline">
+                          {formatTimestamp(utterance.startSeconds)}
+                          {utterance.endSeconds != null ? ` – ${formatTimestamp(utterance.endSeconds)}` : ""}
+                        </button>}
+                        <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
+                          <span className={`truncate font-semibold ${speakerColor(utterance.speakerName)}`}>{utterance.speakerName}</span>
+                          <span className="whitespace-pre-wrap">{utterance.text}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : <p className={cn("whitespace-pre-wrap text-sm leading-relaxed", data.kind === "meeting" ? "px-1 py-1" : "rounded-lg bg-muted/40 p-3")}>{originalText}</p>}
+              </section>}
+              {(!hasPersistedText || hasHighlightedChunk) && data.chunks.length > 0 && <section aria-label="인덱싱된 근거" className="space-y-2">
+                {hasPersistedText && <h3 className="text-sm font-medium">인덱싱된 근거</h3>}
             <ol className={data.kind === "meeting" ? "space-y-1" : "space-y-3"}>
               {data.chunks.map((chunk) => {
                 const isHighlighted = chunk.id === highlightChunkId;
@@ -360,6 +386,8 @@ export function SourceViewer({
                 );
               })}
             </ol>
+              </section>}
+            </div>
           )}
         </div>
       </SheetContent>

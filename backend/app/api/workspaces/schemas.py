@@ -11,8 +11,10 @@ class CreateWorkspaceRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     name: str = Field(min_length=1, max_length=120)
-    llm_provider: str = Field(validation_alias="llmProvider")
+    llm_provider: str | None = Field(default=None, validation_alias="llmProvider")
+    credential_id: UUID | None = Field(default=None, validation_alias="credentialId")
     llm_api_key: str | None = Field(default=None, validation_alias="llmApiKey")
+    llm_base_url: str | None = Field(default=None, validation_alias="llmBaseUrl")
     # The model chosen per job (answer, extraction, embedding, transcription). Jobs left out get
     # the recommended model of the key.
     models: dict[str, ModelOption] | None = None
@@ -76,11 +78,13 @@ class CredentialInput(BaseModel):
 
     provider: str
     api_key: str | None = Field(default=None, validation_alias="apiKey")
+    base_url: str | None = Field(default=None, validation_alias="baseUrl")
     label: str = Field(default="기본", min_length=1, max_length=80)
 
 
 class CredentialRotation(BaseModel):
     api_key: str | None = Field(default=None, validation_alias="apiKey")
+    base_url: str | None = Field(default=None, validation_alias="baseUrl")
 
 
 class CredentialValidation(BaseModel):
@@ -94,6 +98,7 @@ class CredentialResponse(BaseModel):
     id: UUID
     provider: str
     label: str
+    base_url: str | None = Field(default=None, serialization_alias="baseUrl")
     key_hint: str = Field(serialization_alias="keyHint")
     status: str
     is_default: bool = Field(serialization_alias="isDefault")

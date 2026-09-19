@@ -21,7 +21,7 @@ export const modelRoleInfo: Record<
   embedding: {
     label: "검색 임베딩",
     description: "문서와 회의 내용을 검색할 수 있게 벡터로 바꾸는 모델입니다.",
-    unavailable: "문서와 회의 내용을 검색할 수 없습니다.",
+    unavailable: "의미 기반 검색 대신 키워드 검색으로 근거를 찾습니다.",
     // 임베딩만 워크스페이스를 만들 때 정하고 바꿀 수 없습니다. LLM 모델은 언제든 바꿉니다.
     fixedNote:
       "모델마다 벡터가 달라 섞어서 검색할 수 없으므로, 워크스페이스를 만들 때 정한 모델은 이후 바꿀 수 없습니다.",
@@ -35,7 +35,7 @@ export const modelRoleInfo: Record<
 };
 
 export function optionKey(option: ModelOption): string {
-  return `${option.provider}/${option.model}`;
+  return JSON.stringify([option.provider, option.model, option.credentialId ?? null]);
 }
 
 /**
@@ -59,5 +59,22 @@ export function initialSelections(
 
 /** 두 선택이 같은지. 설정 화면에서 바뀐 용도만 저장하려고 비교합니다. */
 export function sameSelection(a: ModelOption | undefined, b: ModelOption | undefined): boolean {
-  return a?.provider === b?.provider && a?.model === b?.model;
+  return a?.provider === b?.provider && a?.model === b?.model &&
+    (a?.credentialId ?? null) === (b?.credentialId ?? null);
+}
+
+/** 새 워크스페이스의 모델을 미리 본 계정 연결에 고정합니다. */
+export function bindCredentialToSelections(
+  selections: ModelSelections,
+  provider: string,
+  credentialId: string,
+): ModelSelections {
+  const bound: ModelSelections = {};
+  for (const [role, option] of Object.entries(selections) as [ModelRole, ModelOption][]) {
+    if (option.provider !== provider || (option.credentialId && option.credentialId !== credentialId)) {
+      throw new Error("선택한 AI 연결의 모델을 다시 확인해 주세요.");
+    }
+    bound[role] = { ...option, credentialId };
+  }
+  return bound;
 }
