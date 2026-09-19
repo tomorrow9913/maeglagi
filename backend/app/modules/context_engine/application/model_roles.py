@@ -74,15 +74,12 @@ def recommendation_rank(model_id: str) -> tuple[bool, bool, str]:
 
 def options_by_role(
     listings: list[tuple[ProviderAdapter, list[ModelInfo]]],
+    prices: dict[tuple[str, str], float] | None = None,
     *,
     defaults: dict[str, dict[str, str]] | None = None,
     today: date | None = None,
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Sort what each key offered into roles. `listings` is in key priority order.
-
-    A model the provider has already retired is not offered. A provider's default model for a job
-    goes first when the key offers it; the rest keep a stable order.
-    """
+    """Exclude retired models, put offered defaults first, then sort other models by price."""
     today = today or date.today()
     options: dict[ModelRole, list[ModelOption]] = {role: [] for role in ROLE_ORDER}
     for adapter, infos in listings:
@@ -103,6 +100,17 @@ def options_by_role(
                         options[role].insert(first_of_provider, option)
                     else:
                         options[role].append(option)
+    if prices:
+        for role in ROLE_ORDER:
+            options[role].sort(
+                key=lambda option: (
+                    (defaults or {}).get(option.provider, {}).get(role.value) != option.model,
+                    (option.provider, option.model) not in prices,
+                    prices.get((option.provider, option.model), float("inf")),
+                    recommendation_rank(option.model),
+                    option.provider,
+                )
+            )
     return options
 
 

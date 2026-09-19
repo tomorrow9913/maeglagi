@@ -54,8 +54,9 @@ class IngestionPipeline:
 
     def _default_model(self, provider_id: str, role: ModelRole) -> str:
         """For a job nobody chose a model for: that provider's default, never another provider's."""
+        override = self.settings.provider_fallback_models.get(provider_id, {})
         configured = self.settings.provider_default_models.get(provider_id, {})
-        return configured.get(role.value) or self._fallback_model(role)
+        return override.get(role.value) or configured.get(role.value) or self._fallback_model(role)
 
     def _fallback_model(self, role: ModelRole) -> str:
         """Last resort when a provider has no configured default: the deployment's flat setting."""

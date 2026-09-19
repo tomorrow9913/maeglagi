@@ -14,6 +14,7 @@ import type {
   SourceContent,
   TranscriptSourceInput,
   Workspace,
+  WorkspaceModels,
   WorkspaceSecrets,
 } from "../types";
 
@@ -56,8 +57,31 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
+  listKeyModels: (input, signal) =>
+    apiFetch<WorkspaceModels>("/llm-keys/models", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
+
+  getWorkspaceModels: (workspaceId, provider, signal) =>
+    apiFetch<WorkspaceModels>(
+      `/workspaces/${workspaceId}/ai/models${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
+      { signal },
+    ),
+
+  updateWorkspaceModels: (workspaceId, selections, signal) =>
+    apiFetch<WorkspaceModels>(`/workspaces/${workspaceId}/ai/models`, {
+      method: "PUT",
+      body: JSON.stringify({ selections }),
+      signal,
+    }),
+
   getWorkspaceSecrets: (workspaceId, signal) =>
     apiFetch<WorkspaceSecrets | null>(`/workspaces/${workspaceId}/llm-key`, { signal }),
+
+  listProviderCredentials: (workspaceId, signal) =>
+    apiFetch<WorkspaceSecrets[]>(`/workspaces/${workspaceId}/provider-credentials`, { signal }),
 
   updateApiKey: (workspaceId, input, signal) =>
     apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/llm-key`, {

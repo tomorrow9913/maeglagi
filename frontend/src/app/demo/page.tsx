@@ -13,5 +13,5 @@ export const metadata = {
  * 발표 중에 목록을 거치지 않고 한 번에 화면을 띄우기 위한 것입니다.
  */
 export default function DemoEntryPage() {
-  redirect(workspacePath(DEMO_WORKSPACE_ID, "timeline"));
+  redirect(workspacePath(DEMO_WORKSPACE_ID, "ask"));
 }

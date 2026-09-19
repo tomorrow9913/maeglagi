@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
+from app.modules.context_engine.application.model_pricing import model_prices
 from app.modules.context_engine.application.model_roles import (
     ModelOption,
     ModelRole,
@@ -35,14 +36,18 @@ async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[M
     adapter = provider_registry.get(provider)
     if adapter is None:
         return options_by_role([])
-    return options_by_role([(adapter, await models_of(adapter, api_key))], defaults=_defaults())
+    return options_by_role(
+        [(adapter, await models_of(adapter, api_key))],
+        await model_prices(),
+        defaults=_defaults(),
+    )
 
 
 async def options_for_workspace(
-    session: AsyncSession, workspace_id: UUID, owner_id: UUID
+    session: AsyncSession, workspace_id: UUID, owner_id: UUID, provider: str | None = None
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Model options across the workspace's active keys, its default key first."""
-    result = await session.exec(
+    """Models from active keys, optionally limited to the provider being configured."""
+    statement = (
         select(ProviderCredential)
         .where(
             ProviderCredential.workspace_id == workspace_id,
@@ -51,6 +56,9 @@ async def options_for_workspace(
         )
         .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
     )
+    if provider is not None:
+        statement = statement.where(ProviderCredential.provider == provider)
+    result = await session.exec(statement)
     listings: list[tuple[ProviderAdapter, list[ModelInfo]]] = []
     for credential in result.all():
         adapter = provider_registry.get(credential.provider)
@@ -61,7 +69,7 @@ async def options_for_workspace(
         except CredentialUnavailableError:
             continue
         listings.append((adapter, await models_of(adapter, api_key)))
-    return options_by_role(listings, defaults=_defaults())
+    return options_by_role(listings, await model_prices(), defaults=_defaults())
 
 
 async def has_indexed_chunks(session: AsyncSession, workspace_id: UUID) -> bool:

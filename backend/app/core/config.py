@@ -45,6 +45,9 @@ class Settings(BaseSettings):
         "anthropic": {"answer": "claude-haiku-4-5"},
         "nvidia": {"answer": "meta/llama-3.1-8b-instruct"},
     }
+    # Optional per-provider runtime fallback overrides. This keeps deployments using
+    # PROVIDER_FALLBACK_MODELS compatible with the catalog's provider defaults.
+    provider_fallback_models: dict[str, dict[str, str]] = {}
     chunk_size_chars: int = 1200
     chunk_overlap_chars: int = 200
     sentry_dsn: SecretStr = SecretStr("")

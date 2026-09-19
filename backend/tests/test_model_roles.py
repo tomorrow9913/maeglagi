@@ -257,6 +257,21 @@ async def test_an_unchosen_job_never_sends_one_providers_model_name_to_another(
     assert resolved.model == "claude-haiku-4-5"  # anthropic's default, not an OpenAI name
 
 
+async def test_provider_fallback_override_takes_precedence(providers: None) -> None:
+    configured = Settings(
+        _env_file=None,
+        provider_fallback_models={"anthropic": {"answer": "claude-sonnet-custom"}},
+    )
+    resolved = await IngestionPipeline(configured).provider_with_model(
+        Session({}, ["anthropic"]),  # type: ignore[arg-type]
+        workspace_id=WORKSPACE,
+        owner_id=OWNER,
+        role=ModelRole.ANSWER,
+    )
+
+    assert resolved.model == "claude-sonnet-custom"
+
+
 # --- what the provider reports: retirement, defaults, release dates --------------------------
 
 TODAY = date(2026, 9, 20)

@@ -14,10 +14,6 @@ from app.api.workspaces.schemas import (
 from app.auth import CurrentUser
 from app.core.credentials import credential_vault, store_credential_secret
 from app.core.database import get_session
-from app.modules.context_engine.application.model_catalog import (
-    options_for_key,
-    with_recommended_defaults,
-)
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
@@ -150,13 +146,8 @@ async def upsert_default_credential(
         credential.is_default = True
         credential.updated_at = now
     session.add(credential)
-    workspace = await _owned_workspace(workspace_id, user, session)
-    # Jobs the workspace never chose a model for get the new key's recommended one, so the
-    # pipeline does not fall back to a model name this key may not even have.
-    workspace.model_settings = with_recommended_defaults(
-        workspace.model_settings, await options_for_key(body.provider, body.api_key)
-    )
-    session.add(workspace)
+    # Registering or rotating a key changes credentials only. Model choices are an
+    # independent workspace setting, including roles the user has not selected yet.
     await session.commit()
     await session.refresh(credential)
     return _response(credential)

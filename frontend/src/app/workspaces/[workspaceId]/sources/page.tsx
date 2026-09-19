@@ -8,12 +8,11 @@ import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RecordingControls } from "@/features/source-ingestion/components/recording-controls";
+import { MeetingCapture } from "@/features/source-ingestion/components/meeting-capture";
 import { SourceList } from "@/features/source-ingestion/components/source-list";
 import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { UploadDropzone } from "@/features/source-ingestion/components/upload-dropzone";
 import { UploadQueue } from "@/features/source-ingestion/components/upload-queue";
-import { useAudioRecorder } from "@/features/source-ingestion/hooks/use-audio-recorder";
 import { useJobPolling } from "@/features/source-ingestion/hooks/use-job-polling";
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
 import { useAsync } from "@/hooks/use-async";
@@ -33,6 +32,7 @@ export default function SourcesPage({ params }: { params: Promise<{ workspaceId:
 
 function SourcesView({ workspaceId }: { workspaceId: string }) {
   const router = useRouter();
+  const [meetingBusy, setMeetingBusy] = useState(false);
   const searchParams = useSearchParams();
 
   /*
@@ -64,17 +64,10 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
   } = useAsync((signal) => api.listSources(workspaceId, signal), [workspaceId]);
 
   const onUploaded = useCallback(() => reload(), [reload]);
-  const { items, uploadDocuments, uploadRecording, dismiss } = useSourceUpload(
+  const { items, uploadDocuments, uploadRecording, uploadTranscript, dismiss } = useSourceUpload(
     workspaceId,
     onUploaded,
   );
-
-  // 녹음이 끝나면 사용자가 따로 누르지 않아도 바로 업로드가 시작됩니다.
-  const onRecorded = useCallback(
-    (audio: Blob, durationSeconds: number) => void uploadRecording(audio, durationSeconds),
-    [uploadRecording],
-  );
-  const recorder = useAudioRecorder({ onComplete: onRecorded });
 
   const jobIds = useMemo(() => items.flatMap((item) => (item.job ? [item.job.id] : [])), [items]);
 
@@ -105,7 +98,9 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
 
       <Tabs defaultValue="document">
         <TabsList>
-          <TabsTrigger value="document">문서 업로드</TabsTrigger>
+          <TabsTrigger value="document" disabled={meetingBusy}>
+            문서 업로드
+          </TabsTrigger>
           <TabsTrigger value="meeting">회의 녹음</TabsTrigger>
         </TabsList>
 
@@ -114,16 +109,11 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         </TabsContent>
 
         <TabsContent value="meeting" className="mt-4">
-          <RecordingControls
-            status={recorder.status}
-            elapsedSeconds={recorder.elapsedSeconds}
-            errorMessage={recorder.errorMessage}
-            onStart={() => void recorder.start()}
-            onStop={recorder.stop}
+          <MeetingCapture
+            onAudio={uploadRecording}
+            onTranscript={uploadTranscript}
+            onBusyChange={setMeetingBusy}
           />
-          <p className="mt-2 text-xs text-muted-foreground">
-            정지하면 녹음이 자동으로 올라가고 음성 인식부터 분석까지 이어집니다.
-          </p>
         </TabsContent>
       </Tabs>
 

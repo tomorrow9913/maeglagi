@@ -1,6 +1,6 @@
 """Four demo seeds from the PoC v1 contract scenario ("Redis 도입" 이유 추적).
 
-These are placeholders for contracts/seeds/redis-adoption/, which is not in the repo yet.
+Their source texts are also stored as standalone files in contracts/seeds/redis-adoption/.
 Each seed carries the source text and the stage outputs a correct model is expected to return.
 Every source_ref is a verbatim sentence from that seed's text.
 """

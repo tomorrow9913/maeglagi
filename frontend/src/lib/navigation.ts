@@ -11,6 +11,12 @@ export type WorkspaceNavItem = {
 
 export const workspaceNavItems: WorkspaceNavItem[] = [
   {
+    segment: "ask",
+    label: "Ask",
+    description: "워크스페이스에 질문하고 근거와 함께 답을 받습니다.",
+    icon: MessageCircleQuestion,
+  },
+  {
     segment: "sources",
     label: "소스",
     description: "회의 녹음과 문서를 올리고 처리 상태를 확인합니다.",
@@ -27,12 +33,6 @@ export const workspaceNavItems: WorkspaceNavItem[] = [
     label: "Graph",
     description: "사람·프로젝트·업무의 연결을 그래프로 탐색합니다.",
     icon: Network,
-  },
-  {
-    segment: "ask",
-    label: "Ask",
-    description: "워크스페이스에 질문하고 근거와 함께 답을 받습니다.",
-    icon: MessageCircleQuestion,
   },
   {
     segment: "settings",
