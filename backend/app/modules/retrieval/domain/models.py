@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GraphEvidence(BaseModel):
@@ -16,6 +16,9 @@ class GraphEntity(BaseModel):
     kind: str
     name: str
     evidence: GraphEvidence
+    # Other spellings of the same entity; `keys` are their normalized forms used for merging.
+    aliases: list[str] = Field(default_factory=list)
+    keys: list[str] = Field(default_factory=list)
 
 
 class GraphRelation(BaseModel):
