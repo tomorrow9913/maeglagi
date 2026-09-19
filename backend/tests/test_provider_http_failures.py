@@ -107,9 +107,12 @@ def test_timeout_extraction_stage_is_allowlisted_and_redacted():
     assert safe.extraction_stage == "entity"
     assert not safe.terminal
     assert "private" not in str(safe)
-    assert source_processor._safe_attempt_error(
-        ExtractionError("private-source-text", "private-key"), "graphing"
-    ).extraction_stage is None
+    assert (
+        source_processor._safe_attempt_error(
+            ExtractionError("private-source-text", "private-key"), "graphing"
+        ).extraction_stage
+        is None
+    )
 
 
 @pytest.mark.parametrize(

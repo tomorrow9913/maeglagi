@@ -196,7 +196,11 @@ test("sidebar watches agent statuses over SSE without repeated list requests", a
   }, { window: { addEventListener() {}, removeEventListener() {} } });
   function render(watchAll = true) { cursor = 0; const value = useLiveSources("workspace-1", watchAll); while (effects.length) effects.shift()(); return value; } // eslint-disable-line react-hooks/rules-of-hooks
   render();
-  requests.shift()([{ id: "agent-1", status: "awaiting_agent", title: "Agent meeting" }]);
+  requests.shift()([
+    { id: "agent-1", status: "awaiting_agent", title: "Agent meeting" },
+    { id: "done-1", status: "succeeded", title: "Historical source" },
+    { id: "failed-1", status: "failed", title: "Failed source" },
+  ]);
   await Promise.resolve();
   assert.deepEqual([...watchedIds], []);
   assert.equal(render().sources[0].status, "awaiting_agent");
@@ -211,7 +215,7 @@ test("sidebar watches agent statuses over SSE without repeated list requests", a
   onJob({ id: "job-1", sourceId: "agent-1", status: "succeeded", progress: 1 });
   render();
   assert.equal(requests.length, 1);
-  assert.deepEqual([...watchedIds], ["agent-1"], "terminal sources remain subscribed for later agent updates");
+  assert.deepEqual([...watchedIds], [], "terminal sources release their SSE subscription");
   requests.shift()([{ id: "agent-1", status: "succeeded", title: "Agent meeting" }]);
   await Promise.resolve();
   assert.equal(render().sources[0].status, "succeeded");

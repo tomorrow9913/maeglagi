@@ -7,7 +7,7 @@ import { useWorkspaceSourceEvents } from "./use-workspace-source-events";
 
 const isPending = (status: Source["status"]) => status === "queued" || status === "enqueue_pending" || status === "processing";
 
-export function useLiveSources(workspaceId: string, watchAllStatuses = false) {
+export function useLiveSources(workspaceId: string, watchReviewStates = false) {
   const api = useApi();
   const isDemo = useDemoMode();
   const [snapshot, setSnapshot] = useState<{ workspaceId: string; sources: Source[] }>();
@@ -61,7 +61,7 @@ export function useLiveSources(workspaceId: string, watchAllStatuses = false) {
     }
   }, [reload, workspaceId]);
 
-  useWorkspaceSourceEvents(workspaceId, sources?.filter((source) => watchAllStatuses || isPending(source.status)).map((source) => source.id) ?? [], onJob, !isDemo, (sourceId) => {
+  useWorkspaceSourceEvents(workspaceId, sources?.filter((source) => isPending(source.status) || (watchReviewStates && (source.status === "awaiting_review" || source.status === "awaiting_agent"))).map((source) => source.id) ?? [], onJob, !isDemo, (sourceId) => {
     if (invalidated.current.workspaceId !== workspaceId || invalidated.current.ids.has(sourceId)) return;
     invalidated.current.ids.add(sourceId);
     reload();

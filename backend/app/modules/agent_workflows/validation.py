@@ -24,20 +24,22 @@ def _hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def source_fingerprint(source: Source, text: str) -> str:
+def source_fingerprint(source: Source, text: str, directory_snapshot: dict[str, Any]) -> str:
     return _hash(
         [
             source.title,
             text,
             source.review_revision,
             source.association_revision,
-            source.confirmed_snapshot,
+            directory_snapshot,
         ]
     )
 
 
-def context_fingerprint(source: Source, text: str, known_decisions: list[str]) -> str:
-    return _hash([source_fingerprint(source, text), sorted(known_decisions)])
+def context_fingerprint(
+    source: Source, text: str, known_decisions: list[str], directory_snapshot: dict[str, Any]
+) -> str:
+    return _hash([source_fingerprint(source, text, directory_snapshot), sorted(known_decisions)])
 
 
 def result_fingerprint(result: ExtractionResult) -> str:
@@ -95,18 +97,20 @@ def validate_extraction(
 
     # Relations contain names, never caller-supplied IDs. Every endpoint must
     # resolve uniquely within this extraction, which is later pinned to one workspace.
-    endpoints: dict[str, set[tuple[str, str]]] = {}
-    for item in [*result.entities, *result.events]:
+    endpoints: dict[tuple[str, str], set[int]] = {}
+    for index, item in enumerate([*result.entities, *result.events]):
         for name in [item.name, *(item.aliases if hasattr(item, "aliases") else [])]:
-            endpoints.setdefault(normalize_name(name, "Event"), set()).add(
-                (item.kind.value, item.name)
-            )
+            key = (item.kind.value, normalize_name(name, item.kind.value))
+            endpoints.setdefault(key, set()).add(index)
     for relation in result.relations:
-        if any(
-            len(endpoints.get(normalize_name(name, "Event"), set())) != 1
-            for name in (relation.source, relation.target)
-        ):
-            raise WorkflowError("invalid_relation", "Relation endpoint is not unique", 422)
+        for name in (relation.source, relation.target):
+            candidates = {
+                index
+                for kind in EntityKind
+                for index in endpoints.get((kind.value, normalize_name(name, kind.value)), set())
+            }
+            if len(candidates) != 1:
+                raise WorkflowError("invalid_relation", "Relation endpoint is not unique", 422)
 
     known = {
         normalize_name(name, EntityKind.DECISION.value)

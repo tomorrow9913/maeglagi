@@ -348,7 +348,7 @@ class AgentWorkflowService:
         return AnalysisContext(
             source=source_info(source),
             text=text,
-            fingerprint=context_fingerprint(source, text, known),
+            fingerprint=context_fingerprint(source, text, known, directory),
             known_decisions=known,
             directory=directory,
             extraction_schema=ExtractionResult.model_json_schema(),
@@ -447,7 +447,10 @@ class AgentWorkflowService:
         if source.review_revision != expected_revision:
             raise WorkflowError("stale_revision", "Source revision changed", 409)
         text = _source_text(source)
-        current_source_fingerprint = source_fingerprint(source, text)
+        directory = source.confirmed_snapshot or await self.repository.directory_snapshot(
+            owner_id, workspace_id, source
+        )
+        current_source_fingerprint = source_fingerprint(source, text, directory)
         checkpoint = source.analysis_checkpoint
         if checkpoint is not None:
             if (
@@ -479,7 +482,7 @@ class AgentWorkflowService:
                 KeylessContextUpdater(),  # type: ignore[arg-type]
             )
             known = await context_store.current_decisions(workspace_id)
-            if expected_fingerprint != context_fingerprint(source, text, known):
+            if expected_fingerprint != context_fingerprint(source, text, known, directory):
                 raise WorkflowError("stale_context", "Analysis context changed", 409)
             validated = validate_extraction(result, source=source, text=text, known_decisions=known)
             graph = None
@@ -541,7 +544,7 @@ class AgentWorkflowService:
                 title=source.title,
                 subject=workspace.name,
                 text=text,
-                directory_snapshot=source.confirmed_snapshot,
+                directory_snapshot=directory,
                 result=validated,
                 resolved_graph=graph,
                 context_applied=checkpoint is not None and checkpoint["phase"] == "context_applied",
