@@ -81,23 +81,16 @@ const state = {
     { id: "project-maeglagi", workspaceId: "demo", name: "맥락이 PoC", goal: "조직의 회의와 자료를 연결", description: "검증 프로젝트", ownerPersonId: "person-minkyu", participantIds: ["person-minkyu", "person-heewon"], revision: 0, startsOn: "2026-09-08", endsOn: null, archivedAt: null, createdAt: "2026-09-08T09:00:00Z", updatedAt: "2026-09-08T09:00:00Z" },
   ] as WorkspaceProject[],
   reviews: new Map<string, MeetingReview>(),
-  /** 키 원문은 저장하지 않고, 서버가 내려줄 힌트만 흉내 냅니다. */
-  secrets: new Map<string, WorkspaceSecrets[]>([
-    [
-      "demo",
-      [
-        {
-          id: "demo-credential",
-          provider: "anthropic",
-          label: "기본",
-          keyHint: "4f2a",
-          status: "active",
-          isDefault: true,
-          updatedAt: "2026-09-08T09:00:00Z",
-        },
-      ],
-    ],
-  ]),
+  /** 계정 연결의 키 원문은 보관하지 않고 응답 힌트만 흉내 냅니다. */
+  accountCredentials: [{
+    id: "demo-credential",
+    provider: "anthropic",
+    label: "기본",
+    keyHint: "4f2a",
+    status: "active",
+    isDefault: true,
+    updatedAt: "2026-09-08T09:00:00Z",
+  }] as WorkspaceSecrets[],
   /** 워크스페이스별로 저장된 모델 선택 */
   models: new Map<string, ModelSelections>([
     ["demo", { answer: { provider: "anthropic", model: "claude-sonnet-4-20250514" } }],
@@ -119,12 +112,15 @@ function modelsForProviders(
   providers: LlmProvider[],
   selections: ModelSelections = {},
   locked: ModelRole[] = [],
+  credentials?: WorkspaceSecrets[],
 ): WorkspaceModels {
   return {
     roles: MODEL_ROLES.map((role) => ({
       role,
       options: providers.flatMap((provider) =>
-        (modelCatalog[provider]?.[role] ?? []).map((model) => ({ provider, model })),
+        (credentials ? credentials.filter((item) => item.provider === provider) : [undefined]).flatMap((credential) =>
+          (modelCatalog[provider]?.[role] ?? []).map((model) => ({ provider, model, ...(credential ? { credentialId: credential.id } : {}) })),
+        ),
       ),
       selected: selections[role] ?? null,
       locked: locked.includes(role),
@@ -157,8 +153,18 @@ const keyPrefix: Record<string, string> = {
  * 실제 서버는 provider에 호출을 보내 확인하므로, 형식이 맞아도 실패할 수
  * 있습니다. mock은 접두사와 길이만 봅니다.
  */
-function checkApiKey(provider: LlmProvider, apiKey: string): ApiKeyValidation {
+function checkApiKey(provider: LlmProvider, apiKey: string, baseUrl?: string): ApiKeyValidation {
   const key = apiKey.trim();
+
+  if (provider === "ollama") {
+    try {
+      const url = new URL(baseUrl ?? "");
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) throw new Error();
+    } catch {
+      return { valid: false, message: "Ollama 서버 주소를 확인해 주세요." };
+    }
+    return { valid: true, message: "Ollama 서버 연결을 확인했습니다. (모의 응답)" };
+  }
 
   if (!key) return { valid: false, message: "API key를 입력해 주세요." };
   const prefix = keyPrefix[provider];
@@ -178,26 +184,27 @@ function checkApiKey(provider: LlmProvider, apiKey: string): ApiKeyValidation {
 }
 
 function storeKey(
-  workspaceId: string,
+  _workspaceId: string,
   provider: LlmProvider,
-  apiKey: string,
+  apiKey: string | undefined,
   label = "기본",
+  baseUrl?: string,
 ): WorkspaceSecrets {
-  const credentials = state.secrets.get(workspaceId) ?? [];
+  const credentials = state.accountCredentials;
   const existing = credentials.find((item) => item.provider === provider && item.label === label);
   for (const item of credentials) item.isDefault = false;
   const secrets: WorkspaceSecrets = {
     id: existing?.id ?? nextId("credential"),
     provider,
     label,
-    keyHint: apiKey.trim().slice(-4),
+    keyHint: apiKey === undefined ? existing?.keyHint ?? "none" : provider === "ollama" ? (apiKey.trim() ? "configured" : "none") : apiKey.trim().slice(-4),
+    baseUrl: baseUrl ?? existing?.baseUrl ?? null,
     status: "active",
     isDefault: true,
     updatedAt: new Date().toISOString(),
   };
   if (existing) credentials.splice(credentials.indexOf(existing), 1, secrets);
   else credentials.push(secrets);
-  state.secrets.set(workspaceId, credentials);
   return secrets;
 }
 
@@ -301,10 +308,17 @@ export const mockApi: MaeglagiApi = {
   async createWorkspace(input, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!input.name.trim()) throw new ApiError(422, "워크스페이스 이름을 입력해 주세요.");
-    if (!input.llmApiKey.trim()) throw new ApiError(422, "API key를 입력해 주세요.");
-
-    const check = checkApiKey(input.llmProvider, input.llmApiKey);
-    if (!check.valid) throw new ApiError(422, check.message);
+    const chosenCredential = input.credentialId
+      ? state.accountCredentials.find((item) => item.id === input.credentialId && item.status === "active")
+      : undefined;
+    if (input.credentialId && (!chosenCredential || (input.llmProvider && chosenCredential.provider !== input.llmProvider))) throw new ApiError(422, "사용 가능한 계정 AI 연결을 선택해 주세요.");
+    const provider = chosenCredential?.provider ?? input.llmProvider;
+    if (!provider) throw new ApiError(422, "AI 연결을 선택해 주세요.");
+    if (!input.credentialId) {
+      if (provider !== "ollama" && !input.llmApiKey?.trim()) throw new ApiError(422, "API key를 입력해 주세요.");
+      const check = checkApiKey(provider, input.llmApiKey ?? "", input.llmBaseUrl);
+      if (!check.valid) throw new ApiError(422, check.message);
+    }
 
     const workspace: Workspace = {
       id: nextId("ws"),
@@ -315,7 +329,7 @@ export const mockApi: MaeglagiApi = {
     state.workspaces.push(workspace);
 
     // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
-    storeKey(workspace.id, input.llmProvider, input.llmApiKey);
+    if (!input.credentialId) storeKey(workspace.id, provider, input.llmApiKey ?? "", "기본", input.llmBaseUrl);
     if (input.models) state.models.set(workspace.id, { ...input.models });
     return { ...workspace };
   },
@@ -338,7 +352,7 @@ export const mockApi: MaeglagiApi = {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
 
-    const configuredProviders = state.secrets.get(workspaceId) ?? [];
+    const configuredProviders = state.accountCredentials;
     return BOOTSTRAP_AI_PROVIDERS.map<AiProvider>((provider) => ({
       ...provider,
       capabilities: [...provider.capabilities],
@@ -352,7 +366,9 @@ export const mockApi: MaeglagiApi = {
           ? ["claude-sonnet-4-20250514"]
           : provider.id === "nvidia"
             ? ["meta/llama-3.1-70b-instruct"]
-            : ["gpt-4.1-mini"]
+            : provider.id === "ollama"
+              ? ["llama3.2:latest"]
+              : ["gpt-4.1-mini"]
         : [],
     }));
   },
@@ -360,19 +376,24 @@ export const mockApi: MaeglagiApi = {
   async validateApiKey(input, signal) {
     // 실제 provider 호출을 흉내 내느라 조금 더 걸립니다.
     await delay(MOCK_LATENCY_MS * 2, signal);
-    return checkApiKey(input.provider, input.apiKey);
+    return checkApiKey(input.provider, input.apiKey ?? "", input.baseUrl);
   },
 
   async listKeyModels(input, signal) {
     await delay(MOCK_LATENCY_MS * 2, signal);
-    const check = checkApiKey(input.provider, input.apiKey);
+    if (input.credentialId) {
+      const credential = state.accountCredentials.find((item) => item.id === input.credentialId && item.provider === input.provider && item.status === "active");
+      if (!credential) throw new ApiError(404, "계정 AI 연결을 찾을 수 없습니다.");
+      return modelsForProviders([input.provider], {}, [], [credential]);
+    }
+    const check = checkApiKey(input.provider, input.apiKey ?? "", input.baseUrl);
     if (!check.valid) throw new ApiError(422, check.message);
     return modelsFor(input.provider);
   },
 
   async getWorkspaceModels(workspaceId, provider, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const credentials = state.secrets.get(workspaceId) ?? [];
+    const credentials = state.accountCredentials;
     if (!state.workspaces.some((item) => item.id === workspaceId)) {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
@@ -388,12 +409,13 @@ export const mockApi: MaeglagiApi = {
       visibleProviders,
       state.models.get(workspaceId),
       lockedRoles(workspaceId),
+      credentials.filter((item) => item.status === "active"),
     );
   },
 
   async updateWorkspaceModels(workspaceId, selections, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const credentials = state.secrets.get(workspaceId) ?? [];
+    const credentials = state.accountCredentials;
     if (!state.workspaces.some((item) => item.id === workspaceId) || credentials.length === 0) {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
@@ -403,21 +425,23 @@ export const mockApi: MaeglagiApi = {
     for (const role of MODEL_ROLES) {
       const wanted = selections[role];
       if (!wanted) continue;
-      const entry = modelsFor(
-        wanted.provider,
+      const entry = modelsForProviders(
+        [wanted.provider],
         currentSelections,
         lockedRoles(workspaceId),
+        credentials.filter((item) => item.status === "active"),
       ).roles.find((item) => item.role === role)!;
       if (
         !credentials.some((item) => item.provider === wanted.provider && item.status === "active")
       ) {
         throw new ApiError(422, "사용 가능한 API key가 없습니다.");
       }
-      if (!entry.options.some((o) => o.provider === wanted.provider && o.model === wanted.model)) {
+      if (!entry.options.some((o) => o.provider === wanted.provider && o.model === wanted.model && (!wanted.credentialId || o.credentialId === wanted.credentialId))) {
         throw new ApiError(422, `${wanted.model}은(는) 이 키로 쓸 수 있는 모델이 아닙니다.`);
       }
       const unchanged =
-        entry.selected?.provider === wanted.provider && entry.selected.model === wanted.model;
+        entry.selected?.provider === wanted.provider && entry.selected.model === wanted.model &&
+        (entry.selected.credentialId ?? null) === (wanted.credentialId ?? null);
       if (entry.locked && !unchanged) {
         throw new ApiError(409, "임베딩 모델은 워크스페이스를 만들 때 정해지며 바꿀 수 없습니다.");
       }
@@ -432,19 +456,46 @@ export const mockApi: MaeglagiApi = {
       ],
       next,
       lockedRoles(workspaceId),
+      credentials.filter((item) => item.status === "active"),
     );
   },
 
   async getWorkspaceSecrets(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    return state.secrets.get(workspaceId)?.find((item) => item.isDefault) ?? null;
+    return state.accountCredentials.find((item) => item.isDefault) ?? null;
   },
 
   async listProviderCredentials(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId))
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
-    return (state.secrets.get(workspaceId) ?? []).map((item) => ({ ...item }));
+    return state.accountCredentials.map((item) => ({ ...item }));
+  },
+
+  async listAccountCredentials(signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return state.accountCredentials.map((item) => ({ ...item }));
+  },
+
+  async createAccountCredential(input, signal) {
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    if (!input.label.trim()) throw new ApiError(422, "연결 이름을 입력해 주세요.");
+    if (state.accountCredentials.some((item) => item.provider === input.provider && item.label === input.label.trim())) throw new ApiError(409, "같은 이름의 연결이 있습니다.");
+    const check = checkApiKey(input.provider, input.apiKey ?? "", input.baseUrl);
+    if (!check.valid) throw new ApiError(422, check.message);
+    return { ...storeKey("account", input.provider, input.apiKey ?? "", input.label.trim(), input.baseUrl) };
+  },
+
+  async rotateAccountCredential(credentialId, input, signal) {
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    const credential = state.accountCredentials.find((item) => item.id === credentialId);
+    if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.");
+    const check = checkApiKey(credential.provider, input.apiKey ?? (credential.provider === "ollama" ? "" : "retained-secret"), input.baseUrl ?? credential.baseUrl ?? undefined);
+    if (!check.valid) throw new ApiError(422, check.message);
+    credential.baseUrl = input.baseUrl ?? credential.baseUrl;
+    if (input.apiKey !== undefined) credential.keyHint = credential.provider === "ollama" ? (input.apiKey.trim() ? "configured" : "none") : input.apiKey.trim().slice(-4);
+    credential.updatedAt = new Date().toISOString();
+    return { ...credential };
   },
 
   async updateApiKey(workspaceId, input, signal) {
@@ -453,11 +504,23 @@ export const mockApi: MaeglagiApi = {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
 
-    const check = checkApiKey(input.provider, input.apiKey);
+    const check = checkApiKey(input.provider, input.apiKey ?? "", input.baseUrl);
     if (!check.valid) throw new ApiError(422, check.message);
 
-    const saved = storeKey(workspaceId, input.provider, input.apiKey, input.label);
+    const saved = storeKey(workspaceId, input.provider, input.apiKey, input.label, input.baseUrl);
     return saved;
+  },
+
+  async rotateProviderCredential(workspaceId, credentialId, input, signal) {
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    const credential = state.accountCredentials.find((item) => item.id === credentialId);
+    if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.");
+    const check = checkApiKey(credential.provider, input.apiKey ?? (["none", "local"].includes(credential.keyHint) ? "" : "retained-secret"), input.baseUrl ?? credential.baseUrl ?? undefined);
+    if (!check.valid) throw new ApiError(422, check.message);
+    credential.baseUrl = input.baseUrl ?? credential.baseUrl;
+    if (input.apiKey !== undefined) credential.keyHint = credential.provider === "ollama" ? (input.apiKey.trim() ? "configured" : "none") : input.apiKey.trim().slice(-4);
+    credential.updatedAt = new Date().toISOString();
+    return { ...credential };
   },
 
   async listPeople(workspaceId, signal) {

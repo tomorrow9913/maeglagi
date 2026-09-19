@@ -13,7 +13,8 @@ import { cn } from "@/lib/utils";
 export type ApiKeyFieldProps = {
   id: string;
   provider: LlmProvider;
-  authMode?: "apiKey" | "none";
+  authMode?: "apiKey" | "optionalApiKey" | "none";
+  baseUrl?: string;
   value: string;
   onChange: (value: string) => void;
   /** 검증 결과가 바뀔 때마다 알려줍니다. 유효하지 않으면 undefined입니다. */
@@ -31,6 +32,7 @@ export function ApiKeyField({
   id,
   provider,
   authMode = "apiKey",
+  baseUrl,
   value,
   onChange,
   onValidated,
@@ -55,8 +57,9 @@ export function ApiKeyField({
   // 입력이 멈춘 뒤에만 검증해 타이핑 중 불필요한 호출을 막습니다.
   useEffect(() => {
     const key = authMode === "none" ? "" : value.trim();
-    if (authMode !== "none" && !key) {
-      publish(undefined);
+    setIsChecking(false);
+    publish(undefined);
+    if ((authMode === "apiKey" && !key) || (authMode === "optionalApiKey" && !baseUrl?.trim())) {
       return;
     }
 
@@ -64,7 +67,7 @@ export function ApiKeyField({
     const timer = setTimeout(async () => {
       setIsChecking(true);
       try {
-        const validation = await api.validateApiKey({ provider, apiKey: key }, controller.signal);
+        const validation = await api.validateApiKey({ provider, apiKey: key, ...(baseUrl ? { baseUrl: baseUrl.trim() } : {}) }, controller.signal);
         if (!controller.signal.aborted) publish(validation, key);
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -81,11 +84,11 @@ export function ApiKeyField({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [value, provider, authMode, publish, api]);
+  }, [value, provider, authMode, baseUrl, publish, api]);
 
   return (
     <div className="space-y-1.5">
-      {authMode === "apiKey" && <div className="relative">
+      {authMode !== "none" && <div className="relative">
         <Input
           id={id}
           type={isRevealed ? "text" : "password"}
@@ -126,7 +129,7 @@ export function ApiKeyField({
         {isChecking ? (
           <>
             <Loader2 className="size-3 animate-spin" aria-hidden />
-            {authMode === "none" ? "서버의 로컬 연결을 확인하는 중…" : "키를 확인하는 중…"}
+            {authMode === "optionalApiKey" ? "Ollama 서버 연결을 확인하는 중…" : authMode === "none" ? "서버의 로컬 연결을 확인하는 중…" : "키를 확인하는 중…"}
           </>
         ) : result?.valid ? (
           <>
@@ -139,7 +142,9 @@ export function ApiKeyField({
             {result.message}
           </>
         ) : (
-          authMode === "none" ? "서버에서 관리하는 로컬 연결입니다. 주소나 키를 입력하지 않습니다." : "키는 암호화해 저장되며 저장 후에는 다시 표시되지 않습니다."
+          authMode === "optionalApiKey"
+            ? "키가 필요 없는 서버라면 비워 두세요. 입력한 키는 암호화해 저장하며 다시 표시하지 않습니다."
+            : authMode === "none" ? "서버에서 관리하는 로컬 연결입니다. 주소나 키를 입력하지 않습니다." : "키는 암호화해 저장되며 저장 후에는 다시 표시되지 않습니다."
         )}
       </p>
     </div>

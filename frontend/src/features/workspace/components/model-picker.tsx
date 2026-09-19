@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { AiProvider, ModelOption, ModelRole, ModelSelections, RoleModels } from "@/lib/api";
+import type { AiProvider, ModelOption, ModelRole, ModelSelections, RoleModels, WorkspaceSecrets } from "@/lib/api";
 
 import { modelRoleInfo, optionKey } from "../lib/model-roles";
 
@@ -26,6 +26,7 @@ export function ModelPicker({
   onChange,
   disabled = false,
   providers,
+  credentials,
   showSavedStatus = false,
 }: {
   idPrefix: string;
@@ -34,10 +35,17 @@ export function ModelPicker({
   onChange: (role: ModelRole, option: ModelOption) => void;
   disabled?: boolean;
   providers?: readonly AiProvider[];
+  credentials?: readonly WorkspaceSecrets[];
   showSavedStatus?: boolean;
 }) {
-  const modelLabel = (option: ModelOption) =>
-    `${providers?.find((provider) => provider.id === option.provider)?.displayName ?? option.provider} · ${option.model}`;
+  const modelLabel = (option: ModelOption) => {
+    const providerName = providers?.find((provider) => provider.id === option.provider)?.displayName ?? option.provider;
+    const credential = credentials?.find((item) => item.id === option.credentialId);
+    const connection = credential
+      ? `${credential.label}${credential.baseUrl ? ` (${credential.baseUrl})` : ""}`
+      : option.credentialId?.slice(0, 8);
+    return `${providerName} · ${option.model}${connection ? ` · ${connection}` : ""}`;
+  };
 
   return (
     <div className="space-y-4">
@@ -68,7 +76,7 @@ export function ModelPicker({
               <p className="flex items-start gap-1.5 text-xs text-warning">
                 <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
                 <span>
-                  {showSavedStatus ? "등록된 키" : "이 키"}로 쓸 수 있는 {info.label} 모델이 없어{" "}
+                  {showSavedStatus ? "등록된 연결" : "이 연결"}로 쓸 수 있는 {info.label} 모델이 없어{" "}
                   {info.unavailable}
                 </span>
               </p>

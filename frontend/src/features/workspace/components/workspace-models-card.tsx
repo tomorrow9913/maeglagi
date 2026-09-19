@@ -15,6 +15,7 @@ import type {
   ModelSelections,
   RoleModels,
   WorkspaceModels,
+  WorkspaceSecrets,
 } from "@/lib/api";
 
 import { sameSelection } from "../lib/model-roles";
@@ -37,9 +38,11 @@ function savedSelections(roles: RoleModels[]): ModelSelections {
 export function WorkspaceModelsCard({
   workspaceId,
   providers,
+  credentials,
 }: {
   workspaceId: string;
   providers: AiProvider[];
+  credentials: WorkspaceSecrets[];
 }) {
   const api = useApi();
   const { data, error, isLoading, reload } = useAsync(
@@ -101,8 +104,8 @@ export function WorkspaceModelsCard({
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">사용할 모델</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            등록된 모든 provider의 키로 쓸 수 있는 모델 중에서 용도마다 고릅니다. 가격을 확인할 수
-            있는 모델은 낮은 순서로, 가격 정보가 없는 모델은 뒤에 표시됩니다.
+            계정의 AI 연결로 쓸 수 있는 모델 중에서 용도마다 고릅니다. 이 선택은 현재 워크스페이스에만
+            적용됩니다. 가격을 확인할 수 있는 모델은 낮은 순서로 표시됩니다.
           </p>
 
           <div className="mt-4">
@@ -125,6 +128,7 @@ export function WorkspaceModelsCard({
                   onChange={select}
                   disabled={isSaving}
                   providers={providers}
+                  credentials={credentials}
                   showSavedStatus
                 />
                 <Button type="submit" size="sm" disabled={!hasChanges || isSaving}>

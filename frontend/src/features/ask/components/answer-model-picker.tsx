@@ -15,8 +15,8 @@ import {
 import { useAsync } from "@/hooks/use-async";
 import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { ModelOption, RoleModels } from "@/lib/api";
+import { optionKey } from "@/features/workspace/lib/model-roles";
 
-const optionKey = (option: ModelOption) => JSON.stringify([option.provider, option.model]);
 
 export function AnswerModelPicker({
   workspaceId,
@@ -36,6 +36,7 @@ export function AnswerModelPicker({
     reload,
   } = useAsync((signal) => api.getWorkspaceModels(workspaceId, undefined, signal), [workspaceId]);
   const { data: providers } = useAsync((signal) => api.listProviders(signal), []);
+  const { data: credentials } = useAsync((signal) => api.listAccountCredentials(signal), []);
   const [answer, setAnswer] = useState<RoleModels>();
   const [failedOption, setFailedOption] = useState<ModelOption>();
   const [saveError, setSaveError] = useState<string>();
@@ -51,7 +52,13 @@ export function AnswerModelPicker({
 
   const providerName = (id: string) =>
     providers?.find((provider) => provider.id === id)?.displayName ?? id;
-  const modelLabel = (option: ModelOption) => `${providerName(option.provider)} · ${option.model}`;
+  const modelLabel = (option: ModelOption) => {
+    const credential = credentials?.find((item) => item.id === option.credentialId);
+    const connection = credential
+      ? `${credential.label}${credential.baseUrl ? ` (${credential.baseUrl})` : ""}`
+      : option.credentialId?.slice(0, 8);
+    return `${providerName(option.provider)} · ${option.model}${connection ? ` · ${connection}` : ""}`;
+  };
   const options = answer?.options ?? [];
   const selected = answer?.selected;
   const selectedAvailable =
@@ -145,7 +152,7 @@ export function AnswerModelPicker({
                   className="underline underline-offset-2"
                   href={workspacePath(workspaceId, "settings")}
                 >
-                  설정에서 API 키 등록
+                  설정에서 AI 연결 등록
                 </Link>
               </p>
             ) : (
