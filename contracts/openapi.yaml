@@ -104,7 +104,7 @@ paths:
     put:
       operationId: updateWorkspaceModels
       summary: Choose the model used for each job
-      description: Jobs left out keep their current choice. The embedding model cannot change once sources are indexed.
+      description: Jobs left out keep their current choice. LLM jobs (answer, extraction, transcription) change freely. The embedding model is fixed when the workspace is created, so changing it is a 409.
       requestBody:
         required: true
         content:
@@ -123,7 +123,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WorkspaceModels" }
         "404": { description: Workspace not found }
-        "409": { description: The embedding model is locked because sources are already indexed }
+        "409": { description: The embedding model is fixed at workspace creation and cannot be changed }
         "422": { description: A job is unknown or the model is not offered for it }
 components:
   schemas:

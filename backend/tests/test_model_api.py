@@ -229,7 +229,7 @@ def test_changing_the_embedding_model_after_indexing_is_a_409(env: Env) -> None:
     response = put_models(TestClient(app), {"embedding": EMBED_LARGE})
 
     assert response.status_code == 409
-    assert "임베딩 모델을 바꿀 수 없습니다" in response.json()["detail"]
+    assert "워크스페이스를 만들 때 정해지며" in response.json()["detail"]
     assert env.workspace.model_settings["embedding"] == EMBED_SMALL
 
 
@@ -327,3 +327,66 @@ def test_the_paths_are_registered() -> None:
 
     assert "/api/v1/llm-keys/models" in paths
     assert {"get", "put"} <= set(paths["/api/v1/workspaces/{workspace_id}/ai/models"])
+
+
+# --- the embedding model is fixed when the workspace is created; LLM models change freely -----
+
+
+def test_the_embedding_model_is_locked_as_soon_as_it_is_chosen_even_before_any_indexing(
+    env: Env,
+) -> None:
+    env.workspace.model_settings = {"embedding": EMBED_SMALL}  # chosen at creation, nothing indexed
+
+    roles = by_role(get_models(TestClient(app)))
+
+    assert env.indexed is False
+    assert roles["embedding"]["locked"] is True
+
+
+def test_a_workspace_that_never_chose_can_choose_the_embedding_model_exactly_once(
+    env: Env,
+) -> None:
+    assert by_role(get_models(TestClient(app)))["embedding"]["locked"] is False
+
+    assert put_models(TestClient(app), {"embedding": EMBED_LARGE}).status_code == 200
+
+    assert by_role(get_models(TestClient(app)))["embedding"]["locked"] is True
+    assert put_models(TestClient(app), {"embedding": EMBED_SMALL}).status_code == 409
+    assert env.workspace.model_settings["embedding"] == EMBED_LARGE
+
+
+def test_changing_the_embedding_model_is_refused_even_though_nothing_is_indexed(env: Env) -> None:
+    env.workspace.model_settings = {"embedding": EMBED_SMALL}
+
+    response = put_models(TestClient(app), {"embedding": EMBED_LARGE})
+
+    assert response.status_code == 409
+    assert env.workspace.model_settings["embedding"] == EMBED_SMALL
+
+
+@pytest.mark.parametrize("role", ["answer", "extraction", "transcription"])
+def test_every_llm_job_can_be_changed_freely_even_with_the_embedding_locked(
+    env: Env, role: str
+) -> None:
+    env.indexed = True
+    env.workspace.model_settings = {"embedding": EMBED_SMALL}
+    first, second = OPTIONS[ModelRole(role)][0], OPTIONS[ModelRole(role)][-1]
+
+    for choice in (second, first, second):  # back and forth, as often as the user likes
+        response = put_models(TestClient(app), {role: choice.model_dump()})
+        assert response.status_code == 200
+        assert env.workspace.model_settings[role] == choice.model_dump()
+
+    assert env.workspace.model_settings["embedding"] == EMBED_SMALL  # untouched throughout
+
+
+def test_a_workspace_created_with_an_embedding_model_starts_locked(env: Env) -> None:
+    create({"embedding": EMBED_LARGE})
+    made = created_workspace(env)
+    made.id = WORKSPACE  # the fake session serves exactly one workspace id
+    env.session.workspace = made
+
+    roles = by_role(get_models(TestClient(app)))
+
+    assert roles["embedding"]["selected"] == EMBED_LARGE
+    assert roles["embedding"]["locked"] is True

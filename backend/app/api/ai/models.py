@@ -34,7 +34,8 @@ class RoleModelsResponse(BaseModel):
     role: str
     options: list[ModelOption]
     selected: ModelOption | None
-    # Fixed for good: the embedding model cannot change once sources are indexed.
+    # Fixed for good. Only the embedding model is: it is chosen when the workspace is created,
+    # because vectors of two models cannot be searched together. LLM models change freely.
     locked: bool
 
 
@@ -73,6 +74,14 @@ def _response(
     return WorkspaceModelsResponse(roles=roles)
 
 
+async def _locked_roles(session: AsyncSession, workspace: Workspace) -> set[ModelRole]:
+    """Embedding is fixed once chosen, or once anything has been embedded with the default."""
+    chosen = selection_of(workspace.model_settings, ModelRole.EMBEDDING) is not None
+    if chosen or await has_indexed_chunks(session, workspace.id):
+        return {ModelRole.EMBEDDING}
+    return set()
+
+
 async def _owned_workspace(
     workspace_id: UUID, user: CurrentUser, session: AsyncSession
 ) -> Workspace:
@@ -97,8 +106,7 @@ async def get_workspace_models(
 ) -> WorkspaceModelsResponse:
     workspace = await _owned_workspace(workspace_id, user, session)
     options = await options_for_workspace(session, workspace.id, user.id)
-    locked = {ModelRole.EMBEDDING} if await has_indexed_chunks(session, workspace.id) else set()
-    return _response(options, workspace.model_settings, locked)
+    return _response(options, workspace.model_settings, await _locked_roles(session, workspace))
 
 
 @router.put("/workspaces/{workspace_id}/ai/models", response_model=WorkspaceModelsResponse)
@@ -115,20 +123,20 @@ async def update_workspace_models(
     if problems:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " ".join(problems))
 
-    locked = {ModelRole.EMBEDDING} if await has_indexed_chunks(session, workspace.id) else set()
+    locked = await _locked_roles(session, workspace)
     requested = body.selections.get(ModelRole.EMBEDDING.value)
     if requested is not None and ModelRole.EMBEDDING in locked:
         current = selection_of(workspace.model_settings, ModelRole.EMBEDDING)
-        # A workspace that never chose embedded with the deployment default; recording that
-        # model is allowed, anything else would mix incompatible vectors.
+        # A workspace that never chose but already embedded used the deployment default; recording
+        # that model is allowed, anything else would mix incompatible vectors.
         unchanged = requested == current or (
             current is None and requested.model == settings.embedding_model
         )
         if not unchanged:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "이미 색인된 소스가 있어 임베딩 모델을 바꿀 수 없습니다. 바꾸면 기존 검색 결과와 "
-                "새 결과가 섞여 품질이 떨어집니다.",
+                "임베딩 모델은 워크스페이스를 만들 때 정해지며 바꿀 수 없습니다. 모델마다 벡터가 "
+                "달라 바꾸면 이미 색인한 소스와 함께 검색할 수 없습니다.",
             )
 
     workspace.model_settings = {
