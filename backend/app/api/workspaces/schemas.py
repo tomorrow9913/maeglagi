@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.context_engine.application.model_roles import ModelOption
+
 
 class CreateWorkspaceRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -10,6 +12,9 @@ class CreateWorkspaceRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     llm_provider: str = Field(validation_alias="llmProvider")
     llm_api_key: str = Field(min_length=1, validation_alias="llmApiKey")
+    # The model chosen per job (answer, extraction, embedding, transcription). Jobs left out get
+    # the recommended model of the key.
+    models: dict[str, ModelOption] | None = None
 
 
 class WorkspaceResponse(BaseModel):

@@ -12,7 +12,7 @@ from app.modules.context_engine.application.context_store import (
 )
 from app.modules.context_engine.application.extraction import ExtractionPipeline
 from app.modules.context_engine.infrastructure.models import ContextRecord, ContextStoreRecord
-from app.modules.ingestion.application.pipeline import IngestionError
+from app.modules.ingestion.application.pipeline import IngestionError, ResolvedProvider
 from app.modules.ingestion.application.source_analysis import (
     SourceAnalysisService,
     analyze_source,
@@ -184,16 +184,20 @@ class FakeSession:
 
 
 class NoStructuredOutputKey:
-    async def provider_for(self, session: Any, **kwargs: Any) -> Any:
+    async def provider_with_model(self, session: Any, **kwargs: Any) -> Any:
         raise IngestionError("structuredOutput을 지원하는 API key가 없습니다.")
 
 
 class WithKey:
+    """A workspace whose owner chose `chosen-extraction-model` for analysis."""
+
     def __init__(self, adapter: FakeAdapter) -> None:
         self.adapter = adapter
+        self.roles: list[Any] = []
 
-    async def provider_for(self, session: Any, **kwargs: Any) -> Any:
-        return self.adapter, "key"
+    async def provider_with_model(self, session: Any, **kwargs: Any) -> Any:
+        self.roles.append(kwargs["role"])
+        return ResolvedProvider(self.adapter, "key", "chosen-extraction-model")
 
 
 async def test_analysis_is_skipped_without_a_structured_output_key() -> None:
@@ -312,3 +316,18 @@ async def test_an_analysis_failure_fails_the_job_instead_of_reporting_success(wi
         await tasks._process_source(record.id)
 
     assert record.status != "succeeded"
+
+
+async def test_analysis_uses_the_extraction_model_the_workspace_chose() -> None:
+    adapter = FakeAdapter(architecture_meeting().responses)
+    ingestion = WithKey(adapter)
+    service = SourceAnalysisService(
+        ingestion,  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: FakeRepository(),
+    )
+
+    await service.run(FakeSession(), source=source(), text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert [role.value for role in ingestion.roles] == ["extraction"]
+    assert {r.model for r in adapter.requests} == {"chosen-extraction-model"}

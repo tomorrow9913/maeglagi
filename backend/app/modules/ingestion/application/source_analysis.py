@@ -12,6 +12,7 @@ from app.modules.context_engine.application.context_store import (
 )
 from app.modules.context_engine.application.entity_resolution import resolve_extraction
 from app.modules.context_engine.application.extraction import ExtractionPipeline
+from app.modules.context_engine.application.model_roles import ModelRole
 from app.modules.context_engine.application.provider import ProviderAdapter
 from app.modules.context_engine.infrastructure.context_store_repository import (
     SqlContextStoreRepository,
@@ -86,14 +87,17 @@ class SourceAnalysisService:
 
     async def run(self, session: AsyncSession, *, source: Source, text: str) -> list[str]:
         try:
-            adapter, api_key = await self.ingestion.provider_for(
-                session, source=source, capability="structuredOutput"
+            adapter, api_key, model = await self.ingestion.provider_with_model(
+                session,
+                workspace_id=source.workspace_id,
+                owner_id=source.owner_id,
+                role=ModelRole.EXTRACTION,
             )
         except IngestionError as exc:
             return self._skip(source, str(exc))
 
         workspace = await session.get(Workspace, source.workspace_id)
-        pipeline = ExtractionPipeline(adapter, api_key, model=self.settings.extraction_model)
+        pipeline = ExtractionPipeline(adapter, api_key, model=model)
         context_store = ContextStoreService(
             self.repository_factory(session), ContextStoreUpdater(pipeline)
         )
@@ -104,7 +108,7 @@ class SourceAnalysisService:
             warnings = await analyze_source(
                 adapter=adapter,
                 api_key=api_key,
-                model=self.settings.extraction_model,
+                model=model,
                 context_store=context_store,
                 graph_store=graph_store,
                 workspace_id=source.workspace_id,
