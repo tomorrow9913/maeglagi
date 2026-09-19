@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import quote
@@ -7,13 +8,24 @@ import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials
 from kombu.exceptions import OperationalError
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.jobs.schemas import JobResponse
+from app.api.workspaces.associations import (
+    project_ids as source_project_ids,
+)
+from app.api.workspaces.associations import (
+    replace_projects,
+    source_people,
+)
+from app.api.workspaces.associations import (
+    router as associations_router,
+)
 from app.api.workspaces.context import router as context_router
+from app.api.workspaces.credentials import _credential_key
 from app.api.workspaces.credentials import router as credentials_router
 from app.api.workspaces.directory import active_project
 from app.api.workspaces.directory import router as directory_router
@@ -54,6 +66,11 @@ from app.modules.ingestion.application.upload_validation import (
     validate_recording,
 )
 from app.modules.ingestion.infrastructure.tasks import process_source
+from app.modules.workspaces.domain.source_state import (
+    ProcessingStage,
+    ReviewState,
+    SourceStatus,
+)
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
 router = APIRouter()
@@ -63,6 +80,13 @@ router.include_router(graph_router)
 router.include_router(source_content_router)
 workspaces = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
+
+
+def _selected_projects(project_id: UUID | None, project_ids: list[UUID] | None) -> list[UUID]:
+    ids = project_ids if project_ids is not None else ([project_id] if project_id else [])
+    if len(ids) != len(set(ids)) or (project_id is not None and (not ids or ids[0] != project_id)):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid project selection")
+    return ids
 
 
 def _job_response(source: Source) -> JobResponse:
@@ -91,7 +115,7 @@ async def _enqueue_source(source: Source, session: AsyncSession) -> None:
     try:
         process_source.apply_async(args=[str(source.id)], task_id=str(source.id))
     except (OperationalError, ConnectionError) as exc:
-        source.status = "failed"
+        source.status = SourceStatus.FAILED
         source.error_message = "Processing queue unavailable"
         session.add(source)
         await session.commit()
@@ -118,10 +142,11 @@ async def list_workspaces(user: CurrentUser, session: Session) -> list[Workspace
 async def create_workspace(
     body: CreateWorkspaceRequest, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
-    valid, message = await validate_provider_credential(body.llm_provider, body.llm_api_key)
+    key = _credential_key(body.llm_provider, body.llm_api_key)
+    valid, message = await validate_provider_credential(body.llm_provider, key)
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
-    options = await options_for_key(body.llm_provider, body.llm_api_key)
+    options = await options_for_key(body.llm_provider, key)
     problems = invalid_selections(body.models or {}, options)
     if problems:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " ".join(problems))
@@ -141,16 +166,17 @@ async def create_workspace(
         workspace_id=workspace.id,
         owner_id=user.id,
         provider=body.llm_provider,
-        key_hint=body.llm_api_key[-4:],
+        key_hint="local" if body.llm_provider == "ollama" else key[-4:],
         is_default=True,
     )
-    credential.vault_secret_id = await store_credential_secret(
-        session,
-        secret=body.llm_api_key,
-        credential_id=credential.id,
-        workspace_id=workspace.id,
-        provider=body.llm_provider,
-    )
+    if body.llm_provider != "ollama":
+        credential.vault_secret_id = await store_credential_secret(
+            session,
+            secret=key,
+            credential_id=credential.id,
+            workspace_id=workspace.id,
+            provider=body.llm_provider,
+        )
     session.add(credential)
     await session.commit()
     await session.refresh(workspace)
@@ -171,7 +197,9 @@ async def get_workspace(
 
 
 @workspaces.get("/{workspace_id}/sources", response_model=list[SourceResponse])
-async def list_sources(workspace_id: UUID, user: CurrentUser, session: Session) -> list[Source]:
+async def list_sources(
+    workspace_id: UUID, user: CurrentUser, session: Session
+) -> list[SourceResponse]:
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
@@ -180,7 +208,21 @@ async def list_sources(workspace_id: UUID, user: CurrentUser, session: Session) 
         .where(Source.workspace_id == workspace.id, Source.owner_id == user.id)
         .order_by(Source.created_at.desc())
     )
-    return list(result.all())
+    sources = list(result.all())
+    return [
+        SourceResponse.model_validate(source, from_attributes=True).model_copy(
+            update={
+                "project_ids": await source_project_ids(session, source),
+                "associations": [
+                    item.model_dump(by_alias=True, mode="json")
+                    for item in await source_people(session, source)
+                ],
+                "has_recording": source.kind == "meeting"
+                and source.content_type.startswith(("audio/", "video/")),
+            }
+        )
+        for source in sources
+    ]
 
 
 @workspaces.post(
@@ -196,8 +238,8 @@ async def upload_document(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
-    source.status = "queued"
-    source.processing_stage = "uploaded"
+    source.status = SourceStatus.QUEUED
+    source.processing_stage = ProcessingStage.UPLOADED
     await session.commit()
     await _enqueue_source(source, session)
     return _job_response(source)
@@ -216,8 +258,19 @@ async def upload_recording(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
     live_draft: Annotated[str | None, Form(alias="liveDraft")] = None,
     project_id: Annotated[UUID | None, Form(alias="projectId")] = None,
+    project_ids: Annotated[str | None, Form(alias="projectIds")] = None,
 ) -> JobResponse:
-    await active_project(session, project_id, workspace_id, user.id)
+    try:
+        ids = _selected_projects(
+            project_id,
+            TypeAdapter(list[UUID]).validate_python(json.loads(project_ids))
+            if project_ids is not None
+            else None,
+        )
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid projectIds") from exc
+    for identifier in ids:
+        await active_project(session, identifier, workspace_id, user.id)
     draft = None
     if live_draft is not None:
         try:
@@ -227,14 +280,16 @@ async def upload_recording(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid live draft") from exc
     source, _ = await _upload_source(workspace_id, audio, "meeting", user, session, credentials)
     source.transcript_source = "server"
-    source.review_state = "transcribing"
-    source.project_id = project_id
+    source.review_state = ReviewState.TRANSCRIBING
+    source.project_id = ids[0] if ids else None
     source.review_utterances = (
         [item.model_dump(by_alias=True, mode="json") for item in draft.utterances] if draft else []
     )
-    source.status = "queued"
-    source.processing_stage = "uploaded"
+    source.status = SourceStatus.QUEUED
+    source.processing_stage = ProcessingStage.UPLOADED
     source.progress = 0
+    await session.flush()
+    await replace_projects(session, source, ids)
     await session.commit()
     await _enqueue_source(source, session)
     return _job_response(source)
@@ -255,7 +310,9 @@ async def create_transcript_source(
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-    await active_project(session, body.project_id, workspace_id, user.id)
+    ids = _selected_projects(body.project_id, body.project_ids)
+    for identifier in ids:
+        await active_project(session, identifier, workspace_id, user.id)
     text_value = body.text.strip()
     if not text_value:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Transcript text is required")
@@ -286,18 +343,20 @@ async def create_transcript_source(
         content_type="text/plain; charset=utf-8",
         size_bytes=len(content),
         transcript_source="browser",
-        project_id=body.project_id,
+        project_id=ids[0] if ids else None,
         duration_seconds=body.duration_seconds,
         transcript_text=text_value,
         review_utterances=[item.model_dump(by_alias=True, mode="json") for item in utterances],
-        review_state="awaiting_review",
-        status="awaiting_review",
-        processing_stage="awaiting_review",
+        review_state=ReviewState.AWAITING_REVIEW,
+        status=SourceStatus.AWAITING_REVIEW,
+        processing_stage=ProcessingStage.AWAITING_REVIEW,
         progress=0.45,
     )
     source.object_path = f"{user.id}/{workspace.id}/{source.id}/transcript.txt"
     await _upload_object(source, content, credentials)
     session.add(source)
+    await session.flush()
+    await replace_projects(session, source, ids)
     await session.commit()
     return _job_response(source)
 
@@ -411,4 +470,5 @@ async def _upload_object(
 
 workspaces.include_router(directory_router)
 workspaces.include_router(review_router)
+workspaces.include_router(associations_router)
 router.include_router(workspaces)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyRound, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,8 +34,40 @@ export function ApiKeyCard({
   const [apiKey, setApiKey] = useState("");
   const [validatedKey, setValidatedKey] = useState<string>();
   const [isSaving, setIsSaving] = useState(false);
+  const [localStatus, setLocalStatus] = useState("연결 확인 중…");
   const formRef = useRef<HTMLFormElement>(null);
   const selectedCredentials = credentials.filter((item) => item.provider === provider);
+  const isLocal = providers.find((item) => item.id === provider)?.authMode === "none";
+  useEffect(() => {
+    if (!isLocal) return;
+    const controller = new AbortController();
+    api.validateApiKey({ provider, apiKey: "" }, controller.signal)
+      .then(async (result) => {
+        if (!result.valid) throw new Error(result.message);
+        const models = await api.listKeyModels({ provider, apiKey: "" }, controller.signal);
+        if (!controller.signal.aborted) setLocalStatus(`서버 연결됨 · 사용 가능한 모델 ${models.roles.reduce((count, role) => count + role.options.length, 0)}개`);
+      })
+      .catch((error) => { if (!controller.signal.aborted) setLocalStatus(error instanceof Error ? error.message : "로컬 연결을 확인하지 못했습니다."); });
+    return () => controller.abort();
+  }, [api, isLocal, provider]);
+
+  if (isLocal) return <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+    <h2 className="text-sm font-medium">서버 관리 로컬 AI 연결</h2>
+    <p className="text-xs text-muted-foreground">이 연결의 주소와 모델은 서버가 관리합니다. API 키나 URL을 입력하지 않습니다.</p>
+    <p aria-live="polite" className="text-xs text-muted-foreground">{localStatus}</p>
+    <ProviderSelect id="settings-provider" value={provider} providers={providers} disabled={isSaving} onChange={(next) => { setIsEditing(false); setEditingCredential(undefined); setApiKey(""); setValidatedKey(undefined); setLocalStatus("연결 확인 중…"); onProviderChange(next); }} />
+    <Button type="button" size="sm" disabled={isSaving} onClick={() => { void (async () => {
+      setIsSaving(true);
+      try {
+        const result = await api.validateApiKey({ provider, apiKey: "" });
+        if (!result.valid) throw new Error(result.message);
+        await api.updateApiKey(workspaceId, { provider, label: "Local", apiKey: "" });
+        onUpdated();
+        toast.success("서버의 로컬 AI 연결을 확인했습니다.");
+      } catch (error) { toast.error(error instanceof Error ? error.message : "로컬 연결을 확인하지 못했습니다."); }
+      finally { setIsSaving(false); }
+    })(); }}>{isSaving ? "확인 중…" : selectedCredentials.length ? "로컬 연결 다시 확인" : "로컬 연결 사용"}</Button>
+  </section>;
 
   const beginEdit = (credential?: WorkspaceSecrets) => {
     setEditingCredential(credential);

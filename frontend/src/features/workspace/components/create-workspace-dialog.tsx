@@ -47,7 +47,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
   const [apiKey, setApiKey] = useState("");
   // 검증을 통과한 키. 이 키로만 모델 목록을 받아 오므로, 없으면 아직 확인 전이라는 뜻입니다.
   const [validatedKey, setValidatedKey] = useState<string>();
-  const isKeyValid = Boolean(validatedKey);
+  const isKeyValid = validatedKey !== undefined;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const selectedProvider = providers.find((item) => item.id === provider);
   const keyModels = useKeyModels(provider, validatedKey, selectedProvider?.defaultModels);
@@ -65,7 +65,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
       const created = await api.createWorkspace({
         name,
         llmProvider: provider,
-        llmApiKey: apiKey,
+        llmApiKey: selectedProvider?.authMode === "none" ? "" : apiKey,
         models: keyModels.selections,
       });
 
@@ -97,9 +97,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>새 워크스페이스</DialogTitle>
-          <DialogDescription>
-            맥락을 모을 공간을 만들고 분석에 쓸 LLM 키를 등록합니다.
-          </DialogDescription>
+          <DialogDescription>맥락을 모을 공간을 만들고 분석에 쓸 AI 연결을 선택합니다.</DialogDescription>
         </DialogHeader>
 
         <form
@@ -132,6 +130,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
               onChange={(next) => {
                 // 다른 provider에 이전 키로 모델을 요청하지 않도록, 키는 다시 확인될 때까지 비웁니다.
                 setValidatedKey(undefined);
+                setApiKey("");
                 setChosen(next);
               }}
               providers={providers}
@@ -143,11 +142,12 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
 
           <div className="space-y-1.5">
             <label htmlFor="workspace-key" className="text-sm font-medium">
-              API key
+              {selectedProvider?.authMode === "none" ? "서버 관리 로컬 연결" : "API key"}
             </label>
             <ApiKeyField
               id="workspace-key"
               provider={provider}
+              authMode={selectedProvider?.authMode}
               value={apiKey}
               onChange={setApiKey}
               onValidated={(_result, key) => setValidatedKey(key)}

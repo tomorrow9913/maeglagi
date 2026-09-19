@@ -37,16 +37,17 @@ def _occurred(record: ContextRecord) -> datetime:
 
 
 def _superseded_by(records: list[ContextRecord]) -> dict[UUID, UUID]:
-    """Map each replaced decision to the latest decision that says it replaces it."""
+    """Map explicitly replaced context items to their latest successors."""
     replaced: dict[UUID, UUID] = {}
     for newer in sorted(records, key=_occurred):
         target = (newer.metadata_ or {}).get("supersedes")
-        if newer.kind != "decision" or not target:
+        if not target:
             continue
         for older in records:
             if (
-                older.kind == "decision"
-                and older.id != newer.id
+                older.id != newer.id
+                and older.owner_id == newer.owner_id
+                and older.workspace_id == newer.workspace_id
                 and (older.metadata_ or {}).get("key") == target
             ):
                 replaced[older.id] = newer.id

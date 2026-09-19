@@ -21,6 +21,20 @@ from app.modules.context_engine.infrastructure.credential_validation import (
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter()
+
+
+def _credential_key(provider: str, value: str | None) -> str:
+    if provider == "ollama":
+        if value:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Ollama does not use an API key"
+            )
+        return ""
+    if not value:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "API key is required")
+    return value
+
+
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -73,7 +87,11 @@ async def _workspace_credentials(
 
 @router.post("/llm-keys/validate", response_model=CredentialValidation)
 async def validate_key(body: CredentialInput, _user: CurrentUser) -> CredentialValidation:
-    valid, message = await validate_provider_credential(body.provider, body.api_key)
+    try:
+        key = _credential_key(body.provider, body.api_key)
+    except HTTPException as exc:
+        return CredentialValidation(valid=False, message=str(exc.detail))
+    valid, message = await validate_provider_credential(body.provider, key)
     return CredentialValidation(valid=valid, message=message)
 
 
@@ -97,7 +115,8 @@ async def add_credential(
     workspace_id: UUID, body: CredentialInput, user: CurrentUser, session: Session
 ) -> CredentialResponse:
     await _owned_workspace(workspace_id, user, session, for_update=True)
-    valid, message = await validate_provider_credential(body.provider, body.api_key)
+    key = _credential_key(body.provider, body.api_key)
+    valid, message = await validate_provider_credential(body.provider, key)
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
     credentials = await _workspace_credentials(workspace_id, user, session)
@@ -108,16 +127,17 @@ async def add_credential(
         owner_id=user.id,
         provider=body.provider,
         label=body.label,
-        key_hint=body.api_key[-4:],
+        key_hint="local" if body.provider == "ollama" else key[-4:],
         is_default=False,
     )
-    credential.vault_secret_id = await store_credential_secret(
-        session,
-        secret=body.api_key,
-        credential_id=credential.id,
-        workspace_id=workspace_id,
-        provider=body.provider,
-    )
+    if body.provider != "ollama":
+        credential.vault_secret_id = await store_credential_secret(
+            session,
+            secret=key,
+            credential_id=credential.id,
+            workspace_id=workspace_id,
+            provider=body.provider,
+        )
     session.add(credential)
     await session.commit()
     await session.refresh(credential)
@@ -137,23 +157,24 @@ async def rotate_credential(
 ) -> CredentialResponse:
     await _owned_workspace(workspace_id, user, session, for_update=True)
     credential = await _owned_credential(workspace_id, credential_id, user, session)
-    valid, message = await validate_provider_credential(credential.provider, body.api_key)
+    key = _credential_key(credential.provider, body.api_key)
+    valid, message = await validate_provider_credential(credential.provider, key)
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
-    if credential.vault_secret_id is None:
+    if credential.provider == "ollama":
+        credential.vault_secret_id = None
+    elif credential.vault_secret_id is None:
         credential.vault_secret_id = await store_credential_secret(
             session,
-            secret=body.api_key,
+            secret=key,
             credential_id=credential.id,
             workspace_id=workspace_id,
             provider=credential.provider,
         )
     else:
-        await credential_vault.update(
-            session, secret_id=credential.vault_secret_id, secret=body.api_key
-        )
+        await credential_vault.update(session, secret_id=credential.vault_secret_id, secret=key)
     credential.encrypted_secret = None
-    credential.key_hint = body.api_key[-4:]
+    credential.key_hint = "local" if credential.provider == "ollama" else key[-4:]
     credential.status = "active"
     credential.updated_at = datetime.now(UTC)
     session.add(credential)
@@ -244,7 +265,8 @@ async def upsert_default_credential(
     session: Session,
 ) -> CredentialResponse:
     await _owned_workspace(workspace_id, user, session, for_update=True)
-    valid, message = await validate_provider_credential(body.provider, body.api_key)
+    key = _credential_key(body.provider, body.api_key)
+    valid, message = await validate_provider_credential(body.provider, key)
     if not valid:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, message)
 
@@ -275,32 +297,33 @@ async def upsert_default_credential(
             owner_id=user.id,
             provider=body.provider,
             label=body.label,
-            key_hint=body.api_key[-4:],
+            key_hint="local" if body.provider == "ollama" else key[-4:],
             is_default=True,
             updated_at=now,
         )
-        credential.vault_secret_id = await store_credential_secret(
-            session,
-            secret=body.api_key,
-            credential_id=credential.id,
-            workspace_id=workspace_id,
-            provider=body.provider,
-        )
-    else:
-        if credential.vault_secret_id is None:
+        if body.provider != "ollama":
             credential.vault_secret_id = await store_credential_secret(
                 session,
-                secret=body.api_key,
+                secret=key,
+                credential_id=credential.id,
+                workspace_id=workspace_id,
+                provider=body.provider,
+            )
+    else:
+        if body.provider == "ollama":
+            credential.vault_secret_id = None
+        elif credential.vault_secret_id is None:
+            credential.vault_secret_id = await store_credential_secret(
+                session,
+                secret=key,
                 credential_id=credential.id,
                 workspace_id=workspace_id,
                 provider=body.provider,
             )
         else:
-            await credential_vault.update(
-                session, secret_id=credential.vault_secret_id, secret=body.api_key
-            )
+            await credential_vault.update(session, secret_id=credential.vault_secret_id, secret=key)
         credential.encrypted_secret = None
-        credential.key_hint = body.api_key[-4:]
+        credential.key_hint = "local" if body.provider == "ollama" else key[-4:]
         credential.status = "active"
         credential.is_default = True
         credential.updated_at = now

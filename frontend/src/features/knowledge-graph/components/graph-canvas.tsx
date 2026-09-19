@@ -171,7 +171,8 @@ export function GraphCanvas({
 
     cy.elements().remove();
     cy.add(elements);
-    cy.layout(LAYOUT).run();
+    const projects = cy.nodes('[type = "project"]');
+    cy.layout(projects.length ? { name: "breadthfirst", directed: false, roots: projects.toArray().map((node) => node.id()), spacingFactor: 1.4, padding: 56 } : LAYOUT).run();
     cy.fit(undefined, 48);
 
     /*

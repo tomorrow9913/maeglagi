@@ -1,4 +1,4 @@
-import { apiFetch, apiStream, apiUpload } from "../client";
+import { apiBlob, apiFetch, apiStream, apiUpload } from "../client";
 import type { MaeglagiApi } from "../contract";
 import type {
   AnswerEvent,
@@ -17,6 +17,7 @@ import type {
   WorkspacePerson,
   WorkspaceProject,
   Source,
+  SourceAssociations,
   SourceContent,
   TranscriptSourceInput,
   Workspace,
@@ -102,12 +103,17 @@ export const httpApi: MaeglagiApi = {
   listProjects: (workspaceId, signal) => apiFetch<WorkspaceProject[]>(`/workspaces/${workspaceId}/projects`, { signal }),
   createProject: (workspaceId, input: ProjectInput, signal) => apiFetch<WorkspaceProject>(`/workspaces/${workspaceId}/projects`, { method: "POST", body: JSON.stringify(input), signal }),
   updateProject: (workspaceId, projectId, input, signal) => apiFetch<WorkspaceProject>(`/workspaces/${workspaceId}/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(input), signal }),
+  listProjectParticipants: (workspaceId, projectId, signal) => apiFetch<WorkspacePerson[]>(`/workspaces/${workspaceId}/projects/${projectId}/participants`, { signal }),
+  setProjectParticipants: (workspaceId, projectId, input, signal) => apiFetch<WorkspaceProject>(`/workspaces/${workspaceId}/projects/${projectId}/participants`, { method: "PUT", body: JSON.stringify(input), signal }),
 
   listSources: (workspaceId, signal) =>
     apiFetch<Source[]>(`/workspaces/${workspaceId}/sources`, { signal }),
 
   getSourceContent: (sourceId, signal) =>
     apiFetch<SourceContent>(`/sources/${sourceId}/content`, { signal }),
+  getSourcePlaybackUrl: (sourceId, signal) => apiFetch<{ url: string; expiresAt: string }>(`/sources/${sourceId}/playback-url`, { method: "POST", signal }),
+  exportSourceMarkdown: (sourceId, signal) => apiBlob(`/sources/${sourceId}/export.md`, { signal }),
+  updateSourceAssociations: (workspaceId, sourceId, input, signal) => apiFetch<SourceAssociations>(`/workspaces/${workspaceId}/sources/${sourceId}/associations`, { method: "PATCH", body: JSON.stringify(input), signal }),
 
   uploadDocument: (workspaceId, file, options) => {
     const form = new FormData();
@@ -117,9 +123,10 @@ export const httpApi: MaeglagiApi = {
 
   uploadRecording: (workspaceId, audio, liveDraft?: { utterances: MeetingUtterance[] }, projectId?, options?) => {
     const form = new FormData();
-    form.append("audio", audio, "recording.webm");
+    form.append("audio", audio, typeof File !== "undefined" && audio instanceof File ? audio.name : "recording.webm");
     if (liveDraft?.utterances.length) form.append("liveDraft", JSON.stringify(liveDraft));
     if (projectId) form.append("projectId", projectId);
+    if (options?.projectIds) form.append("projectIds", JSON.stringify(options.projectIds));
     return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/recordings`, form, options);
   },
 
@@ -132,6 +139,7 @@ export const httpApi: MaeglagiApi = {
 
   getJob: (jobId, signal) => apiFetch<ProcessingJob>(`/jobs/${jobId}`, { signal }),
   getMeetingReview: (workspaceId, sourceId, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { signal }),
+  retryMeetingTranscription: (workspaceId, sourceId, signal) => apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/${sourceId}/review/retry-transcription`, { method: "POST", signal }),
   saveMeetingReview: (workspaceId, sourceId, input, signal) => apiFetch<MeetingReview>(`/workspaces/${workspaceId}/sources/${sourceId}/review`, { method: "PATCH", body: JSON.stringify(input), signal }),
   confirmMeetingReview: (workspaceId, sourceId, revision, signal) => apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/${sourceId}/review/confirm`, { method: "POST", body: JSON.stringify({ revision }), signal }),
 
@@ -146,6 +154,7 @@ export const httpApi: MaeglagiApi = {
   getKnowledgeGraph: (workspaceId, query, signal) => {
     const params = new URLSearchParams();
     if (query?.at) params.set("at", query.at);
+    if (query?.includeMaterials !== undefined) params.set("includeMaterials", String(query.includeMaterials));
     const search = params.toString();
     return apiFetch<KnowledgeGraph>(
       `/workspaces/${workspaceId}/graph${search ? `?${search}` : ""}`,

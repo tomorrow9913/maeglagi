@@ -421,6 +421,37 @@ async def test_writer_merges_by_email_across_sources_even_if_the_name_differs() 
     assert row["identifiers"] == [A]
 
 
+async def test_writer_never_merges_conflicting_directory_people_even_with_same_email() -> None:
+    graph = people(entity("김민수", EntityKind.PERSON, identifiers=[A]))
+    person = graph.entities[0]
+    own_directory = f"directory:person:{uuid4()}"
+    other_directory = f"directory:person:{uuid4()}"
+    person.identifiers.append(own_directory)
+    store = FakeStore(
+        [
+            existing(uuid4(), row_id=person.id, identifiers=[A, other_directory]),
+        ]
+    )
+
+    await writer(store).write(graph)
+
+    row = store.rows("MERGE (e:Entity {id: row.id})")[0]
+    assert row["id"] == str(person.id)
+    assert own_directory in row["identifiers"]
+    assert other_directory not in row["identifiers"]
+
+
+async def test_directory_person_does_not_join_bare_name_node() -> None:
+    graph = people(entity("김민수", EntityKind.PERSON, identifiers=[A]))
+    person = graph.entities[0]
+    person.identifiers.append(f"directory:person:{uuid4()}")
+    store = FakeStore([existing(uuid4(), row_id=person.id, identifiers=[])])
+
+    await writer(store).write(graph)
+
+    assert store.rows("MERGE (e:Entity {id: row.id})")[0]["id"] == str(person.id)
+
+
 async def test_writer_reports_an_ambiguous_bare_name_instead_of_guessing() -> None:
     graph = people(entity("김민수", EntityKind.PERSON))
     person = graph.entities[0]

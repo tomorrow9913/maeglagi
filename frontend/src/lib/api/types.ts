@@ -31,6 +31,7 @@ export type LlmProvider = string;
 export type AiProvider = {
   id: LlmProvider;
   displayName: string;
+  authMode?: "apiKey" | "none";
   capabilities: string[];
   configured: boolean;
   models: string[];
@@ -112,13 +113,21 @@ export type Source = {
   /** server는 오디오 STT, browser는 브라우저 받아쓰기 원문입니다. */
   transcriptSource?: "server" | "browser";
   projectId?: string | null;
+  projectIds?: string[];
+  associations?: SourceAssociation[];
+  associationRevision?: number;
+  hasRecording?: boolean;
 };
+
+export type SourceAssociation = { personId: string; role: "participant" | "author" };
+export type SourceAssociations = { revision: number; projectIds: string[]; people: SourceAssociation[] };
 
 /** 원문 뷰어가 쓰는 정규화된 본문 */
 export type SourceContent = {
   sourceId: string;
   title: string;
   kind: SourceKind;
+  hasRecording?: boolean;
   /** 청크 단위 본문. 근거 하이라이트가 chunkId로 위치를 찾습니다. */
   chunks: {
     id: string;
@@ -157,12 +166,14 @@ export type TranscriptSourceInput = {
   durationSeconds?: number;
   utterances?: MeetingUtterance[];
   projectId?: string | null;
+  projectIds?: string[];
 };
 
 export type WorkspacePerson = {
   id: string;
   workspaceId: string;
   name: string;
+  email?: string | null;
   aliases: string[];
   role?: string | null;
   archivedAt: string | null;
@@ -170,7 +181,7 @@ export type WorkspacePerson = {
   updatedAt: string;
 };
 
-export type PersonInput = { name: string; aliases?: string[]; role?: string | null };
+export type PersonInput = { name: string; email?: string | null; aliases?: string[]; role?: string | null };
 export type WorkspaceProject = {
   id: string;
   workspaceId: string;
@@ -178,6 +189,8 @@ export type WorkspaceProject = {
   goal: string | null;
   description: string | null;
   ownerPersonId: string | null;
+  participantIds?: string[];
+  revision?: number;
   startsOn: string | null;
   endsOn: string | null;
   archivedAt: string | null;
@@ -189,6 +202,7 @@ export type ProjectInput = {
   goal?: string | null;
   description?: string | null;
   ownerPersonId?: string | null;
+  participantIds?: string[];
   startsOn?: string | null;
   endsOn?: string | null;
 };
@@ -205,8 +219,13 @@ export type MeetingReview = {
   title: string;
   transcriptSource: "server" | "browser";
   reviewState: "transcribing" | "awaiting_review" | "confirmed";
+  status: ProcessingStatus;
+  stage: ProcessingStage;
+  errorMessage: string | null;
   revision: number;
   projectId: string | null;
+  projectIds?: string[];
+  suggestedParticipants?: WorkspacePerson[];
   utterances: MeetingUtterance[];
   rawTranscriptText: string | null;
   rawUtterances: MeetingUtterance[];
@@ -285,6 +304,10 @@ export type GraphNode = {
   kind?: string;
   /** 이후 결정이 이 결정을 명시적으로 대체했다면 대체한 결정의 id */
   supersededBy?: string | null;
+  material?: boolean;
+  sourceId?: string | null;
+  directoryId?: string | null;
+  directoryKind?: "Person" | "Project" | null;
 };
 
 export type GraphEdge = {
@@ -297,12 +320,15 @@ export type GraphEdge = {
   /** 관계의 유효 기간. 비어 있으면 시작을 모르거나 종료가 확인되지 않은 관계입니다. */
   validFrom?: string | null;
   validTo?: string | null;
+  explicit?: boolean;
+  role?: "participant" | "author" | "project" | null;
 };
 
 /** 그래프를 볼 기준 시점. 비우면 지금 유효한 관계만 보여줍니다. */
 export type KnowledgeGraphQuery = {
   /** ISO-8601 날짜 또는 시각. 이 시점에 유효했던 관계만 돌려줍니다. */
   at?: string;
+  includeMaterials?: boolean;
 };
 
 export type KnowledgeGraph = {

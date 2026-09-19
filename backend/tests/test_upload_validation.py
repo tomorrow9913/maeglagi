@@ -18,7 +18,7 @@ from app.modules.ingestion.application.upload_validation import (
     validate_document,
     validate_recording,
 )
-from app.modules.workspaces.infrastructure.models import Workspace, WorkspaceProject
+from app.modules.workspaces.infrastructure.models import Source, Workspace, WorkspaceProject
 
 workspace_router = import_module("app.api.workspaces.router")
 
@@ -113,7 +113,14 @@ class FakeSession:
         return None
 
     def add(self, source: Any) -> None:
-        self.sources.append(source)
+        if isinstance(source, Source) and source not in self.sources:
+            self.sources.append(source)
+
+    async def flush(self) -> None:
+        pass
+
+    async def exec(self, _statement: Any) -> None:
+        return None
 
     async def commit(self) -> None:
         pass

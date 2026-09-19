@@ -19,6 +19,7 @@ import type {
   LlmProvider,
   ModelSelections,
   Source,
+  SourceAssociations,
   SourceContent,
   TranscriptSourceInput,
   Workspace,
@@ -95,9 +96,14 @@ export interface MaeglagiApi {
   listProjects(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceProject[]>;
   createProject(workspaceId: string, input: ProjectInput, signal?: AbortSignal): Promise<WorkspaceProject>;
   updateProject(workspaceId: string, projectId: string, input: Partial<ProjectInput> & { archived?: boolean }, signal?: AbortSignal): Promise<WorkspaceProject>;
+  listProjectParticipants(workspaceId: string, projectId: string, signal?: AbortSignal): Promise<WorkspacePerson[]>;
+  setProjectParticipants(workspaceId: string, projectId: string, input: { revision: number; personIds: string[] }, signal?: AbortSignal): Promise<WorkspaceProject>;
 
   listSources(workspaceId: string, signal?: AbortSignal): Promise<Source[]>;
   getSourceContent(sourceId: string, signal?: AbortSignal): Promise<SourceContent>;
+  getSourcePlaybackUrl(sourceId: string, signal?: AbortSignal): Promise<{ url: string; expiresAt: string }>;
+  exportSourceMarkdown(sourceId: string, signal?: AbortSignal): Promise<Blob>;
+  updateSourceAssociations(workspaceId: string, sourceId: string, input: { revision: number; projectIds: string[]; people: { personId: string; role: "participant" | "author" }[] }, signal?: AbortSignal): Promise<SourceAssociations>;
   /** 문서 업로드. 전송이 끝나면 반환된 job으로 처리 진행률을 폴링합니다. */
   uploadDocument(workspaceId: string, file: File, options?: UploadOptions): Promise<ProcessingJob>;
   /** 회의 녹음 업로드. STT 이후 파이프라인은 문서와 동일합니다. */
@@ -106,7 +112,7 @@ export interface MaeglagiApi {
     audio: Blob,
     liveDraft?: { utterances: MeetingUtterance[] },
     projectId?: string,
-    options?: UploadOptions,
+    options?: UploadOptions & { projectIds?: string[] },
   ): Promise<ProcessingJob>;
   /** 브라우저 받아쓰기 대본. 서버 STT 단계 없이 공통 분석 파이프라인으로 들어갑니다. */
   uploadTranscript(
@@ -116,7 +122,8 @@ export interface MaeglagiApi {
   ): Promise<ProcessingJob>;
   getJob(jobId: string, signal?: AbortSignal): Promise<ProcessingJob>;
   getMeetingReview(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<MeetingReview>;
-  saveMeetingReview(workspaceId: string, sourceId: string, input: { revision: number; projectId: string | null; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
+  retryMeetingTranscription(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<ProcessingJob>;
+  saveMeetingReview(workspaceId: string, sourceId: string, input: { revision: number; projectId?: string | null; projectIds?: string[]; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
   confirmMeetingReview(workspaceId: string, sourceId: string, revision: number, signal?: AbortSignal): Promise<ProcessingJob>;
 
   listContextItems(

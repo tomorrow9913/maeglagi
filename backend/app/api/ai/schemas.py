@@ -10,6 +10,7 @@ class ProviderCatalogItem(BaseModel):
     display_name: str = Field(serialization_alias="displayName")
     capabilities: list[str]
     configured: bool
+    auth_mode: str = Field(default="apiKey", serialization_alias="authMode")
     models: list[str] = Field(default_factory=list)
     # The model this provider preselects per job (answer, extraction, embedding, transcription).
     default_models: dict[str, str] = Field(

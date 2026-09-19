@@ -119,6 +119,9 @@ class FakeSession:
         return Workspace(id=WORKSPACE, owner_id=self.owner, name="ws")
 
     async def exec(self, statement: Any) -> FakeResult:
+        entities = [item.get("entity") for item in getattr(statement, "column_descriptions", [])]
+        if Source not in entities:
+            return FakeResult([])
         return FakeResult(
             [
                 Source(
@@ -250,7 +253,7 @@ def test_an_unknown_or_foreign_workspace_is_a_404(api: tuple[TestClient, FakeSto
     assert fetch(client).status_code == 404
 
 
-def test_the_graph_is_unavailable_when_neo4j_is_not_configured() -> None:
+def test_directory_graph_remains_available_when_neo4j_is_not_configured() -> None:
     app.dependency_overrides[get_current_user] = lambda: AuthUser(id=str(USER), metadata={})
     app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
 
@@ -263,4 +266,5 @@ def test_the_graph_is_unavailable_when_neo4j_is_not_configured() -> None:
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 503
+    assert response.status_code == 200
+    assert response.json()["edges"] == []

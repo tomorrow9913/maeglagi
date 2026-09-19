@@ -32,7 +32,10 @@ from app.modules.context_engine.infrastructure.models import (
     ContextStoreRecord,
 )
 from app.modules.workspaces.infrastructure.models import (
+    ProjectMember,
     Source,
+    SourcePerson,
+    SourceProject,
     Workspace,
     WorkspacePerson,
     WorkspaceProject,
@@ -135,7 +138,10 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
         "objects",
     }
     _require(
-        required <= set(payload) <= required | {"people", "projects"}, "Unexpected payload fields"
+        required
+        <= set(payload)
+        <= required | {"people", "projects", "project_members", "source_projects", "source_people"},
+        "Unexpected payload fields",
     )
     _require(payload["version"] == VERSION, "Unsupported artifact version")
     workspace = payload["workspace"]
@@ -160,7 +166,7 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
         )
     for key in ("sources", "chunks", "contexts", "context_stores", "objects"):
         _require(isinstance(payload[key], list), f"Invalid {key}")
-    for key in ("people", "projects"):
+    for key in ("people", "projects", "project_members", "source_projects", "source_people"):
         _require(isinstance(payload.get(key, []), list), f"Invalid {key}")
     sources, chunks, contexts, stores = (
         payload[key] for key in ("sources", "chunks", "contexts", "context_stores")
@@ -203,6 +209,34 @@ def validate_artifact(artifact: dict[str, Any], *, owner_id: UUID | None = None)
             role is None or (isinstance(role, str) and len(role) <= 120),
             "Invalid person role",
         )
+    normalized_emails = [
+        item.get("email_normalized") for item in people if item.get("email_normalized")
+    ]
+    _require(len(normalized_emails) == len(set(normalized_emails)), "Duplicate person email")
+    for key in ("project_members", "source_projects", "source_people"):
+        for row in payload.get(key, []):
+            _require(isinstance(row, dict), f"Invalid {key} row")
+            _require(
+                _uuid(row.get("workspace_id"), "association workspace") == workspace_id,
+                "Association workspace mismatch",
+            )
+            if key != "project_members":
+                _require(
+                    _uuid(row.get("source_id"), "association source") in source_ids,
+                    "Orphan source association",
+                )
+            if key != "source_people":
+                _require(
+                    _uuid(row.get("project_id"), "association project") in project_ids,
+                    "Orphan project association",
+                )
+            if key != "source_projects":
+                _require(
+                    _uuid(row.get("person_id"), "association person") in person_ids,
+                    "Orphan person association",
+                )
+            if key == "source_people":
+                _require(row.get("role") in {"participant", "author"}, "Invalid source person role")
     for source in sources:
         project_id = source.get("project_id")
         _require(
@@ -388,6 +422,11 @@ async def export_snapshot(
             )
         ).all()
         rows[model.__tablename__] = [_row(item) for item in result]
+    for model in (ProjectMember, SourceProject, SourcePerson):
+        result = (
+            await db.scalars(select(model).where(model.workspace_id == source_workspace))
+        ).all()
+        rows[model.__tablename__] = [_row(item) for item in result]
     nodes = [
         dict(item["props"])
         for item in graph.run(
@@ -425,6 +464,9 @@ async def export_snapshot(
         "workspace": _row(workspace),
         "people": rows["workspace_people"],
         "projects": rows["workspace_projects"],
+        "project_members": rows["project_members"],
+        "source_projects": rows["source_projects"],
+        "source_people": rows["source_people"],
         "sources": rows["sources"],
         "chunks": rows["chunks"],
         "contexts": rows["contexts"],
@@ -610,6 +652,9 @@ async def restore_snapshot(
             (WorkspacePerson, "people"),
             (WorkspaceProject, "projects"),
             (Source, "sources"),
+            (ProjectMember, "project_members"),
+            (SourceProject, "source_projects"),
+            (SourcePerson, "source_people"),
             (Chunk, "chunks"),
             (ContextRecord, "contexts"),
             (ContextStoreRecord, "context_stores"),
@@ -642,14 +687,32 @@ async def restore_snapshot(
                                 "ownerPersonId": _remap(
                                     snapshot["project"].get("ownerPersonId"), target
                                 ),
-                            },
+                            }
+                            if snapshot.get("project")
+                            else None,
+                            "projects": [
+                                {
+                                    **project,
+                                    "id": _remap(project["id"], target),
+                                    "ownerPersonId": _remap(project.get("ownerPersonId"), target),
+                                }
+                                for project in snapshot.get("projects", [])
+                            ],
                             "people": [
                                 {**person, "id": _remap(person["id"], target)}
                                 for person in snapshot.get("people", [])
                             ],
+                            "roster": [
+                                {**person, "id": _remap(person["id"], target)}
+                                for person in snapshot.get("roster", [])
+                            ],
                         }
                 if key == "projects":
                     row["owner_person_id"] = _remap(original.get("owner_person_id"), target)
+                if key in {"project_members", "source_projects", "source_people"}:
+                    row["person_id"] = _remap(original.get("person_id"), target)
+                    row["project_id"] = _remap(original.get("project_id"), target)
+                    row["source_id"] = _remap(original.get("source_id"), target)
                 if key in {"chunks", "contexts"}:
                     row["source_id"] = _remap(original["source_id"], target)
                 if key == "contexts":

@@ -38,7 +38,7 @@ async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[M
         return options_by_role([])
     return options_by_role(
         [(adapter, await models_of(adapter, api_key))],
-        await model_prices(),
+        {} if provider == "ollama" else await model_prices(),
         defaults=_defaults(),
     )
 
@@ -69,7 +69,8 @@ async def options_for_workspace(
         except CredentialUnavailableError:
             continue
         listings.append((adapter, await models_of(adapter, api_key)))
-    return options_by_role(listings, await model_prices(), defaults=_defaults())
+    prices = {} if listings and all(a.id == "ollama" for a, _ in listings) else await model_prices()
+    return options_by_role(listings, prices, defaults=_defaults())
 
 
 async def has_indexed_chunks(session: AsyncSession, workspace_id: UUID) -> bool:

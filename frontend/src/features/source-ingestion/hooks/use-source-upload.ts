@@ -106,17 +106,18 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
 
   /** 녹음이 끝나는 즉시 호출됩니다. 사용자가 따로 업로드를 누르지 않습니다. */
   const uploadRecording = useCallback(
-    async (audio: Blob, durationSeconds: number, liveDraft?: { utterances: MeetingUtterance[] }, projectId?: string) => {
+    async (audio: Blob, durationSeconds: number, liveDraft?: { utterances: MeetingUtterance[] }, projectId?: string, projectIds?: string[]) => {
       if (audio.size === 0) {
         toast.error("녹음된 오디오가 없습니다.");
         throw new Error("녹음된 오디오가 없습니다.");
       }
 
-      const item = enqueue(recordingName(), audio.size, durationSeconds);
+      const item = enqueue(typeof File !== "undefined" && audio instanceof File ? audio.name : recordingName(), audio.size, durationSeconds || undefined);
 
       try {
         const job = await api.uploadRecording(workspaceId, audio, liveDraft, projectId, {
           onProgress: (ratio) => patch(item.id, { progress: ratio }),
+          projectIds,
         });
         patch(item.id, { status: "uploaded", progress: 1, job });
         toast.success("녹음을 올렸습니다. 음성 인식 후 대본 검토가 필요합니다.");
@@ -143,7 +144,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
         input.durationSeconds,
       );
       try {
-        const job = await api.uploadTranscript(workspaceId, { ...input, projectId: projectId || null });
+        const job = await api.uploadTranscript(workspaceId, { ...input, projectId: projectId || null, projectIds: input.projectIds ?? (projectId ? [projectId] : []) });
         patch(item.id, { status: "uploaded", progress: 1, job });
         onUploaded?.();
         window.dispatchEvent(new Event("maeglagi:sources-changed"));
