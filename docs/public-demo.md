@@ -35,8 +35,10 @@ The script refuses an existing workspace unless the owner and exact fixture dige
 it generates stable UUIDs for fixture records and skips existing rows on repeat, preserving edits.
 It never imports private workspaces. A failed Neo4j write can be retried with the same command:
 Postgres rows are committed first, then graph nodes and edges are added idempotently when Neo4j is
-configured. If Neo4j is absent, directory and source material graph nodes still appear, while the
-fixture's decision and task graph nodes require Neo4j.
+configured. The public demo graph requires Neo4j so it preserves the original decisions, tasks,
+events, and replacement relationships. Without Neo4j it reports an unavailable graph instead of
+silently displaying only directory and material nodes. Private workspace directory graphs can
+still be used without Neo4j.
 
 After verifying the seeded workspace, set `DEMO_WORKSPACE_ID` to that workspace UUID on the API
 deployment. Do not set it to a private workspace. Publication and production execution are

@@ -76,3 +76,14 @@ def test_demo_does_not_authenticate_private_routes(demo_client):
     settings.supabase_publishable_key = SecretStr("public-test")
     response = client.get(f"/api/v1/workspaces/{workspace.id}/people")
     assert response.status_code == 401
+
+
+def test_demo_does_not_silently_show_partial_graph_without_neo4j(demo_client, monkeypatch):
+    client, _, _, settings = demo_client
+    settings.neo4j_uri = ""
+    handler = AsyncMock()
+    monkeypatch.setattr(demo.graph, "get_knowledge_graph", handler)
+    response = client.get("/api/v1/demo/graph")
+    assert response.status_code == 503
+    assert "decision and event history" in response.json()["detail"]
+    handler.assert_not_awaited()

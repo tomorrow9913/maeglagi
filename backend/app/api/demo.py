@@ -130,6 +130,10 @@ async def knowledge_graph(
     at: datetime | None = None,
     include_materials: bool = Query(default=True, alias="includeMaterials"),
 ):
+    if store is None:
+        raise HTTPException(
+            503, "Demo graph database is not configured; decision and event history is unavailable"
+        )
     return await graph.get_knowledge_graph(
         workspace.id,
         reader(workspace),
