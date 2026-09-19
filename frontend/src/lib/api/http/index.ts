@@ -64,8 +64,11 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
-  getWorkspaceModels: (workspaceId, signal) =>
-    apiFetch<WorkspaceModels>(`/workspaces/${workspaceId}/ai/models`, { signal }),
+  getWorkspaceModels: (workspaceId, provider, signal) =>
+    apiFetch<WorkspaceModels>(
+      `/workspaces/${workspaceId}/ai/models${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
+      { signal },
+    ),
 
   updateWorkspaceModels: (workspaceId, selections, signal) =>
     apiFetch<WorkspaceModels>(`/workspaces/${workspaceId}/ai/models`, {
@@ -76,6 +79,9 @@ export const httpApi: MaeglagiApi = {
 
   getWorkspaceSecrets: (workspaceId, signal) =>
     apiFetch<WorkspaceSecrets | null>(`/workspaces/${workspaceId}/llm-key`, { signal }),
+
+  listProviderCredentials: (workspaceId, signal) =>
+    apiFetch<WorkspaceSecrets[]>(`/workspaces/${workspaceId}/provider-credentials`, { signal }),
 
   updateApiKey: (workspaceId, input, signal) =>
     apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/llm-key`, {

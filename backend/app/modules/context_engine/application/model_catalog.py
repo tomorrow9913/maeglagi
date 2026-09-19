@@ -35,10 +35,10 @@ async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[M
 
 
 async def options_for_workspace(
-    session: AsyncSession, workspace_id: UUID, owner_id: UUID
+    session: AsyncSession, workspace_id: UUID, owner_id: UUID, provider: str | None = None
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Model options across the workspace's active keys, its default key first."""
-    result = await session.exec(
+    """Models from active keys, optionally limited to the provider being configured."""
+    statement = (
         select(ProviderCredential)
         .where(
             ProviderCredential.workspace_id == workspace_id,
@@ -47,6 +47,9 @@ async def options_for_workspace(
         )
         .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
     )
+    if provider is not None:
+        statement = statement.where(ProviderCredential.provider == provider)
+    result = await session.exec(statement)
     listings: list[tuple[ProviderAdapter, list[str]]] = []
     for credential in result.all():
         adapter = provider_registry.get(credential.provider)

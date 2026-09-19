@@ -84,8 +84,12 @@ export type ApiKeyValidation = {
  * 마지막 4자만 `keyHint`로 내려줍니다.
  */
 export type WorkspaceSecrets = {
+  id: string;
   provider: LlmProvider;
+  label: string;
   keyHint: string;
+  status: string;
+  isDefault: boolean;
   updatedAt: string;
 };
 

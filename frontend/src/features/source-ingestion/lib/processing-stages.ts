@@ -19,11 +19,18 @@ const sequence: Record<SourceKind, ProcessingStage[]> = {
   meeting: ["uploaded", "transcribing", "analyzing", "graphing", "completed"],
 };
 
-export function stagesFor(kind: SourceKind): ProcessingStage[] {
-  return sequence[kind];
+export function stagesFor(
+  kind: SourceKind,
+  transcriptSource?: "server" | "browser",
+): ProcessingStage[] {
+  return sequence[transcriptSource === "browser" ? "document" : kind];
 }
 
 /** 진행 표시에서 현재 단계가 몇 번째인지. 모르는 값이면 0을 돌려줍니다. */
-export function stageIndexOf(kind: SourceKind, stage: ProcessingStage): number {
-  return Math.max(sequence[kind].indexOf(stage), 0);
+export function stageIndexOf(
+  kind: SourceKind,
+  stage: ProcessingStage,
+  transcriptSource?: "server" | "browser",
+): number {
+  return Math.max(stagesFor(kind, transcriptSource).indexOf(stage), 0);
 }

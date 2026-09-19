@@ -12,8 +12,8 @@ import { stageIndexOf, stageLabel, stagesFor } from "../lib/processing-stages";
  * 회의 녹음은 음성 인식 단계가 하나 더 있어 종류에 따라 단계 수가 다릅니다.
  */
 export function ProcessingTracker({ job, className }: { job: ProcessingJob; className?: string }) {
-  const stages = stagesFor(job.sourceKind);
-  const currentIndex = stageIndexOf(job.sourceKind, job.stage);
+  const stages = stagesFor(job.sourceKind, job.transcriptSource);
+  const currentIndex = stageIndexOf(job.sourceKind, job.stage, job.transcriptSource);
   const failed = job.status === "failed";
 
   return (

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import type { ProcessingJob } from "@/lib/api";
+import type { ProcessingJob, TranscriptSourceInput } from "@/lib/api";
 
 import { validateDocuments } from "../lib/validate-file";
 
@@ -97,6 +97,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
       if (uploaded > 0) {
         toast.success(`${uploaded}개 파일을 올렸습니다. 분석을 시작합니다.`);
         onUploaded?.();
+        window.dispatchEvent(new Event("maeglagi:sources-changed"));
       }
     },
     [workspaceId, patch, enqueue, onUploaded],
@@ -119,6 +120,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
         patch(item.id, { status: "uploaded", progress: 1, job });
         toast.success("녹음을 올렸습니다. 음성 인식을 시작합니다.");
         onUploaded?.();
+        window.dispatchEvent(new Event("maeglagi:sources-changed"));
       } catch (error) {
         patch(item.id, {
           status: "failed",
@@ -130,9 +132,36 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
     [workspaceId, patch, enqueue, onUploaded],
   );
 
+  const uploadTranscript = useCallback(
+    async (input: TranscriptSourceInput) => {
+      if (!input.text.trim()) return false;
+      const item = enqueue(
+        input.title || "회의 대본",
+        new Blob([input.text]).size,
+        input.durationSeconds,
+      );
+      try {
+        const job = await api.uploadTranscript(workspaceId, input);
+        patch(item.id, { status: "uploaded", progress: 1, job });
+        onUploaded?.();
+        window.dispatchEvent(new Event("maeglagi:sources-changed"));
+        toast.success("검토한 대본을 올렸습니다. 분석을 시작합니다.");
+        return true;
+      } catch (error) {
+        patch(item.id, {
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : "업로드 실패",
+        });
+        toast.error("대본을 올리지 못했습니다. 편집 내용은 유지됩니다.");
+        return false;
+      }
+    },
+    [workspaceId, enqueue, patch, onUploaded],
+  );
+
   const dismiss = useCallback((id: string) => {
     setItems((current) => current.filter((item) => item.id !== id));
   }, []);
 
-  return { items, uploadDocuments, uploadRecording, dismiss };
+  return { items, uploadDocuments, uploadRecording, uploadTranscript, dismiss };
 }

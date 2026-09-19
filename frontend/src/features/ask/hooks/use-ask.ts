@@ -26,11 +26,13 @@ export function useAsk(workspaceId: string) {
   const [isStreaming, setIsStreaming] = useState(false);
 
   const controllerRef = useRef<AbortController>(null);
+  const inFlightRef = useRef(false);
   const sequence = useRef(0);
 
   useEffect(() => {
     setTurns([]);
     setIsStreaming(false);
+    inFlightRef.current = false;
     return () => controllerRef.current?.abort();
   }, [workspaceId]);
 
@@ -41,7 +43,8 @@ export function useAsk(workspaceId: string) {
   const ask = useCallback(
     async (question: string) => {
       const trimmed = question.trim();
-      if (!trimmed || isStreaming) return;
+      if (!trimmed || inFlightRef.current) return;
+      inFlightRef.current = true;
 
       const id = `turn-${++sequence.current}`;
       setTurns((current) => [
@@ -80,11 +83,12 @@ export function useAsk(workspaceId: string) {
           errorMessage: error instanceof Error ? error.message : "답변을 받지 못했습니다.",
         });
       } finally {
+        inFlightRef.current = false;
         setIsStreaming(false);
         controllerRef.current = null;
       }
     },
-    [workspaceId, isStreaming, patch],
+    [workspaceId, patch],
   );
 
   const stop = useCallback(() => controllerRef.current?.abort(), []);
