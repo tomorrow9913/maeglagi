@@ -77,9 +77,14 @@ export function ModelPicker({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {entry.locked
-                    ? "소스가 색인된 뒤에는 바꿀 수 없습니다. 모델이 섞이면 검색 품질이 깨집니다."
-                    : info.description}
+                  {info.description}
+                  {info.fixedNote ? (
+                    <span className={entry.locked ? "block" : "block text-warning"}>
+                      {entry.locked
+                        ? `정해진 모델이라 바꿀 수 없습니다. ${info.fixedNote}`
+                        : `한 번 정하면 바꿀 수 없습니다. ${info.fixedNote}`}
+                    </span>
+                  ) : null}
                 </p>
               </>
             )}

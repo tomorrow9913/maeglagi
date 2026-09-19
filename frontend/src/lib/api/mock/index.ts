@@ -90,13 +90,16 @@ function modelsFor(
   };
 }
 
-/** 소스가 이미 색인된 워크스페이스는 임베딩 모델을 바꿀 수 없습니다. */
+/**
+ * 임베딩 모델은 워크스페이스를 만들 때 정하고 바꿀 수 없습니다(백엔드와 같은 규칙).
+ * 선택이 이미 있거나 소스가 색인된 뒤에는 잠기고, LLM 모델은 언제든 바꿀 수 있습니다.
+ */
 function lockedRoles(workspaceId: string): ModelRole[] {
-  return state.sources.some(
+  const chosen = state.models.get(workspaceId)?.embedding !== undefined;
+  const indexed = state.sources.some(
     (source) => source.workspaceId === workspaceId && source.status === "succeeded",
-  )
-    ? ["embedding"]
-    : [];
+  );
+  return chosen || indexed ? ["embedding"] : [];
 }
 
 /** provider별 키 접두사. 실제 서비스의 키 형식과 맞춥니다. */
@@ -313,7 +316,7 @@ export const mockApi: MaeglagiApi = {
       const unchanged =
         entry.selected?.provider === wanted.provider && entry.selected.model === wanted.model;
       if (entry.locked && !unchanged) {
-        throw new ApiError(409, "소스가 색인된 뒤에는 임베딩 모델을 바꿀 수 없습니다.");
+        throw new ApiError(409, "임베딩 모델은 워크스페이스를 만들 때 정해지며 바꿀 수 없습니다.");
       }
       next[role] = wanted;
     }
