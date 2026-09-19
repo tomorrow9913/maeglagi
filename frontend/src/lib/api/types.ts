@@ -225,6 +225,8 @@ export type AnswerSource = {
   kind: SourceKind;
   title: string;
   excerpt: string;
+  /** 회의 근거가 시작되는 시각(초). 원문 뷰어가 이 위치로 이동합니다. 문서 근거에는 없습니다. */
+  timestamp?: number;
 };
 
 /**
