@@ -16,6 +16,7 @@ from app.modules.context_engine.application.model_roles import (
     selection_of,
 )
 from app.modules.context_engine.application.provider import EmbeddingResponse, ModelInfo
+from app.modules.context_engine.infrastructure.models import Chunk
 from app.modules.context_engine.infrastructure.provider_adapters import (
     parse_anthropic_model,
     parse_openai_model,
@@ -24,7 +25,6 @@ from app.modules.ingestion.application import pipeline as pipeline_module
 from app.modules.ingestion.application.pipeline import (
     IngestionError,
     IngestionPipeline,
-    ResolvedProvider,
     embedding_dimensions_argument,
 )
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
@@ -229,10 +229,12 @@ async def test_the_workspaces_choice_decides_the_model(providers: None) -> None:
     )
 
 
-async def test_a_workspace_that_never_chose_gets_that_providers_default(providers: None) -> None:
+async def test_a_workspace_that_never_chose_keeps_the_legacy_embedding_model(
+    providers: None,
+) -> None:
     resolved = await resolve({}, ["openai"], ModelRole.EMBEDDING)
 
-    assert resolved.model == "text-embedding-3-small"  # the provider's default, not a guess
+    assert resolved.model == "deployment-default"
 
 
 async def test_the_key_of_the_chosen_models_provider_is_used_even_if_it_is_not_the_default(
@@ -442,16 +444,21 @@ async def test_selected_model_uses_the_key_that_offers_it(monkeypatch: pytest.Mo
     assert (resolved.api_key, resolved.model) == ("second", "gpt-second")
 
 
-async def test_first_index_records_the_embedding_model_used(
+async def test_first_and_later_indexes_keep_the_legacy_model_without_saving_a_choice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class EmbeddingAdapter(Adapter):
+        def __init__(self) -> None:
+            super().__init__("openai", OPENAI_CAPS)
+            self.models_used: list[str] = []
+
         async def embedding(self, request: Any, api_key: str) -> EmbeddingResponse:
+            self.models_used.append(request.model)
             return EmbeddingResponse(embeddings=[[0.1, 0.2]], model=request.model, provider=self.id)
 
     class IndexSession(Session):
         def __init__(self) -> None:
-            super().__init__({}, [])
+            super().__init__({}, ["openai"])
             self.added: list[Any] = []
 
         async def execute(self, statement: Any) -> None:
@@ -459,15 +466,26 @@ async def test_first_index_records_the_embedding_model_used(
 
         def add(self, item: Any) -> None:
             self.added.append(item)
+            if isinstance(item, Chunk):
+                self.indexed = True
 
     session = IndexSession()
-    adapter = EmbeddingAdapter("openai", OPENAI_CAPS)
-    indexer = IngestionPipeline(Settings(_env_file=None, embedding_dimensions=2))
+    adapter = EmbeddingAdapter()
+    monkeypatch.setattr(pipeline_module.provider_registry, "get", lambda _: adapter)
 
-    async def provider(*args: Any, **kwargs: Any) -> ResolvedProvider:
-        return ResolvedProvider(adapter, "key", "text-embedding-new")
+    async def secret(session: Any, credential: Any) -> str:
+        return "key"
 
-    monkeypatch.setattr(indexer, "provider_with_model", provider)
+    monkeypatch.setattr(pipeline_module, "resolve_credential_secret", secret)
+    indexer = IngestionPipeline(
+        Settings(
+            _env_file=None,
+            embedding_dimensions=2,
+            embedding_model="text-embedding-legacy",
+            provider_default_models={"openai": {"embedding": "text-embedding-default"}},
+            provider_fallback_models={"openai": {"embedding": "text-embedding-fallback"}},
+        )
+    )
     monkeypatch.setattr(indexer.normalizer, "normalize", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         indexer.chunker,
@@ -486,14 +504,15 @@ async def test_first_index_records_the_embedding_model_used(
         size_bytes=4,
     )
 
-    count = await indexer.index_source(session, source=source, segments=[])  # type: ignore[arg-type]
+    first = await indexer.index_source(session, source=source, segments=[])  # type: ignore[arg-type]
+    assert first == 1
+    assert session.workspace.model_settings == {}
 
-    assert count == 1
-    assert session.workspace.model_settings["embedding"] == {
-        "provider": "openai",
-        "model": "text-embedding-new",
-    }
-    assert session.workspace in session.added
+    later = await indexer.index_source(session, source=source, segments=[])  # type: ignore[arg-type]
+    assert later == 1
+    assert adapter.models_used == ["text-embedding-legacy", "text-embedding-legacy"]
+    assert session.workspace.model_settings == {}
+    assert session.workspace not in session.added
 
 
 def test_anthropic_metadata_is_read_from_the_models_list() -> None:

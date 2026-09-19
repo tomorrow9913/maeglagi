@@ -8,10 +8,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
-from app.modules.context_engine.application.model_catalog import has_indexed_chunks
 from app.modules.context_engine.application.model_roles import (
     ROLE_CAPABILITY,
-    ModelOption,
     ModelRole,
     selection_of,
 )
@@ -56,7 +54,11 @@ class IngestionPipeline:
         )
 
     def _default_model(self, provider_id: str, role: ModelRole) -> str:
-        """For a job nobody chose a model for: that provider's default, never another provider's."""
+        """Use the legacy embedding setting, otherwise this provider's configured fallback."""
+        if role == ModelRole.EMBEDDING:
+            # Workspaces without a stored choice have always used this deployment setting.
+            # Changing the default for new indexing would mix vector spaces in old workspaces.
+            return self.settings.embedding_model
         override = self.settings.provider_fallback_models.get(provider_id, {})
         configured = self.settings.provider_default_models.get(provider_id, {})
         return override.get(role.value) or configured.get(role.value) or self._fallback_model(role)
@@ -92,11 +94,6 @@ class IngestionPipeline:
             .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
         )
         credentials = list(result.all())
-        legacy_embedding = (
-            role == ModelRole.EMBEDDING
-            and chosen is None
-            and await has_indexed_chunks(session, workspace_id)
-        )
         if chosen is not None:
             credentials = [c for c in credentials if c.provider == chosen.provider]
         needs_key_match = chosen is not None and len(credentials) > 1
@@ -121,10 +118,6 @@ class IngestionPipeline:
                     ):
                         continue
                 model = chosen.model
-            elif legacy_embedding:
-                # Old chunks have no model metadata. They used the flat deployment setting;
-                # provider defaults may have changed since those chunks were indexed.
-                model = self.settings.embedding_model
             else:
                 model = self._default_model(credential.provider, role)
             return ResolvedProvider(adapter, api_key, model)
@@ -206,22 +199,6 @@ class IngestionPipeline:
             for embedding in response.embeddings
         ):
             raise IngestionError("임베딩 차원이 Vector Store schema와 다릅니다.")
-
-        workspace = await session.get(Workspace, source.workspace_id)
-        # Record the model before the first chunks are saved. Subsequent indexing and
-        # searches must use the same vector space even if provider defaults change.
-        if (
-            workspace
-            and selection_of(workspace.model_settings, ModelRole.EMBEDDING) is None
-            and not await has_indexed_chunks(session, workspace.id)
-        ):
-            workspace.model_settings = {
-                **workspace.model_settings,
-                ModelRole.EMBEDDING.value: ModelOption(
-                    provider=provider.adapter.id, model=provider.model
-                ).model_dump(),
-            }
-            session.add(workspace)
 
         await session.execute(delete(Chunk).where(Chunk.source_id == source.id))
         for chunk, embedding in zip(chunks, response.embeddings, strict=True):
