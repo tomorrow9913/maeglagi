@@ -692,3 +692,53 @@ def test_http_failed_stt_review_exposes_error_and_retries_same_job(
         assert published == [str(session.source.id)]
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("operation", ["confirm", "retry-transcription"])
+@pytest.mark.parametrize("executor", ["postgres", "celery"])
+def test_review_enqueue_uses_application_executor_when_global_differs(
+    monkeypatch: pytest.MonkeyPatch, operation: str, executor: str
+) -> None:
+    session = FakeSession()
+    if operation == "confirm":
+        session.source.review_utterances = [utterance()]
+    else:
+        session.source.transcript_source = "server"
+        session.source.review_state = "transcribing"
+        session.source.status = "failed"
+    app = create_app(
+        Settings(_env_file=None, processing_executor=executor, pg_executor_enabled=False)
+    )
+
+    async def session_dependency() -> Any:
+        yield session
+
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(id=OWNER)
+    app.dependency_overrides[get_session] = session_dependency
+    global_executor = "celery" if executor == "postgres" else "postgres"
+    monkeypatch.setattr(
+        review_module,
+        "get_settings",
+        lambda: Settings(_env_file=None, processing_executor=global_executor),
+    )
+    selected: list[str] = []
+
+    async def enqueue_pg(*args: Any, **kwargs: Any) -> None:
+        selected.append("postgres")
+
+    monkeypatch.setattr(review_module, "enqueue_pg_source", enqueue_pg)
+    monkeypatch.setattr(review_module, "wake_executors", lambda: None)
+    monkeypatch.setattr(
+        review_module.process_source,
+        "apply_async",
+        lambda **kwargs: selected.append("celery"),
+    )
+    url = f"/api/v1/workspaces/{WORKSPACE}/sources/{session.source.id}/review/{operation}"
+    try:
+        response = TestClient(app).post(
+            url, json={"revision": 0} if operation == "confirm" else None
+        )
+        assert response.status_code == 202
+        assert selected == [executor]
+    finally:
+        app.dependency_overrides.clear()

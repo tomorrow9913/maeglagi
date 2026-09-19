@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from kombu.exceptions import OperationalError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete
@@ -344,7 +344,12 @@ async def save_review(
 
 @router.post("/confirm", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def confirm_review(
-    workspace_id: UUID, source_id: UUID, body: ConfirmRequest, user: CurrentUser, session: Session
+    workspace_id: UUID,
+    source_id: UUID,
+    body: ConfirmRequest,
+    user: CurrentUser,
+    session: Session,
+    request: Request = None,
 ) -> JobResponse:
     source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
     if source.review_revision != body.revision:
@@ -432,7 +437,8 @@ async def confirm_review(
     source.processing_stage = ProcessingStage.CONFIRMED
     source.error_message = None
     session.add(source)
-    if get_settings().processing_executor == "postgres":
+    settings = request.app.state.settings if request is not None else get_settings()
+    if settings.processing_executor == "postgres":
         source.status = SourceStatus.QUEUED
         await enqueue_pg_source(session, source, supersede_existing=True)
         await session.commit()
@@ -461,7 +467,11 @@ async def confirm_review(
     "/retry-transcription", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED
 )
 async def retry_transcription(
-    workspace_id: UUID, source_id: UUID, user: CurrentUser, session: Session
+    workspace_id: UUID,
+    source_id: UUID,
+    user: CurrentUser,
+    session: Session,
+    request: Request = None,
 ) -> JobResponse:
     source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
     if source.transcript_source != "server" or source.review_state != ReviewState.TRANSCRIBING:
@@ -478,7 +488,8 @@ async def retry_transcription(
     source.processing_stage = ProcessingStage.TRANSCRIBING
     source.error_message = None
     session.add(source)
-    if get_settings().processing_executor == "postgres":
+    settings = request.app.state.settings if request is not None else get_settings()
+    if settings.processing_executor == "postgres":
         source.status = SourceStatus.QUEUED
         await enqueue_pg_source(session, source, supersede_existing=True)
         await session.commit()
