@@ -41,6 +41,12 @@ class SupabaseCredentialVault:
             {"secret_id": secret_id, "secret": secret},
         )
 
+    async def delete(self, session: AsyncSession, *, secret_id: UUID) -> None:
+        await session.execute(
+            text("delete from vault.secrets where id = :secret_id"),
+            {"secret_id": secret_id},
+        )
+
     async def reveal(self, session: AsyncSession, *, secret_id: UUID) -> str:
         result = await session.execute(
             text("select decrypted_secret from vault.decrypted_secrets where id = :secret_id"),

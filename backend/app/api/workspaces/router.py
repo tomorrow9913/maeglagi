@@ -36,6 +36,12 @@ from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
+from app.modules.ingestion.application.upload_validation import (
+    InvalidUploadError,
+    UnsupportedUploadError,
+    validate_document,
+    validate_recording,
+)
 from app.modules.ingestion.infrastructure.tasks import process_source
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
@@ -68,16 +74,6 @@ def _response(workspace: Workspace, source_count: int = 0) -> WorkspaceResponse:
         created_at=workspace.created_at,
         source_count=source_count,
     )
-
-
-def _validate_document(file: UploadFile) -> None:
-    filename = (file.filename or "").lower()
-    allowed = (".pdf", ".docx", ".txt", ".md", ".markdown")
-    if not filename.endswith(allowed):
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            "Supported document types: PDF, DOCX, TXT, MD",
-        )
 
 
 async def _enqueue_source(source: Source, session: AsyncSession) -> None:
@@ -185,7 +181,6 @@ async def upload_document(
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
-    _validate_document(file)
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
     source.status = "queued"
     source.processing_stage = "uploaded"
@@ -312,14 +307,27 @@ async def _upload_source(
     workspace = await session.get(Workspace, workspace_id)
     if workspace is None or workspace.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-    content = await file.read()
+    settings = get_settings()
+    content = await file.read(settings.max_upload_bytes + 1)
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty file")
-    settings = get_settings()
     if len(content) > settings.max_upload_bytes:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File is too large")
     filename = file.filename or ("recording.webm" if kind == "meeting" else "document")
     filename = filename.replace("/", "_").replace("\\", "_")
+    try:
+        if kind == "document":
+            validate_document(filename, file.content_type, content)
+        else:
+            extension = validate_recording(filename, file.content_type, content)
+            # The browser client names every MediaRecorder blob recording.webm, even on
+            # Safari where the bytes and MIME are MP4. Keep the STT filename truthful.
+            if filename.lower().endswith(".webm") and extension == ".mp4":
+                filename = filename[:-5] + ".mp4"
+    except UnsupportedUploadError as exc:
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(exc)) from exc
+    except InvalidUploadError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     source = Source(
         workspace_id=workspace.id,
         owner_id=user.id,
