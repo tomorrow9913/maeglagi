@@ -265,7 +265,9 @@ class IngestionPipeline:
         """Nearest chunks to an already-computed embedding, optionally within `source_ids`."""
         distance = Chunk.embedding.cosine_distance(embedding).label("distance")
         statement = select(Chunk, distance).where(
-            Chunk.workspace_id == workspace_id, Chunk.owner_id == owner_id
+            Chunk.workspace_id == workspace_id,
+            Chunk.owner_id == owner_id,
+            Chunk.embedding.is_not(None),
         )
         if source_ids is not None:
             statement = statement.where(Chunk.source_id.in_(source_ids))  # type: ignore[attr-defined]

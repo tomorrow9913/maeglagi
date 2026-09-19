@@ -77,7 +77,7 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             onClick={() => setMode("document")}
           >
             <FileUp className="size-3.5" aria-hidden />
-            파일 추가
+            문서·녹음 파일
           </Button>
           <Button
             type="button"
