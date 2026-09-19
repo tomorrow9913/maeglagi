@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
 from app.core.database import get_session
-from app.main import app
+from app.main import create_app
 from app.modules.ingestion.application.upload_validation import (
     InvalidUploadError,
     UnsupportedUploadError,
@@ -120,6 +120,7 @@ class FakeSession:
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeSession, list[Any]]]:
     session = FakeSession()
     uploaded: list[Any] = []
+    test_app = create_app()
 
     async def get_test_session() -> Any:
         yield session
@@ -130,14 +131,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeSe
     async def enqueue(_source: Any, _session: Any) -> None:
         pass
 
-    app.dependency_overrides[get_current_user] = lambda: AuthUser(id=str(USER), metadata={})
-    app.dependency_overrides[get_session] = get_test_session
+    test_app.dependency_overrides[get_current_user] = lambda: AuthUser(id=str(USER), metadata={})
+    test_app.dependency_overrides[get_session] = get_test_session
     monkeypatch.setattr(workspace_router, "_upload_object", upload)
     monkeypatch.setattr(workspace_router, "_enqueue_source", enqueue)
     try:
-        yield TestClient(app), session, uploaded
+        yield TestClient(test_app), session, uploaded
     finally:
-        app.dependency_overrides.clear()
+        test_app.dependency_overrides.clear()
 
 
 def test_rejected_uploads_never_reach_storage_or_queue(
