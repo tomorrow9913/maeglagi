@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import Settings
 from app.modules.context_engine.application.context_store import (
@@ -293,6 +294,90 @@ async def test_the_service_names_the_store_after_the_workspace_and_releases_its_
     assert repository.record is not None
     assert repository.record.subject == "맥락이 PoC"
     assert session.commits == 3  # extraction, context/phase, and completed checkpoint
+
+
+@pytest.mark.parametrize("decisions_changed", [False, True])
+async def test_extracted_checkpoint_revalidates_decisions_before_context_apply(
+    monkeypatch: pytest.MonkeyPatch, decisions_changed: bool
+) -> None:
+    repository = FakeRepository(stored_record("old decision"))
+    record, session = source(), FakeSession()
+    record.review_state = "confirmed"
+    adapter = FakeAdapter(architecture_meeting().responses)
+    service = SourceAnalysisService(
+        WithKey(adapter),  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: repository,  # type: ignore[arg-type]
+    )
+    original_apply = ContextStoreService.apply
+    attempts = 0
+
+    async def fail_once(self: ContextStoreService, **kwargs: Any) -> list[str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("context update interrupted")
+        return await original_apply(self, **kwargs)
+
+    monkeypatch.setattr(ContextStoreService, "apply", fail_once)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    assert record.analysis_checkpoint["phase"] == "extracted"
+    initial_fingerprint = record.analysis_checkpoint["decision_fingerprint"]
+    initial_requests = sum(
+        request.schema_name != "extraction_context_update" for request in adapter.requests
+    )
+
+    if decisions_changed:
+        # A terminal failure can leave an extracted checkpoint for an explicit
+        # retry after another source has advanced the workspace decisions.
+        record.status = "failed"
+        repository.record = stored_record("replacement decision")
+    await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert record.analysis_checkpoint["phase"] == "done"
+    extraction_requests = sum(
+        request.schema_name != "extraction_context_update" for request in adapter.requests
+    )
+    assert (extraction_requests > initial_requests) is decisions_changed
+    assert (
+        record.analysis_checkpoint["decision_fingerprint"] != initial_fingerprint
+    ) is decisions_changed
+
+
+async def test_legacy_extracted_checkpoint_is_reextracted_before_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = FakeRepository(stored_record("replacement decision"))
+    record, session = source(), FakeSession()
+    record.review_state = "confirmed"
+    adapter = FakeAdapter(architecture_meeting().responses)
+    service = SourceAnalysisService(
+        WithKey(adapter),  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        repository_factory=lambda _: repository,  # type: ignore[arg-type]
+    )
+    original_apply = ContextStoreService.apply
+    attempts = 0
+
+    async def fail_once(self: ContextStoreService, **kwargs: Any) -> list[str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("context update interrupted")
+        return await original_apply(self, **kwargs)
+
+    monkeypatch.setattr(ContextStoreService, "apply", fail_once)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+    del record.analysis_checkpoint["decision_fingerprint"]
+    first_requests = len(adapter.requests)
+
+    await service.run(session, source=record, text=architecture_meeting().text)  # type: ignore[arg-type]
+
+    assert record.analysis_checkpoint["phase"] == "done"
+    assert "decision_fingerprint" in record.analysis_checkpoint
+    assert len(adapter.requests) > first_requests
 
 
 # --- the Celery task calls it ---------------------------------------------------------------
@@ -782,6 +867,30 @@ async def test_worker_loss_after_analysis_commit_resumes_without_reindexing(
     assert record.status == "succeeded"
     assert StubIngestion.index_calls == 1
     assert CommitThenDie.calls == 2
+
+
+async def test_database_error_inside_pipeline_is_an_infrastructure_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updates: list[UUID] = []
+
+    @asynccontextmanager
+    async def held_lock(source_id: UUID) -> Any:
+        yield
+
+    async def fail_query(source_id: UUID) -> None:
+        raise OperationalError("SELECT 1", {}, Exception("database unavailable"))
+
+    async def update(source_id: UUID, **kwargs: Any) -> None:
+        updates.append(source_id)
+
+    monkeypatch.setattr(tasks, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(tasks, "_process_source", fail_query)
+    monkeypatch.setattr(tasks, "_update_source", update)
+
+    with pytest.raises(OperationalError):
+        await tasks._run_source_attempt(SOURCE, final_attempt=True)
+    assert updates == []
 
 
 def test_infrastructure_retries_do_not_consume_application_attempts(

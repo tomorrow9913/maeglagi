@@ -35,6 +35,10 @@ from app.modules.workspaces.infrastructure.models import Source, Workspace
 logger = logging.getLogger(__name__)
 
 
+def _decision_fingerprint(decisions: list[str]) -> str:
+    return hashlib.sha256(json.dumps(sorted(decisions), ensure_ascii=False).encode()).hexdigest()
+
+
 async def analyze_source(
     *,
     adapter: ProviderAdapter,
@@ -53,7 +57,7 @@ async def analyze_source(
     resolved_graph: ResolvedGraph | None = None,
     context_applied: bool = False,
     context_warnings: list[str] | None = None,
-    on_extracted: Callable[[ExtractionResult, ResolvedGraph], Awaitable[None]] | None = None,
+    on_extracted: Callable[[ExtractionResult, ResolvedGraph, str], Awaitable[None]] | None = None,
     on_context_applied: Callable[[list[str]], Awaitable[None]] | None = None,
 ) -> list[str]:
     """One extraction per source, read three ways: timeline, Context Store, graph.
@@ -63,8 +67,10 @@ async def analyze_source(
     """
     # Only decisions nobody has replaced can be replaced, so those are the candidates the Event
     # stage may pick a `supersedes` from.
+    decision_fingerprint = None
     if result is None:
         known = await context_store.current_decisions(workspace_id)
+        decision_fingerprint = _decision_fingerprint(known)
         pipeline = ExtractionPipeline(adapter, api_key, model=model)
         hint = None
         if directory_snapshot:
@@ -99,7 +105,11 @@ async def analyze_source(
         trusted_directory_identifiers=trusted_directory_identifiers,
     )
     if on_extracted is not None and resolved_graph is None:
-        await on_extracted(result, graph)
+        if decision_fingerprint is None:
+            decision_fingerprint = _decision_fingerprint(
+                await context_store.current_decisions(workspace_id)
+            )
+        await on_extracted(result, graph, decision_fingerprint)
     warnings = [*result.warnings, *(context_warnings or [])]
 
     if not context_applied:
@@ -203,14 +213,29 @@ class SourceAnalysisService:
         context_store = ContextStoreService(
             self.repository_factory(session), ContextStoreUpdater(pipeline)
         )
+        if checkpoint is not None and checkpoint["phase"] == "extracted":
+            current = _decision_fingerprint(
+                await context_store.current_decisions(source.workspace_id)
+            )
+            if checkpoint.get("decision_fingerprint") != current:
+                # The extraction has written neither sink. Drop it before
+                # extracting against the decisions visible under the workspace
+                # lock; legacy checkpoints without a fingerprint take this path.
+                source.analysis_checkpoint = None
+                session.add(source)
+                await session.commit()
+                checkpoint = None
         graph_store = (
             Neo4jGraphStore.from_settings(self.settings) if self.settings.neo4j_enabled else None
         )
         try:
 
-            async def save_extraction(result: ExtractionResult, graph: ResolvedGraph) -> None:
+            async def save_extraction(
+                result: ExtractionResult, graph: ResolvedGraph, decision_fingerprint: str
+            ) -> None:
                 source.analysis_checkpoint = {
                     "fingerprint": fingerprint,
+                    "decision_fingerprint": decision_fingerprint,
                     "phase": "extracted",
                     "result": result.model_dump(mode="json"),
                     "graph": graph.model_dump(mode="json"),
