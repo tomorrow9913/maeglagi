@@ -225,17 +225,18 @@ test("transcript upload sends edited text once and preserves the payload on fail
     {
       window: { dispatchEvent() {} },
       Event,
+      Error,
     },
     {
       sonner: { toast: { error() {}, success() {} } },
-      "@/lib/api": {
-        api: {
+      "@/lib/api/context": {
+        useApi: () => ({
           async uploadTranscript(workspace, body) {
             sent.push({ workspace, body });
             if (shouldFail) throw new Error("offline");
             return { id: "job-1", transcriptSource: "browser" };
           },
-        },
+        }),
       },
       "../lib/validate-file": {},
     },
@@ -245,9 +246,13 @@ test("transcript upload sends edited text once and preserves the payload on fail
   upload = hook.render("useSourceUpload", "workspace-1");
   assert.equal(upload.items.length, 1);
   assert.equal(upload.items[0].status, "failed");
+  assert.equal(upload.items[0].errorMessage, "offline");
   assert.equal(input.text, "김민수: 수정한 문장");
   shouldFail = false;
   assert.equal(await upload.uploadTranscript(input), true);
   assert.equal(sent.length, 2);
   assert.deepEqual(sent[1], { workspace: "workspace-1", body: input });
+  upload = hook.render("useSourceUpload", "workspace-1");
+  assert.equal(upload.items[0].status, "uploaded");
+  assert.equal(upload.items[0].job.id, "job-1");
 });

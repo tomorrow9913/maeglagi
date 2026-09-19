@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { LlmProvider, ModelOption, ModelRole, ModelSelections, RoleModels } from "@/lib/api";
 
 import { initialSelections } from "../lib/model-roles";
@@ -18,6 +18,7 @@ export function useKeyModels(
   validatedKey: string | undefined,
   defaults: Partial<Record<ModelRole, string>> | undefined,
 ) {
+  const api = useApi();
   const [roles, setRoles] = useState<RoleModels[]>();
   const [error, setError] = useState<Error>();
   const [isLoading, setIsLoading] = useState(false);
@@ -54,7 +55,7 @@ export function useKeyModels(
       });
 
     return () => controller.abort();
-  }, [provider, validatedKey]);
+  }, [provider, validatedKey, api]);
 
   const select = useCallback((role: ModelRole, option: ModelOption) => {
     setSelections((current) => ({ ...current, [role]: option }));

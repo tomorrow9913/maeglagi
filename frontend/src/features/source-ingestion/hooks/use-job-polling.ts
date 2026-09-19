@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { ProcessingJob } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 1_000;
@@ -22,6 +22,7 @@ export function useJobPolling(
   onSettled?: (job: ProcessingJob) => void,
 ): Record<string, ProcessingJob> {
   const [jobs, setJobs] = useState<Record<string, ProcessingJob>>({});
+  const api = useApi();
 
   // 최신 콜백을 참조만 해서, 콜백이 바뀌어도 폴링이 다시 시작되지 않게 합니다.
   const settledRef = useRef(onSettled);
@@ -74,7 +75,7 @@ export function useJobPolling(
       clearTimeout(timer);
       pending = new Set();
     };
-  }, [key]);
+  }, [key, api]);
 
   return jobs;
 }

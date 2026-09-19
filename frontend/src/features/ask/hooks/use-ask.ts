@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { AnswerSource } from "@/lib/api";
 
 export type AskTurn = {
@@ -22,6 +22,7 @@ export type AskTurn = {
  * 워크스페이스가 바뀌면 이력을 비웁니다.
  */
 export function useAsk(workspaceId: string) {
+  const api = useApi();
   const [turns, setTurns] = useState<AskTurn[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
 
@@ -88,7 +89,7 @@ export function useAsk(workspaceId: string) {
         controllerRef.current = null;
       }
     },
-    [workspaceId, patch],
+    [workspaceId, patch, api],
   );
 
   const stop = useCallback(() => controllerRef.current?.abort(), []);

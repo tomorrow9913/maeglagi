@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useAsync } from "@/hooks/use-async";
-import { api, BOOTSTRAP_AI_PROVIDERS, pickDefaultProvider } from "@/lib/api";
+import { BOOTSTRAP_AI_PROVIDERS, pickDefaultProvider } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { LlmProvider, Workspace } from "@/lib/api";
 
 import { useKeyModels } from "../hooks/use-key-models";
@@ -32,6 +33,7 @@ import { ProviderSelect } from "./provider-select";
  * 어차피 분석을 돌릴 수 없기 때문입니다.
  */
 export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Workspace) => void }) {
+  const api = useApi();
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
   // 서버가 지원하는 provider를 받아 보여줍니다. 받지 못하면 대비 목록으로 물러섭니다.

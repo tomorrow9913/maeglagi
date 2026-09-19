@@ -5,12 +5,13 @@ import Link from "next/link";
 import { FileText, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
+import { useApi, useWorkspacePath } from "@/lib/api/context";
 import { SourceViewer } from "./source-viewer";
 import { SourceUploadDialog } from "./source-upload-dialog";
 
 export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
+  const api = useApi();
+  const workspacePath = useWorkspacePath();
   const { data, error, isLoading, reload } = useAsync(
     (signal) => api.listSources(workspaceId, signal),
     [workspaceId],

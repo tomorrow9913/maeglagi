@@ -2,10 +2,9 @@
 
 import { useRouter } from "next/navigation";
 
-import { DEMO_WORKSPACE_ID } from "@/lib/api";
 import { answers } from "@/lib/api/mock/fixtures";
 import type { AnswerSource } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
+import { demoPath } from "@/lib/demo-routing";
 
 import { AnswerBody } from "./answer-body";
 import { MaeglagiAvatar } from "./maeglagi-avatar";
@@ -26,7 +25,7 @@ export function AnswerPreview() {
 
   const openSource = (source: AnswerSource) => {
     const query = new URLSearchParams({ source: source.sourceId, chunk: source.chunkId });
-    router.push(`${workspacePath(DEMO_WORKSPACE_ID, "sources")}?${query.toString()}`);
+    router.push(`${demoPath("sources")}?${query.toString()}`);
   };
 
   return (

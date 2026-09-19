@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useSelectedLayoutSegment } from "next/navigation";
 
+import { useWorkspacePath } from "@/lib/api/context";
 import { cn } from "@/lib/utils";
-import { workspaceNavItems, workspacePath } from "@/lib/navigation";
+import { workspaceNavItems } from "@/lib/navigation";
 
 export function WorkspaceNav({ workspaceId }: { workspaceId: string }) {
   const segment = useSelectedLayoutSegment();
+  const workspacePath = useWorkspacePath();
 
   return (
     <nav aria-label="워크스페이스 메뉴" className="flex flex-wrap gap-1 md:flex-col">

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { Button } from "@/components/ui/button";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type {
   AiProvider,
   ModelOption,
@@ -41,6 +41,7 @@ export function WorkspaceModelsCard({
   workspaceId: string;
   providers: AiProvider[];
 }) {
+  const api = useApi();
   const { data, error, isLoading, reload } = useAsync(
     (signal) => api.getWorkspaceModels(workspaceId, undefined, signal),
     [workspaceId],

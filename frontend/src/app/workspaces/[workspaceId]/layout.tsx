@@ -10,7 +10,8 @@ import { WorkspaceNav } from "@/components/layout/workspace-nav";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAsync } from "@/hooks/use-async";
-import { api, ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 
 export default function WorkspaceLayout({
   children,
@@ -20,6 +21,7 @@ export default function WorkspaceLayout({
   params: Promise<{ workspaceId: string }>;
 }) {
   const { workspaceId } = use(params);
+  const api = useApi();
 
   /*
    * 워크스페이스가 없으면 하위 화면은 전부 "데이터 없음"처럼 보입니다.

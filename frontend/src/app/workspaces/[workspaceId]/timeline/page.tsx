@@ -14,14 +14,15 @@ import {
 import { groupByDate } from "@/features/context-timeline/lib/group-by-date";
 import { kindDotClass } from "@/features/context-timeline/lib/kind-style";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { ContextItemSource } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 export default function TimelinePage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
+  const api = useApi();
   const router = useRouter();
+  const workspacePath = useWorkspacePath();
 
   const [filters, setFilters] = useState<TimelineFilterState>({ kinds: [], sourceKinds: [] });
 
@@ -60,7 +61,7 @@ export default function TimelinePage({ params }: { params: Promise<{ workspaceId
       if (source.chunkId) query.set("chunk", source.chunkId);
       router.push(`${workspacePath(workspaceId, "sources")}?${query.toString()}`);
     },
-    [router, workspaceId],
+    [router, workspaceId, workspacePath],
   );
 
   const openSuperseder = useCallback((contextItemId: string) => {

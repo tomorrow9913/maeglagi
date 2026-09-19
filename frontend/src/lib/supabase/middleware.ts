@@ -2,9 +2,11 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { isMockMode, isSupabaseConfigured, supabaseConfig } from "./config";
+import { isDemoPath, requiresWorkspaceAuth } from "@/lib/demo-routing";
 
 export async function updateSession(request: NextRequest) {
-  if (isMockMode || !isSupabaseConfigured) return NextResponse.next({ request });
+  if (isDemoPath(request.nextUrl.pathname) || isMockMode || !isSupabaseConfigured)
+    return NextResponse.next({ request });
 
   let response = NextResponse.next({ request });
   const { url, key } = supabaseConfig();
@@ -22,7 +24,7 @@ export async function updateSession(request: NextRequest) {
   });
 
   const { data } = await supabase.auth.getUser();
-  if (!data.user && request.nextUrl.pathname.startsWith("/workspaces")) {
+  if (!data.user && requiresWorkspaceAuth(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", request.nextUrl.pathname);

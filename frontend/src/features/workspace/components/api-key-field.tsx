@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { ApiKeyValidation, LlmProvider } from "@/lib/api";
 import { providerKeyPlaceholder } from "@/lib/api/providers";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,7 @@ export function ApiKeyField({
   disabled = false,
 }: ApiKeyFieldProps) {
   const [isRevealed, setIsRevealed] = useState(false);
+  const api = useApi();
   const [isChecking, setIsChecking] = useState(false);
   const [result, setResult] = useState<ApiKeyValidation>();
 
@@ -78,7 +79,7 @@ export function ApiKeyField({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [value, provider, publish]);
+  }, [value, provider, publish, api]);
 
   return (
     <div className="space-y-1.5">
