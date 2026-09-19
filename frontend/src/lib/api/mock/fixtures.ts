@@ -516,15 +516,15 @@ export const contextStore: ContextStore = {
  */
 export const modelCatalog: Record<string, Partial<Record<ModelRole, string[]>>> = {
   openai: {
-    answer: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
-    extraction: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
+    answer: ["gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
+    extraction: ["gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
     embedding: ["text-embedding-3-small", "text-embedding-3-large"],
-    transcription: ["gpt-4o-transcribe", "whisper-1"],
+    transcription: ["whisper-1", "gpt-4o-transcribe"],
   },
   anthropic: {
-    answer: ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
+    answer: ["claude-haiku-4-5", "claude-sonnet-4-20250514"],
   },
   nvidia: {
-    answer: ["meta/llama-3.1-70b-instruct", "meta/llama-3.1-8b-instruct"],
+    answer: ["meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct"],
   },
 };
