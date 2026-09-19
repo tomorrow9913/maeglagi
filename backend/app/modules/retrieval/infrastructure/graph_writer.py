@@ -4,9 +4,11 @@ from uuid import UUID
 
 from app.modules.context_engine.application.entity_resolution import (
     ResolvedGraph,
+    Supersession,
     pick_canonical,
     relation_id,
 )
+from app.modules.context_engine.application.temporal import Interval, normalize, parse_instant
 from app.modules.context_engine.domain.ontology import RelationKind
 from app.modules.retrieval.domain.models import GraphEntity, GraphRelation
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
@@ -28,18 +30,51 @@ MERGE (e:Entity {id: row.id})
 SET e.workspace_id = row.workspace_id, e.kind = row.kind, e.name = row.name,
     e.aliases = row.aliases, e.keys = row.keys, e.identifiers = row.identifiers,
     e.source_ids = row.source_ids,
-    e.source_id = row.source_id, e.chunk_id = row.chunk_id, e.timestamp = row.timestamp
+    e.source_id = row.source_id, e.chunk_id = row.chunk_id, e.timestamp = row.timestamp,
+    e.superseded_by = coalesce(row.superseded_by, e.superseded_by)
+"""
+
+# A decision that replaced an existing one: only an unreplaced decision can be superseded,
+# and re-running the same source (superseded_by already equal) stays a no-op.
+_SUPERSEDE = """
+UNWIND $rows AS row
+MATCH (old:Entity {workspace_id: row.workspace_id, kind: 'Decision'})
+WHERE any(key IN row.keys WHERE key IN coalesce(old.keys, []))
+  AND old.id <> row.new_id
+  AND (old.superseded_by IS NULL OR old.superseded_by = row.new_id)
+SET old.superseded_by = row.new_id
+RETURN row.new_id AS new_id, old.id AS id
 """
 
 # Neo4j cannot parameterize relationship types. `kind` only ever comes from RelationKind.
+_FIND_RELATIONS = """
+UNWIND $rows AS row
+MATCH (:Entity {{id: row.source_entity_id, workspace_id: row.workspace_id}})
+      -[r:{kind}]->
+      (:Entity {{id: row.target_entity_id, workspace_id: row.workspace_id}})
+RETURN row.source_entity_id AS source, row.target_entity_id AS target,
+       toString(r.valid_from) AS valid_from, toString(r.valid_to) AS valid_to
+"""
+
 _UPSERT_RELATIONS = """
 UNWIND $rows AS row
 MATCH (a:Entity {{id: row.source_entity_id, workspace_id: row.workspace_id}})
 MATCH (b:Entity {{id: row.target_entity_id, workspace_id: row.workspace_id}})
-MERGE (a)-[r:{kind}]->(b)
-ON CREATE SET r.id = row.id
+MERGE (a)-[r:{kind} {{id: row.id}}]->(b)
 SET r.workspace_id = row.workspace_id, r.source_id = row.source_id,
-    r.chunk_id = row.chunk_id, r.timestamp = row.timestamp
+    r.chunk_id = row.chunk_id, r.timestamp = row.timestamp,
+    r.valid_from = CASE WHEN row.valid_from IS NULL THEN null ELSE datetime(row.valid_from) END,
+    r.valid_to = CASE WHEN row.valid_to IS NULL THEN null ELSE datetime(row.valid_to) END
+"""
+
+# Drop this triple's edges that are no longer one of its merged, disjoint periods.
+_DELETE_STALE_RELATIONS = """
+UNWIND $rows AS row
+MATCH (:Entity {{id: row.source_entity_id, workspace_id: row.workspace_id}})
+      -[r:{kind}]->
+      (:Entity {{id: row.target_entity_id, workspace_id: row.workspace_id}})
+WHERE r.id IS NULL OR NOT r.id IN row.keep_ids
+DELETE r
 """
 
 
@@ -56,14 +91,98 @@ class GraphWriter:
         merged, id_map, warnings = await self._reconcile(graph.entities)
         await self.store.execute(
             _UPSERT_ENTITIES,
-            {"rows": [_entity_row(entity, sources) for entity, sources in merged]},
+            {"rows": [_entity_row(entity, sources, id_map) for entity, sources in merged]},
         )
+        warnings += await self._supersede(graph.supersessions, id_map, merged[0][0].workspace_id)
         for kind, relations in _group_by_kind(graph.relations, id_map).items():
-            await self.store.execute(
-                _UPSERT_RELATIONS.format(kind=kind.value),
-                {"rows": [_relation_row(r) for r in relations]},
-            )
+            await self._write_relations(kind, relations)
         return warnings
+
+    async def _supersede(
+        self, supersessions: list[Supersession], id_map: dict[UUID, UUID], workspace_id: UUID
+    ) -> list[str]:
+        if not supersessions:
+            return []
+        rows = [
+            {
+                "workspace_id": str(workspace_id),
+                "new_id": str(id_map.get(item.new_id, item.new_id)),
+                "keys": item.old_keys,
+            }
+            for item in supersessions
+        ]
+        linked = {r["new_id"] for r in await self.store.execute(_SUPERSEDE, {"rows": rows})}
+        return [
+            f"대체되는 결정을 찾지 못했거나 이미 다른 결정으로 대체되었습니다: {item.old_name}"
+            for item, row in zip(supersessions, rows, strict=True)
+            if row["new_id"] not in linked
+        ]
+
+    async def _write_relations(self, kind: RelationKind, relations: list[GraphRelation]) -> None:
+        """Merge each relation's new period into its stored ones so periods never overlap."""
+        workspace = str(relations[0].workspace_id)
+        triples = sorted({(str(r.source_entity_id), str(r.target_entity_id)) for r in relations})
+        stored = await self.store.execute(
+            _FIND_RELATIONS.format(kind=kind.value),
+            {
+                "rows": [
+                    {"workspace_id": workspace, "source_entity_id": s, "target_entity_id": t}
+                    for s, t in triples
+                ]
+            },
+        )
+        spans: dict[tuple[str, str], list[Interval]] = defaultdict(list)
+        for record in stored:
+            spans[(str(record["source"]), str(record["target"]))].append(
+                Interval(parse_instant(record["valid_from"]), parse_instant(record["valid_to"]))
+            )
+        template = relations[0]
+        for relation in relations:
+            key = (str(relation.source_entity_id), str(relation.target_entity_id))
+            spans[key].append(Interval(relation.valid_from, relation.valid_to))
+
+        rows: list[dict[str, Any]] = []
+        keep: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for source, target in triples:
+            for span in normalize(spans[(source, target)]):
+                identifier = relation_id(
+                    template.workspace_id, UUID(source), UUID(target), kind.value, span.valid_from
+                )
+                keep[(source, target)].append(str(identifier))
+                evidence = next(
+                    r.evidence
+                    for r in relations
+                    if (str(r.source_entity_id), str(r.target_entity_id)) == (source, target)
+                )
+                rows.append(
+                    _relation_row(
+                        GraphRelation(
+                            id=identifier,
+                            workspace_id=template.workspace_id,
+                            source_entity_id=UUID(source),
+                            target_entity_id=UUID(target),
+                            kind=kind.value,
+                            evidence=evidence,
+                            valid_from=span.valid_from,
+                            valid_to=span.valid_to,
+                        )
+                    )
+                )
+        await self.store.execute(_UPSERT_RELATIONS.format(kind=kind.value), {"rows": rows})
+        await self.store.execute(
+            _DELETE_STALE_RELATIONS.format(kind=kind.value),
+            {
+                "rows": [
+                    {
+                        "workspace_id": workspace,
+                        "source_entity_id": s,
+                        "target_entity_id": t,
+                        "keep_ids": keep[(s, t)],
+                    }
+                    for s, t in triples
+                ]
+            },
+        )
 
     async def _reconcile(
         self, entities: list[GraphEntity]
@@ -155,7 +274,12 @@ class GraphWriter:
         return merged_list, id_map, warnings
 
 
-def _entity_row(entity: GraphEntity, source_ids: list[str]) -> dict[str, Any]:
+def _entity_row(
+    entity: GraphEntity, source_ids: list[str], id_map: dict[UUID, UUID]
+) -> dict[str, Any]:
+    replaced_by = (
+        id_map.get(entity.superseded_by, entity.superseded_by) if entity.superseded_by else None
+    )
     return {
         "id": str(entity.id),
         "workspace_id": str(entity.workspace_id),
@@ -164,6 +288,7 @@ def _entity_row(entity: GraphEntity, source_ids: list[str]) -> dict[str, Any]:
         "aliases": entity.aliases,
         "keys": entity.keys,
         "identifiers": entity.identifiers,
+        "superseded_by": str(replaced_by) if replaced_by else None,
         "source_ids": source_ids,
         "source_id": str(entity.evidence.source_id),
         "chunk_id": str(entity.evidence.chunk_id) if entity.evidence.chunk_id else None,
@@ -182,6 +307,8 @@ def _relation_row(relation: GraphRelation) -> dict[str, Any]:
         "timestamp": relation.evidence.timestamp.isoformat()
         if relation.evidence.timestamp
         else None,
+        "valid_from": relation.valid_from.isoformat() if relation.valid_from else None,
+        "valid_to": relation.valid_to.isoformat() if relation.valid_to else None,
     }
 
 
@@ -193,7 +320,9 @@ def _group_by_kind(
         source = id_map.get(relation.source_entity_id, relation.source_entity_id)
         target = id_map.get(relation.target_entity_id, relation.target_entity_id)
         kind = RelationKind(relation.kind)  # raises for anything outside the ontology
-        identifier = relation_id(relation.workspace_id, source, target, kind.value)
+        identifier = relation_id(
+            relation.workspace_id, source, target, kind.value, relation.valid_from
+        )
         grouped[kind][identifier] = relation.model_copy(
             update={"id": identifier, "source_entity_id": source, "target_entity_id": target}
         )

@@ -67,6 +67,7 @@ def _decisions(result: ExtractionResult) -> list[DecisionItem]:
             title=item.name,
             description=item.description,
             decided_at=item.occurred_at,
+            supersedes=item.supersedes,
             source_refs=item.source_refs,
         )
         for item in _events(result, EntityKind.DECISION)
@@ -107,8 +108,16 @@ class MeetingAnalyzer:
     def __init__(self, pipeline: ExtractionPipeline) -> None:
         self.pipeline = pipeline
 
-    async def analyze(self, transcript: str, *, title: str | None = None) -> MeetingAnalysis:
-        result = await self.pipeline.extract(transcript, title=title)
+    async def analyze(
+        self,
+        transcript: str,
+        *,
+        title: str | None = None,
+        known_decisions: list[str] | None = None,
+    ) -> MeetingAnalysis:
+        result = await self.pipeline.extract(
+            transcript, title=title, known_decisions=known_decisions
+        )
         warnings = list(result.warnings)
         if result.classification.source_type is not SourceType.MEETING:
             warnings.append(
@@ -148,8 +157,14 @@ class DocumentAnalyzer:
     def __init__(self, pipeline: ExtractionPipeline) -> None:
         self.pipeline = pipeline
 
-    async def analyze(self, text: str, *, title: str | None = None) -> DocumentAnalysis:
-        result = await self.pipeline.extract(text, title=title)
+    async def analyze(
+        self,
+        text: str,
+        *,
+        title: str | None = None,
+        known_decisions: list[str] | None = None,
+    ) -> DocumentAnalysis:
+        result = await self.pipeline.extract(text, title=title, known_decisions=known_decisions)
         warnings = list(result.warnings)
         source_type = result.classification.source_type
         planning: PlanningBrief | None = None

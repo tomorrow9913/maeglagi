@@ -44,6 +44,7 @@ RESPONSES: dict[str, dict[str, Any]] = {
                 "description": "9월 말 출시로 확정",
                 "occurred_at": "2026-09-14",
                 "due_at": None,
+                "supersedes": None,
                 "source_refs": ["9월 말 출시로 하기로 했다"],
             }
         ]
@@ -54,12 +55,16 @@ RESPONSES: dict[str, dict[str, Any]] = {
                 "source": "김민수",
                 "target": "맥락이",
                 "kind": "WORKS_ON",
+                "valid_from": None,
+                "valid_to": None,
                 "source_refs": ["민수가 맥락이를 맡는다"],
             },
             {
                 "source": "김민수",
                 "target": "없는 개체",
                 "kind": "CREATED",
+                "valid_from": None,
+                "valid_to": None,
                 "source_refs": ["환각"],
             },
         ]
