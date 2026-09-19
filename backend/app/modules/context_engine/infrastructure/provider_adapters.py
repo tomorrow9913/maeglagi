@@ -42,9 +42,13 @@ def parse_openai_model(item: Any) -> ModelInfo | None:
     if not isinstance(item, dict) or not isinstance(item.get("id"), str):
         return None
     created = item.get("created")
+    try:
+        created_at = datetime.fromtimestamp(created, UTC) if isinstance(created, int) else None
+    except (ValueError, OverflowError, OSError):
+        created_at = None
     return ModelInfo(
         id=item["id"],
-        created=datetime.fromtimestamp(created, UTC) if isinstance(created, int) else None,
+        created=created_at,
         shutdown_date=_parse_date(item.get("shutdown_date")),
     )
 

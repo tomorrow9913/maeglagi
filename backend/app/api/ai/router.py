@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -98,7 +99,13 @@ async def list_available_providers(
         if credential is not None:
             try:
                 api_key = await resolve_credential_secret(session, credential)
-                models = await adapter.list_models(api_key)
+                infos = await adapter.list_model_infos(api_key)
+                today = date.today()
+                models = sorted(
+                    info.id
+                    for info in infos
+                    if info.shutdown_date is None or info.shutdown_date > today
+                )
             except (ProviderError, CredentialUnavailableError):
                 models = []
         items.append(

@@ -1,3 +1,4 @@
+from datetime import date
 from typing import NamedTuple
 from uuid import UUID
 
@@ -7,8 +8,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
+from app.modules.context_engine.application.model_catalog import has_indexed_chunks
 from app.modules.context_engine.application.model_roles import (
     ROLE_CAPABILITY,
+    ModelOption,
     ModelRole,
     selection_of,
 )
@@ -89,8 +92,13 @@ class IngestionPipeline:
             .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
         )
         credentials = list(result.all())
-        if chosen is not None:  # the key of the chosen model's provider goes first
-            credentials.sort(key=lambda credential: credential.provider != chosen.provider)
+        legacy_embedding = (
+            role == ModelRole.EMBEDDING
+            and chosen is None
+            and await has_indexed_chunks(session, workspace_id)
+        )
+        if chosen is not None:
+            credentials = [c for c in credentials if c.provider == chosen.provider]
         for credential in credentials:
             adapter = provider_registry.get(credential.provider)
             if adapter is None or capability not in adapter.capabilities:
@@ -99,13 +107,27 @@ class IngestionPipeline:
                 api_key = await resolve_credential_secret(session, credential)
             except CredentialUnavailableError:
                 continue
-            uses_choice = chosen is not None and chosen.provider == credential.provider
-            model = (
-                chosen.model
-                if uses_choice and chosen
-                else self._default_model(credential.provider, role)
-            )
+            if chosen is not None:
+                try:
+                    offered = await adapter.list_model_infos(api_key)
+                except ProviderError:
+                    continue
+                if not any(
+                    info.id == chosen.model
+                    and (info.shutdown_date is None or info.shutdown_date > date.today())
+                    for info in offered
+                ):
+                    continue
+                model = chosen.model
+            elif legacy_embedding:
+                # Old chunks have no model metadata. They used the flat deployment setting;
+                # provider defaults may have changed since those chunks were indexed.
+                model = self.settings.embedding_model
+            else:
+                model = self._default_model(credential.provider, role)
             return ResolvedProvider(adapter, api_key, model)
+        if chosen is not None:
+            raise IngestionError("선택한 모델을 제공하는 API key가 없습니다.")
         raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
 
     async def transcribe(
@@ -182,6 +204,22 @@ class IngestionPipeline:
             for embedding in response.embeddings
         ):
             raise IngestionError("임베딩 차원이 Vector Store schema와 다릅니다.")
+
+        workspace = await session.get(Workspace, source.workspace_id)
+        # Record the model before the first chunks are saved. Subsequent indexing and
+        # searches must use the same vector space even if provider defaults change.
+        if (
+            workspace
+            and selection_of(workspace.model_settings, ModelRole.EMBEDDING) is None
+            and not await has_indexed_chunks(session, workspace.id)
+        ):
+            workspace.model_settings = {
+                **workspace.model_settings,
+                ModelRole.EMBEDDING.value: ModelOption(
+                    provider=provider.adapter.id, model=provider.model
+                ).model_dump(),
+            }
+            session.add(workspace)
 
         await session.execute(delete(Chunk).where(Chunk.source_id == source.id))
         for chunk, embedding in zip(chunks, response.embeddings, strict=True):

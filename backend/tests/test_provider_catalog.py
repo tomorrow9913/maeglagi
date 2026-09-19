@@ -1,4 +1,9 @@
-from collections.abc import Iterator
+import importlib
+from collections.abc import AsyncIterator, Iterator
+from datetime import date
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,8 +11,13 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
 from app.core.config import Settings, get_settings
+from app.core.database import get_session
 from app.main import app
+from app.modules.context_engine.application.provider import ModelInfo
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
+from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
+
+ai_router = importlib.import_module("app.api.ai.router")
 
 
 @pytest.fixture
@@ -92,3 +102,57 @@ def test_operators_can_change_the_defaults_without_touching_code(client: TestCli
     item = next(i for i in client.get("/api/v1/ai/providers").json() if i["id"] == "openai")
 
     assert item["defaultModels"] == {"answer": "some-newer-model"}
+
+
+def test_workspace_catalog_includes_defaults_and_excludes_retired_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = uuid4()
+    workspace = Workspace(owner_id=owner, name="catalog")
+    credential = ProviderCredential(
+        workspace_id=workspace.id, owner_id=owner, provider="openai", key_hint="1234"
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=workspace),
+        exec=AsyncMock(return_value=SimpleNamespace(all=lambda: [credential])),
+    )
+
+    class Adapter:
+        id = "openai"
+        display_name = "OpenAI"
+        capabilities = ("chat", "models")
+
+        async def list_model_infos(self, api_key: str) -> list[ModelInfo]:
+            return [
+                ModelInfo(id="gpt-live"),
+                ModelInfo(id="gpt-retired", shutdown_date=date(2020, 1, 1)),
+            ]
+
+    async def test_session() -> AsyncIterator[object]:
+        yield session
+
+    async def secret(*args: object) -> str:
+        return "test-key"
+
+    monkeypatch.setattr(ai_router.provider_registry, "all", lambda: [Adapter()])
+    monkeypatch.setattr(ai_router, "resolve_credential_secret", secret)
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(id=str(owner), metadata={})
+    app.dependency_overrides[get_session] = test_session
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, provider_default_models={"openai": {"answer": "gpt-live"}}
+    )
+    try:
+        response = TestClient(app).get(f"/api/v1/workspaces/{workspace.id}/ai/providers")
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "id": "openai",
+                "displayName": "OpenAI",
+                "capabilities": ["chat", "models"],
+                "configured": True,
+                "models": ["gpt-live"],
+                "defaultModels": {"answer": "gpt-live"},
+            }
+        ]
+    finally:
+        app.dependency_overrides.clear()
