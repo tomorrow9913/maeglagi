@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { ProcessingJob, TranscriptSourceInput } from "@/lib/api";
 
 import { validateDocuments } from "../lib/validate-file";
@@ -36,6 +36,7 @@ function recordingName(): string {
  * 한 곳에서 이어받습니다. 전송이 끝나면 서버가 준 job이 항목에 붙습니다.
  */
 export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
+  const api = useApi();
   const [items, setItems] = useState<UploadItem[]>([]);
   const sequence = useRef(0);
 
@@ -100,7 +101,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
         window.dispatchEvent(new Event("maeglagi:sources-changed"));
       }
     },
-    [workspaceId, patch, enqueue, onUploaded],
+    [workspaceId, patch, enqueue, onUploaded, api],
   );
 
   /** 녹음이 끝나는 즉시 호출됩니다. 사용자가 따로 업로드를 누르지 않습니다. */
@@ -129,7 +130,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
         toast.error("녹음 업로드에 실패했습니다.");
       }
     },
-    [workspaceId, patch, enqueue, onUploaded],
+    [workspaceId, patch, enqueue, onUploaded, api],
   );
 
   const uploadTranscript = useCallback(
@@ -156,7 +157,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
         return false;
       }
     },
-    [workspaceId, enqueue, patch, onUploaded],
+    [workspaceId, enqueue, patch, onUploaded, api],
   );
 
   const dismiss = useCallback((id: string) => {

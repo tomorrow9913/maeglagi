@@ -13,9 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { ModelOption, RoleModels } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
 
 const optionKey = (option: ModelOption) => JSON.stringify([option.provider, option.model]);
 
@@ -28,6 +27,8 @@ export function AnswerModelPicker({
   isStreaming: boolean;
   onSavingChange: (saving: boolean) => void;
 }) {
+  const api = useApi();
+  const workspacePath = useWorkspacePath();
   const {
     data,
     error: loadError,

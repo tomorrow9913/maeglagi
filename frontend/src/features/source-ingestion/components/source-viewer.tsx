@@ -12,7 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,6 +37,7 @@ export function SourceViewer({
   onClose: () => void;
 }) {
   const highlightRef = useRef<HTMLLIElement>(null);
+  const api = useApi();
 
   const { data, error, isLoading, reload } = useAsync(
     (signal) => (sourceId ? api.getSourceContent(sourceId, signal) : Promise.resolve(undefined)),

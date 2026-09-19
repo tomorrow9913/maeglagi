@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { LlmProvider, ModelOption, ModelRole, ModelSelections, RoleModels } from "@/lib/api";
 
 import { initialSelections } from "../lib/model-roles";
@@ -14,6 +14,7 @@ import { initialSelections } from "../lib/model-roles";
  * provider나 키가 바뀌면 목록을 다시 받고 선택은 첫 옵션으로 초기화합니다.
  */
 export function useKeyModels(provider: LlmProvider, validatedKey: string | undefined) {
+  const api = useApi();
   const [roles, setRoles] = useState<RoleModels[]>();
   const [error, setError] = useState<Error>();
   const [isLoading, setIsLoading] = useState(false);
@@ -46,7 +47,7 @@ export function useKeyModels(provider: LlmProvider, validatedKey: string | undef
       });
 
     return () => controller.abort();
-  }, [provider, validatedKey]);
+  }, [provider, validatedKey, api]);
 
   const select = useCallback((role: ModelRole, option: ModelOption) => {
     setSelections((current) => ({ ...current, [role]: option }));

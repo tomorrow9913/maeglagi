@@ -1,13 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { isMockMode, isSupabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/client";
+import { isDemoPath } from "@/lib/demo-routing";
 
 export function AuthButton() {
   const router = useRouter();
-  if (isMockMode || !isSupabaseConfigured) return null;
+  const pathname = usePathname();
+  if (isMockMode || !isSupabaseConfigured || isDemoPath(pathname)) return null;
 
   return (
     <button

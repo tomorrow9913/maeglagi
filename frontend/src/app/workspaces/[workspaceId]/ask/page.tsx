@@ -15,12 +15,13 @@ import { MaeglagiAvatar } from "@/features/ask/components/maeglagi-avatar";
 import { exampleQuestions } from "@/features/ask/lib/example-questions";
 import { useAsk } from "@/features/ask/hooks/use-ask";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { AnswerSource } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export default function AskPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
+  const api = useApi();
   const [uploadMode, setUploadMode] = useState<"document" | "meeting" | null>(null);
   const [sourceViewer, setSourceViewer] = useState<AnswerSource>();
 

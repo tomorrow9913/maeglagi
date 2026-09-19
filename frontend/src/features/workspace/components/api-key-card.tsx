@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { AiProvider, LlmProvider, WorkspaceSecrets } from "@/lib/api";
 
 import { ApiKeyField } from "./api-key-field";
@@ -28,6 +28,7 @@ export function ApiKeyCard({
   onUpdated: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
+  const api = useApi();
   const [editingCredential, setEditingCredential] = useState<WorkspaceSecrets>();
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");

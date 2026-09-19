@@ -16,9 +16,8 @@ import {
   type GraphPalette,
 } from "@/features/knowledge-graph/lib/graph-style";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { ContextItemSource, EntityType, KnowledgeGraph } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 const entityTypes: EntityType[] = ["person", "project", "decision", "task", "event"];
@@ -48,7 +47,9 @@ function filterGraph(
 
 export default function GraphPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
+  const api = useApi();
   const router = useRouter();
+  const workspacePath = useWorkspacePath();
 
   const [hidden, setHidden] = useState<EntityType[]>([]);
   // 비우면 지금 유효한 관계, 날짜를 고르면 그날 유효했던 관계를 보여줍니다.
@@ -79,7 +80,7 @@ export default function GraphPage({ params }: { params: Promise<{ workspaceId: s
       if (source.chunkId) query.set("chunk", source.chunkId);
       router.push(`${workspacePath(workspaceId, "sources")}?${query.toString()}`);
     },
-    [router, workspaceId],
+    [router, workspaceId, workspacePath],
   );
 
   return (

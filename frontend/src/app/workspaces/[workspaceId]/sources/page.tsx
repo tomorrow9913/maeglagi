@@ -16,9 +16,8 @@ import { UploadQueue } from "@/features/source-ingestion/components/upload-queue
 import { useJobPolling } from "@/features/source-ingestion/hooks/use-job-polling";
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { ProcessingJob } from "@/lib/api";
-import { workspacePath } from "@/lib/navigation";
 
 export default function SourcesPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -31,7 +30,9 @@ export default function SourcesPage({ params }: { params: Promise<{ workspaceId:
 }
 
 function SourcesView({ workspaceId }: { workspaceId: string }) {
+  const api = useApi();
   const router = useRouter();
+  const workspacePath = useWorkspacePath();
   const [meetingBusy, setMeetingBusy] = useState(false);
   const searchParams = useSearchParams();
 
@@ -54,7 +55,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
     setViewer(undefined);
     // 쿼리를 지워 새로고침해도 다시 열리지 않게 합니다.
     if (searchParams.get("source")) router.replace(workspacePath(workspaceId, "sources"));
-  }, [router, searchParams, workspaceId]);
+  }, [router, searchParams, workspaceId, workspacePath]);
 
   const {
     data: sources,
@@ -87,7 +88,7 @@ function SourcesView({ workspaceId }: { workspaceId: string }) {
         },
       });
     },
-    [reload, router, workspaceId],
+    [reload, router, workspaceId, workspacePath],
   );
 
   const jobs = useJobPolling(jobIds, onSettled);

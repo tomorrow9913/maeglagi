@@ -7,11 +7,12 @@ import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-
 import { ApiKeyCard } from "@/features/workspace/components/api-key-card";
 import { WorkspaceModelsCard } from "@/features/workspace/components/workspace-models-card";
 import { useAsync } from "@/hooks/use-async";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/context";
 import type { AiProvider, LlmProvider } from "@/lib/api";
 
 export default function SettingsPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
+  const api = useApi();
   const { data, error, isLoading, reload } = useAsync(
     (signal) =>
       Promise.all([
