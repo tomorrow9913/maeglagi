@@ -410,6 +410,7 @@ def _model_row(model: Any, row: dict[str, Any]) -> Any:
 
 async def _verify_committed_target(db: AsyncSession, target: UUID) -> bool | None:
     """Use an independent connection; the failed session's identity map proves nothing."""
+
     async def query() -> bool:
         async with AsyncSession(bind=db.bind) as verifier:
             return await verifier.get(Workspace, target) is not None
