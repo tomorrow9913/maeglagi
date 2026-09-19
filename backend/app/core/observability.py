@@ -76,9 +76,7 @@ class SafeHttpTransport(HttpTransport):
         elif response.status == 429:
             self.on_dropped_event("status_429")
         elif response.status >= 300 or response.status < 200:
-            self._handle_request_error(
-                envelope=envelope, loss_reason=f"status_{response.status}"
-            )
+            self._handle_request_error(envelope=envelope, loss_reason=f"status_{response.status}")
 
 
 def _redact_sentry_event(event: dict, _hint: dict) -> dict:

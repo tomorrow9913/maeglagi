@@ -280,9 +280,7 @@ async def test_pg_executor_fails_typed_configuration_error_on_first_attempt(monk
     monkeypatch.setattr(pg_executor, "_heartbeat", heartbeat)
     monkeypatch.setattr(pg_executor, "process_source_attempt", attempt)
     monkeypatch.setattr(pg_executor, "_fenced_update", update)
-    monkeypatch.setattr(
-        pg_executor, "_report_terminal_failure", lambda *args: reports.append(args)
-    )
+    monkeypatch.setattr(pg_executor, "_report_terminal_failure", lambda *args: reports.append(args))
     await pg_executor._execute_claim(source_id, owner, 1, 0, 60)
     assert len(updates) == 1
     assert "status = 'failed'" in updates[0][0]

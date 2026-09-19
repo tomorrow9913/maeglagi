@@ -136,15 +136,21 @@ def test_a_source_that_is_not_indexed_yet_has_no_chunks(client: TestClient) -> N
 def test_confirmed_text_is_available_without_indexed_chunks(
     client: TestClient, status: SourceStatus
 ) -> None:
-    source = MEETING.model_copy(update={
-        "status": status,
-        "review_state": ReviewState.CONFIRMED,
-        "transcript_text": "이전 초안",
-        "review_utterances": [{
-            "id": "turn-1", "speakerName": "민규", "text": "확인한 원문",
-            "startSeconds": 12,
-        }],
-    })
+    source = MEETING.model_copy(
+        update={
+            "status": status,
+            "review_state": ReviewState.CONFIRMED,
+            "transcript_text": "이전 초안",
+            "review_utterances": [
+                {
+                    "id": "turn-1",
+                    "speakerName": "민규",
+                    "text": "확인한 원문",
+                    "startSeconds": 12,
+                }
+            ],
+        }
+    )
     serve(chunks=[], source=source)
 
     body = content(client).json()
@@ -156,11 +162,13 @@ def test_confirmed_text_is_available_without_indexed_chunks(
 
 
 def test_current_review_edits_take_priority_before_confirmation(client: TestClient) -> None:
-    source = MEETING.model_copy(update={
-        "review_state": ReviewState.AWAITING_REVIEW,
-        "transcript_text": "음성 인식 원본",
-        "review_utterances": [{"id": "turn-1", "speakerName": "화자 1", "text": "수정한 문장"}],
-    })
+    source = MEETING.model_copy(
+        update={
+            "review_state": ReviewState.AWAITING_REVIEW,
+            "transcript_text": "음성 인식 원본",
+            "review_utterances": [{"id": "turn-1", "speakerName": "화자 1", "text": "수정한 문장"}],
+        }
+    )
     serve(chunks=[], source=source)
 
     assert content(client).json()["originalText"] == "화자 1: 수정한 문장"

@@ -81,9 +81,7 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                     uuid4() for _ in range(5)
                 )
                 keyed_id, secret_id = uuid4(), uuid4()
-                selected = json.dumps(
-                    {"answer": {"provider": "ollama", "model": "same:latest"}}
-                )
+                selected = json.dumps({"answer": {"provider": "ollama", "model": "same:latest"}})
                 for workspace_id, name in (
                     (first_ws, "first"),
                     (second_ws, "second"),
@@ -92,7 +90,10 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                     await conn.execute(
                         "INSERT INTO workspaces (id,owner_id,name,model_settings,created_at) "
                         "VALUES ($1,$2,$3,$4::jsonb,now())",
-                        workspace_id, owner, name, selected,
+                        workspace_id,
+                        owner,
+                        name,
+                        selected,
                     )
                 for credential_id, workspace_id, label, is_default, day in (
                     (first_old, first_ws, "other", False, 1),
@@ -107,19 +108,28 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                         "created_at,updated_at) VALUES "
                         "($1,$2,$3,'ollama',$4,'local',$5,'active',"
                         "'2026-09-01'::timestamptz + $6 * interval '1 day',now())",
-                        credential_id, workspace_id, owner, label, is_default, day,
+                        credential_id,
+                        workspace_id,
+                        owner,
+                        label,
+                        is_default,
+                        day,
                     )
                 await conn.execute(
                     "INSERT INTO provider_credentials "
                     "(id,workspace_id,owner_id,provider,label,key_hint,is_default,status,"
                     "vault_secret_id,created_at,updated_at) "
                     "VALUES ($1,$2,$3,'openai','api','ABCD',false,'active',$4,now(),now())",
-                    keyed_id, first_ws, owner, secret_id,
+                    keyed_id,
+                    first_ws,
+                    owner,
+                    secret_id,
                 )
                 migrate("upgrade", "head")
                 rows = await conn.fetch(
                     "SELECT id,label,is_default FROM provider_credentials "
-                    "WHERE owner_id=$1 AND provider='ollama'", owner,
+                    "WHERE owner_id=$1 AND provider='ollama'",
+                    owner,
                 )
                 assert len(rows) == 5
                 assert len({row["label"] for row in rows}) == 5
@@ -131,24 +141,32 @@ def test_account_migration_preserves_workspace_choices_and_rolls_back() -> None:
                 ):
                     assert await conn.fetchval(
                         "SELECT model_settings->'answer'->>'credentialId' "
-                        "FROM workspaces WHERE id=$1", workspace_id,
+                        "FROM workspaces WHERE id=$1",
+                        workspace_id,
                     ) == str(expected_id)
-                assert await conn.fetchval(
-                    "SELECT vault_secret_id FROM provider_credentials WHERE id=$1", keyed_id
-                ) == secret_id
+                assert (
+                    await conn.fetchval(
+                        "SELECT vault_secret_id FROM provider_credentials WHERE id=$1", keyed_id
+                    )
+                    == secret_id
+                )
                 migrate("downgrade", "202609240001")
                 restored = await conn.fetch(
                     "SELECT id,label,is_default FROM provider_credentials "
-                    "WHERE owner_id=$1 AND provider='ollama'", owner,
+                    "WHERE owner_id=$1 AND provider='ollama'",
+                    owner,
                 )
                 by_id = {row["id"]: row for row in restored}
                 assert by_id[first_default]["label"] == "same label"
                 assert by_id[second_default]["label"] == "same label"
                 assert by_id[first_default]["is_default"]
                 assert by_id[second_default]["is_default"]
-                assert await conn.fetchval(
-                    "SELECT vault_secret_id FROM provider_credentials WHERE id=$1", keyed_id
-                ) == secret_id
+                assert (
+                    await conn.fetchval(
+                        "SELECT vault_secret_id FROM provider_credentials WHERE id=$1", keyed_id
+                    )
+                    == secret_id
+                )
             finally:
                 await conn.close()
         finally:

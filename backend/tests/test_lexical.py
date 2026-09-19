@@ -48,8 +48,10 @@ async def test_text_only_chunks_do_not_lock_embedding_model() -> None:
     try:
         async with engine.connect() as connection:
             await connection.execute(
-                text("CREATE TEMP TABLE chunks (id uuid PRIMARY KEY, workspace_id uuid, "
-                     "embedding vector(2))")
+                text(
+                    "CREATE TEMP TABLE chunks (id uuid PRIMARY KEY, workspace_id uuid, "
+                    "embedding vector(2))"
+                )
             )
             await connection.execute(
                 text("INSERT INTO chunks VALUES (:id, :workspace, NULL)"),

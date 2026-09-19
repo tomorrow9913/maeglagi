@@ -252,9 +252,7 @@ async def make_ollama_client(
         not allow_private or any(_is_public_address(address) for address in addresses)
     ):
         raise ValueError("Public Ollama endpoints require HTTPS")
-    if not isinstance(api_key, str) or any(
-        not 33 <= ord(char) <= 126 for char in api_key
-    ):
+    if not isinstance(api_key, str) or any(not 33 <= ord(char) <= 126 for char in api_key):
         raise ValueError("Invalid Ollama API key")
     if api_key and parts.scheme == "http" and not allow_private_network:
         raise ValueError("Ollama API keys require HTTPS outside self-hosted private networks")

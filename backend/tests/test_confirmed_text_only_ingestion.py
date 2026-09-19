@@ -49,12 +49,14 @@ async def test_confirmed_edited_audio_reaches_extraction_without_stt_or_embeddin
         async def exec(self, statement: Any) -> Any:
             entity = statement.column_descriptions[0]["entity"]
             if entity is ProviderCredential:
+
                 class NoCredentials:
                     def all(self) -> list[Any]:
                         return []
 
                 return NoCredentials()
             if entity is Chunk:
+
                 class NoVectors:
                     def first(self) -> None:
                         return None

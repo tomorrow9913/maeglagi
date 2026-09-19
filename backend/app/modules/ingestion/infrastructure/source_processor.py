@@ -99,8 +99,7 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         (
             item.response.status_code
             for item in chain
-            if isinstance(item, httpx.HTTPStatusError)
-            and 100 <= item.response.status_code <= 599
+            if isinstance(item, httpx.HTTPStatusError) and 100 <= item.response.status_code <= 599
         ),
         None,
     )

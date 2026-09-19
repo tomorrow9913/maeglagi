@@ -23,19 +23,23 @@ async def recovery_db():
     engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
     async with engine.begin() as connection:
         await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-        await connection.execute(text("""
+        await connection.execute(
+            text("""
             CREATE TABLE sources (
                 id uuid PRIMARY KEY, kind text, status text, review_state text,
                 processing_stage text NOT NULL
             )
-        """))
-        await connection.execute(text("""
+        """)
+        )
+        await connection.execute(
+            text("""
             CREATE TABLE processing_jobs (
                 source_id uuid PRIMARY KEY REFERENCES sources(id), status text,
                 stage text, provider_attempts integer, claim_generation integer,
                 next_run_at timestamptz, created_at timestamptz, updated_at timestamptz
             )
-        """))
+        """)
+        )
     yield async_sessionmaker(engine, class_=AsyncSession)
     async with engine.begin() as connection:
         await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
@@ -74,14 +78,20 @@ async def test_recovery_is_idempotent_and_preserves_existing_jobs(recovery_db):
     identifier = await seed(recovery_db)
     async with recovery_db() as session:
         assert await recover_missing_jobs(session) == 1
-        await session.execute(text("""
+        await session.execute(
+            text("""
             UPDATE processing_jobs SET status='failed', provider_attempts=4, claim_generation=8
-        """))
+        """)
+        )
         await session.commit()
         assert await recover_missing_jobs(session) == 0
-        row = (await session.execute(text("""
+        row = (
+            await session.execute(
+                text("""
             SELECT source_id, status, provider_attempts, claim_generation FROM processing_jobs
-        """))).one()
+        """)
+            )
+        ).one()
         assert tuple(row) == (identifier, "failed", 4, 8)
 
 
