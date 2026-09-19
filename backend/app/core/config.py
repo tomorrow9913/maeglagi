@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://maeglagi:maeglagi@localhost:5432/maeglagi"
     supabase_url: str = ""
     supabase_publishable_key: SecretStr = SecretStr("")
+    supabase_service_role_key: SecretStr = SecretStr("")
     supabase_storage_bucket: str = "sources"
     neo4j_uri: str = ""
     neo4j_username: str = ""
@@ -26,11 +27,18 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 50 * 1024 * 1024
     cors_origins: list[str] = ["http://localhost:3000"]
     llm_provider: str = "mock"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+    transcription_model: str = "whisper-1"
+    chunk_size_chars: int = 1200
+    chunk_overlap_chars: int = 200
     sentry_dsn: SecretStr = SecretStr("")
     sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     rate_limit: str = "120/minute"
     rate_limit_storage_uri: str = "memory://"
     log_level: str = "INFO"
+    celery_broker_url: SecretStr = SecretStr("memory://")
+    celery_task_always_eager: bool = False
 
     @property
     def supabase_enabled(self) -> bool:

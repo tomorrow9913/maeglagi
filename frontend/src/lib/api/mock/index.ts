@@ -110,7 +110,10 @@ const nextId = (prefix: string) => `${prefix}-${++sequence}`;
 
 /** 경과 시간으로 진행률과 단계를 계산합니다. */
 function advanceJob(job: ProcessingJob & { startedAt: number }): ProcessingJob {
-  const stages = stageSequence[job.sourceKind];
+  const stages =
+    job.transcriptSource === "browser"
+      ? (["uploaded", "analyzing", "graphing", "completed"] as const)
+      : stageSequence[job.sourceKind];
   const elapsed = Date.now() - job.startedAt;
   const ratio = Math.min(elapsed / JOB_DURATION_MS, 1);
 
@@ -271,7 +274,7 @@ export const mockApi: MaeglagiApi = {
 
   async uploadRecording(workspaceId, audio, options) {
     await simulateTransfer(options);
-    return registerUpload(workspaceId, {
+    const job = registerUpload(workspaceId, {
       id: nextId("src"),
       workspaceId,
       kind: "meeting",
@@ -280,7 +283,27 @@ export const mockApi: MaeglagiApi = {
       createdAt: new Date().toISOString(),
       // Blob에는 길이 정보가 없으므로 대략치로 둡니다. 실제 값은 STT가 채웁니다.
       durationSeconds: Math.round(audio.size / 16_000),
+      transcriptSource: "server",
     });
+    job.transcriptSource = "server";
+    return job;
+  },
+
+  async uploadTranscript(workspaceId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    if (!input.text.trim()) throw new ApiError(422, "대본을 입력해 주세요.");
+    const job = registerUpload(workspaceId, {
+      id: nextId("src"),
+      workspaceId,
+      kind: "meeting",
+      title: input.title?.trim() || `회의 대본 ${new Date().toLocaleString("ko-KR")}`,
+      status: "processing",
+      createdAt: new Date().toISOString(),
+      durationSeconds: input.durationSeconds,
+      transcriptSource: "browser",
+    });
+    job.transcriptSource = "browser";
+    return job;
   },
 
   async getJob(jobId, signal) {

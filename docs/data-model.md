@@ -19,6 +19,13 @@ auth.users
   검사합니다.
 - Neo4j의 Entity와 Relation에는 원문을 복제하지 않습니다. 최소 식별 속성과
   `source_id`, `chunk_id`, `timestamp`만 저장해 PostgreSQL/Storage의 근거를 참조합니다.
+- 같은 개체의 다른 표기는 하나의 Entity 노드로 병합합니다. 노드는 대표 `name`과 다른 표기
+  `aliases`, 정규화된 병합 키 `keys`, 근거가 된 `source_ids`를 가집니다. 노드 id는
+  `workspace + kind + 정규화된 이름`에서 결정되어 같은 소스를 다시 처리해도 upsert됩니다.
+- 이름만으로는 동명이인을 구분할 수 없으므로 이메일 등 원문에 적힌 식별 정보를 `identifiers`로
+  함께 저장합니다. 식별 정보가 겹치면 이름이 달라도 같은 노드, 이름이 같아도 식별 정보가 서로
+  다르면 다른 노드입니다. 식별 정보가 있는 노드의 id는 식별 정보에서 결정됩니다. 식별 정보 없이
+  이름이 같은 후보가 여럿이면 추측하지 않고 합치지 않은 채 경고합니다.
 
 스키마의 실행 가능한 기준은 `supabase/migrations`이며 Python 측 계약은 SQLModel과
 `GraphEntity`/`GraphRelation` 모델입니다.

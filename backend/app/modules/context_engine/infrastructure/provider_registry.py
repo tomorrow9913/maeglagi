@@ -24,6 +24,7 @@ provider_registry = ProviderRegistry(
             "https://api.openai.com/v1",
             supports_embedding=True,
             supports_structured_output=True,
+            supports_transcription=True,
         ),
         AnthropicAdapter(),
         OpenAICompatibleAdapter("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1"),

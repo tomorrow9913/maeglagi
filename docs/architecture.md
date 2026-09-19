@@ -71,6 +71,25 @@ Vector DB 컨테이너는 운영하지 않으며 Render에는 FastAPI만 배포�
 `/api/v1/health`는 프로세스 liveness, `/api/v1/ready`는 Object Storage,
 PostgreSQL, pgvector, graph projection의 준비 상태를 확인합니다.
 
+## 회의 수집 경로
+
+회의는 두 경로로 수집하지만 정규화 이후에는 같은 파이프라인을 사용합니다.
+
+```text
+audio upload ── provider STT ──┐
+                               ├─ normalization → chunking → embedding → pgvector
+browser transcript ────────────┘
+```
+
+- `POST /workspaces/{id}/sources/recordings`: 원본 오디오를 Storage에 보존한 뒤
+  transcription capability가 있는 BYOK provider로 일괄 STT합니다.
+- `POST /workspaces/{id}/sources/transcripts`: 브라우저가 만든 대본을 원문으로
+  보존하고 STT 단계 없이 분석을 시작합니다.
+- `transcriptSource`가 `server`면 `transcribing` 단계를 포함하고, `browser`면
+  해당 단계를 생략합니다.
+- chunk는 `source_id`, 순번, 회의 시간 범위를 보존하고 1,200자/200자 overlap
+  전략으로 생성합니다. embedding은 Supabase PostgreSQL의 pgvector에 적재합니다.
+
 ## API versioning
 
 모든 public endpoint는 `/api/v1` 아래에 둡니다. `contracts/openapi.yaml`이 프론트와 백엔드의 합의 지점이며, 구현이 늘어나면 FastAPI가 생성한 schema와 CI에서 diff를 검사합니다.

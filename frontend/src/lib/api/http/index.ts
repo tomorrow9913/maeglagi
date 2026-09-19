@@ -11,6 +11,7 @@ import type {
   ProcessingJob,
   Source,
   SourceContent,
+  TranscriptSourceInput,
   Workspace,
   WorkspaceSecrets,
 } from "../types";
@@ -79,6 +80,13 @@ export const httpApi: MaeglagiApi = {
     form.append("audio", audio, "recording.webm");
     return apiUpload<ProcessingJob>(`/workspaces/${workspaceId}/sources/recordings`, form, options);
   },
+
+  uploadTranscript: (workspaceId, input: TranscriptSourceInput, signal) =>
+    apiFetch<ProcessingJob>(`/workspaces/${workspaceId}/sources/transcripts`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    }),
 
   getJob: (jobId, signal) => apiFetch<ProcessingJob>(`/jobs/${jobId}`, { signal }),
 
