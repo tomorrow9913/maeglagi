@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAudioRecorder } from "../hooks/use-audio-recorder";
@@ -10,12 +11,11 @@ import { RecordingControls } from "./recording-controls";
 import type { TranscriptSourceInput } from "@/lib/api";
 
 const speakerColors = [
-  "text-blue-700 dark:text-blue-300",
-  "text-violet-700 dark:text-violet-300",
-  "text-emerald-700 dark:text-emerald-300",
-  "text-amber-700 dark:text-amber-300",
-  "text-rose-700 dark:text-rose-300",
-  "text-cyan-700 dark:text-cyan-300",
+  "text-[var(--chart-2-hex)]",
+  "text-[var(--chart-4-hex)]",
+  "text-[var(--chart-1-hex)]",
+  "text-[var(--chart-3-hex)]",
+  "text-[var(--chart-5-hex)]",
 ];
 const speakerColor = (speaker: string | number) =>
   speakerColors[Number(speaker) % speakerColors.length];
@@ -283,15 +283,15 @@ export function MeetingCapture({
                   말씀하시면 문장이 여기에 표시됩니다. 화자를 선택한 뒤 발언해 주세요.
                 </p>
               )}
-              <div className="space-y-1" role="group" aria-label="발언 목록">
+              <div role="group" aria-label="발언 목록">
                 {draft.map((row, index) => (
                   <div
                     key={row.id}
-                    className="group grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 py-1.5 sm:grid-cols-[8rem_minmax(0,1fr)]"
+                    className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 py-0.5 sm:grid-cols-[8rem_minmax(0,1fr)]"
                   >
                     <select
                       aria-label={`발언 ${index + 1} 화자`}
-                      className={`w-full min-w-0 rounded-sm bg-transparent py-1 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring ${speakerColor(row.speaker)}`}
+                      className={`w-full min-w-0 rounded-sm bg-transparent py-0.5 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring ${speakerColor(row.speaker)}`}
                       value={row.speaker}
                       disabled={saving}
                       onChange={(event) => update(row.id, { speaker: event.target.value })}
@@ -302,7 +302,7 @@ export function MeetingCapture({
                         </option>
                       ))}
                     </select>
-                    <div className="min-w-0">
+                    <div className="flex min-w-0 items-start gap-1">
                       <textarea
                         ref={(element) => {
                           if (element) grow(element);
@@ -331,7 +331,16 @@ export function MeetingCapture({
                           }
                         }}
                         aria-label={`발언 ${index + 1} 내용`}
-                        className="block min-h-7 w-full resize-none overflow-hidden bg-transparent py-1 text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title={
+                          row.edited
+                            ? "직접 수정됨"
+                            : row.isFinal
+                              ? "인식 확정"
+                              : active
+                                ? "인식 중"
+                                : "최종 확인 필요"
+                        }
+                        className="block min-h-6 min-w-0 flex-1 resize-none overflow-hidden bg-transparent py-0.5 text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         value={row.text}
                         disabled={saving}
                         onChange={(event) => {
@@ -339,28 +348,19 @@ export function MeetingCapture({
                           update(row.id, { text: event.target.value, edited: true });
                         }}
                       />
-                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                        <span>
-                          {row.edited
-                            ? "수정됨"
-                            : row.isFinal
-                              ? "인식 확정"
-                              : active
-                                ? "인식 중…"
-                                : "확인 필요"}
-                        </span>
-                        <button
-                          type="button"
-                          className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                          disabled={saving}
-                          onClick={() => {
-                            deletedIds.current.add(row.id);
-                            setDraft((rows) => rows?.filter((item) => item.id !== row.id) ?? null);
-                          }}
-                        >
-                          발언 삭제
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-50 hover:bg-accent hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        aria-label={`발언 ${index + 1} 삭제`}
+                        title="발언 삭제"
+                        disabled={saving}
+                        onClick={() => {
+                          deletedIds.current.add(row.id);
+                          setDraft((rows) => rows?.filter((item) => item.id !== row.id) ?? null);
+                        }}
+                      >
+                        <X className="size-3.5" aria-hidden />
+                      </button>
                     </div>
                   </div>
                 ))}

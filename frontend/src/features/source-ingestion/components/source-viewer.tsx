@@ -28,10 +28,11 @@ function formatTimestamp(seconds: number): string {
 }
 
 const speakerTextColors = [
-  "text-blue-700 dark:text-blue-300",
-  "text-violet-700 dark:text-violet-300",
-  "text-emerald-700 dark:text-emerald-300",
-  "text-amber-700 dark:text-amber-300",
+  "text-[var(--chart-2-hex)]",
+  "text-[var(--chart-4-hex)]",
+  "text-[var(--chart-1-hex)]",
+  "text-[var(--chart-3-hex)]",
+  "text-[var(--chart-5-hex)]",
 ];
 
 function speakerColor(name: string): string {
@@ -101,7 +102,7 @@ export function SourceViewer({
               표시할 원문이 없습니다.
             </p>
           ) : (
-            <ol className={data.kind === "meeting" ? "space-y-2" : "space-y-3"}>
+            <ol className={data.kind === "meeting" ? "space-y-1" : "space-y-3"}>
               {data.chunks.map((chunk) => {
                 const isHighlighted = chunk.id === highlightChunkId;
                 return (
@@ -115,7 +116,7 @@ export function SourceViewer({
                         : data.kind === "meeting"
                           ? ""
                           : "rounded-lg bg-muted/40",
-                      data.kind === "meeting" ? "px-1 py-2" : "p-3",
+                      data.kind === "meeting" ? "px-1 py-1" : "p-3",
                     )}
                   >
                     {chunk.startSeconds != null ? (
@@ -125,7 +126,7 @@ export function SourceViewer({
                       </span>
                     ) : null}
                     {data.kind === "meeting" ? (
-                      <div className="space-y-1.5">
+                      <div className="space-y-0.5">
                         {chunk.text
                           .split(/\n+/)
                           .filter(Boolean)
