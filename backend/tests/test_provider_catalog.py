@@ -39,7 +39,14 @@ def test_catalog_lists_every_registered_provider_with_its_real_capabilities(
 def test_catalog_uses_the_same_shape_as_the_workspace_catalog(client: TestClient) -> None:
     item = client.get("/api/v1/ai/providers").json()[0]
 
-    assert set(item) == {"id", "displayName", "capabilities", "configured", "models"}
+    assert set(item) == {
+        "id",
+        "displayName",
+        "capabilities",
+        "configured",
+        "models",
+        "defaultModels",
+    }
     assert item["configured"] is False
     assert item["models"] == []
 
@@ -54,3 +61,34 @@ def test_catalog_requires_a_signed_in_user() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 401
+
+
+def test_the_catalog_gives_each_providers_default_models_so_they_show_as_soon_as_it_is_picked(
+    client: TestClient,
+) -> None:
+    by_id = {item["id"]: item for item in client.get("/api/v1/ai/providers").json()}
+
+    assert by_id["openai"]["defaultModels"]["embedding"] == "text-embedding-3-small"
+    assert set(by_id["openai"]["defaultModels"]) == {
+        "answer",
+        "extraction",
+        "embedding",
+        "transcription",
+    }
+    # A provider that cannot embed has no embedding default; the UI shows nothing for that job.
+    assert "embedding" not in by_id["anthropic"]["defaultModels"]
+    assert by_id["anthropic"]["defaultModels"]["answer"]
+
+
+def test_operators_can_change_the_defaults_without_touching_code(client: TestClient) -> None:
+    from app.core.config import Settings, get_settings
+    from app.main import app as application
+
+    application.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None,
+        provider_default_models={"openai": {"answer": "some-newer-model"}},
+    )
+
+    item = next(i for i in client.get("/api/v1/ai/providers").json() if i["id"] == "openai")
+
+    assert item["defaultModels"] == {"answer": "some-newer-model"}

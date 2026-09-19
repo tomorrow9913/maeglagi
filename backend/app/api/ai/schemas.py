@@ -11,6 +11,10 @@ class ProviderCatalogItem(BaseModel):
     capabilities: list[str]
     configured: bool
     models: list[str] = Field(default_factory=list)
+    # The model this provider preselects per job (answer, extraction, embedding, transcription).
+    default_models: dict[str, str] = Field(
+        default_factory=dict, serialization_alias="defaultModels"
+    )
 
 
 class ProviderChatRequest(BaseModel):

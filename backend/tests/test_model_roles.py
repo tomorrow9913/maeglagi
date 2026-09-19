@@ -1,3 +1,4 @@
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +14,11 @@ from app.modules.context_engine.application.model_roles import (
     roles_for_model,
     selection_of,
 )
+from app.modules.context_engine.application.provider import ModelInfo
+from app.modules.context_engine.infrastructure.provider_adapters import (
+    parse_anthropic_model,
+    parse_openai_model,
+)
 from app.modules.ingestion.application import pipeline as pipeline_module
 from app.modules.ingestion.application.pipeline import (
     IngestionError,
@@ -23,6 +29,10 @@ from app.modules.workspaces.infrastructure.models import ProviderCredential, Wor
 
 OPENAI_CAPS = ("chat", "embedding", "structuredOutput", "transcription", "models")
 CHAT_ONLY = ("chat", "models")
+
+
+def infos(*ids: str) -> list[ModelInfo]:
+    return [ModelInfo(id=model) for model in ids]
 
 
 class Adapter:
@@ -85,14 +95,14 @@ def test_a_stable_alias_comes_before_a_dated_snapshot_of_the_same_model() -> Non
 
 def test_options_are_grouped_by_job_and_a_job_nobody_offers_stays_empty() -> None:
     options = options_by_role(
-        [(OPENAI, ["gpt-4o-mini", "text-embedding-3-small", "whisper-1", "dall-e-3"])]
+        [(OPENAI, infos("gpt-4o-mini", "text-embedding-3-small", "whisper-1", "dall-e-3"))]
     )
 
     assert [o.model for o in options[ModelRole.ANSWER]] == ["gpt-4o-mini"]
     assert [o.model for o in options[ModelRole.EMBEDDING]] == ["text-embedding-3-small"]
     assert [o.model for o in options[ModelRole.TRANSCRIPTION]] == ["whisper-1"]
 
-    chat_only = options_by_role([(ANTHROPIC, ["claude-sonnet", "claude-haiku"])])
+    chat_only = options_by_role([(ANTHROPIC, infos("claude-sonnet", "claude-haiku"))])
     assert len(chat_only[ModelRole.ANSWER]) == 2
     assert chat_only[ModelRole.EMBEDDING] == [] and chat_only[ModelRole.TRANSCRIPTION] == []
     assert chat_only[ModelRole.EXTRACTION] == []
@@ -100,7 +110,7 @@ def test_options_are_grouped_by_job_and_a_job_nobody_offers_stays_empty() -> Non
 
 def test_two_keys_offer_a_job_in_key_priority_order_without_duplicates() -> None:
     options = options_by_role(
-        [(ANTHROPIC, ["claude-sonnet"]), (OPENAI, ["gpt-4o-mini", "gpt-4o-mini"])]
+        [(ANTHROPIC, infos("claude-sonnet")), (OPENAI, infos("gpt-4o-mini", "gpt-4o-mini"))]
     )
 
     assert [(o.provider, o.model) for o in options[ModelRole.ANSWER]] == [
@@ -110,7 +120,7 @@ def test_two_keys_offer_a_job_in_key_priority_order_without_duplicates() -> None
 
 
 def test_a_choice_must_be_a_model_the_key_offers_for_that_job() -> None:
-    options = options_by_role([(OPENAI, ["gpt-4o-mini", "text-embedding-3-small"])])
+    options = options_by_role([(OPENAI, infos("gpt-4o-mini", "text-embedding-3-small"))])
     good = ModelOption(provider="openai", model="text-embedding-3-small")
 
     assert invalid_selections({"embedding": good}, options) == []
@@ -206,10 +216,10 @@ async def test_the_workspaces_choice_decides_the_model(providers: None) -> None:
     )
 
 
-async def test_a_workspace_that_never_chose_gets_the_deployment_default(providers: None) -> None:
+async def test_a_workspace_that_never_chose_gets_that_providers_default(providers: None) -> None:
     resolved = await resolve({}, ["openai"], ModelRole.EMBEDDING)
 
-    assert resolved.model == "deployment-default"
+    assert resolved.model == "text-embedding-3-small"  # the provider's default, not a guess
 
 
 async def test_the_key_of_the_chosen_models_provider_is_used_even_if_it_is_not_the_default(
@@ -236,3 +246,114 @@ async def test_a_choice_whose_key_is_gone_falls_back_instead_of_calling_the_wron
 
     assert resolved.adapter.id == "anthropic"
     assert resolved.model != "gpt-4o"  # never sends an OpenAI model name to Anthropic
+
+
+async def test_an_unchosen_job_never_sends_one_providers_model_name_to_another(
+    providers: None,
+) -> None:
+    resolved = await resolve({}, ["anthropic"], ModelRole.ANSWER)
+
+    assert resolved.adapter.id == "anthropic"
+    assert resolved.model == "claude-haiku-4-5"  # anthropic's default, not an OpenAI name
+
+
+# --- what the provider reports: retirement, defaults, release dates --------------------------
+
+TODAY = date(2026, 9, 20)
+
+
+def test_a_model_the_provider_has_already_retired_is_not_offered() -> None:
+    options = options_by_role(
+        [
+            (
+                OPENAI,
+                [
+                    ModelInfo(id="gpt-old", shutdown_date=date(2026, 9, 1)),
+                    ModelInfo(id="gpt-today", shutdown_date=TODAY),
+                    ModelInfo(id="gpt-later", shutdown_date=date(2026, 12, 1)),
+                    ModelInfo(id="gpt-4o-mini"),
+                ],
+            )
+        ],
+        today=TODAY,
+    )
+
+    assert {o.model for o in options[ModelRole.ANSWER]} == {"gpt-later", "gpt-4o-mini"}
+
+
+def test_the_providers_default_leads_its_models_when_the_key_offers_it() -> None:
+    options = options_by_role(
+        [(OPENAI, infos("gpt-4.1", "gpt-4o-mini", "gpt-4o"))],
+        defaults={"openai": {"answer": "gpt-4.1"}},
+    )
+
+    assert options[ModelRole.ANSWER][0].model == "gpt-4.1"
+
+
+def test_a_default_the_key_does_not_offer_is_skipped_instead_of_invented() -> None:
+    options = options_by_role(
+        [(OPENAI, infos("gpt-4o-mini", "gpt-4o"))],
+        defaults={"openai": {"answer": "model-this-key-lacks"}},
+    )
+
+    assert "model-this-key-lacks" not in {o.model for o in options[ModelRole.ANSWER]}
+    assert options[ModelRole.ANSWER][0].model == "gpt-4o-mini"
+
+
+def test_a_default_that_was_retired_is_not_preselected() -> None:
+    options = options_by_role(
+        [(OPENAI, [ModelInfo(id="gpt-4.1", shutdown_date=date(2026, 1, 1)), *infos("gpt-4o")])],
+        defaults={"openai": {"answer": "gpt-4.1"}},
+        today=TODAY,
+    )
+
+    assert [o.model for o in options[ModelRole.ANSWER]] == ["gpt-4o"]
+
+
+def test_each_providers_default_only_leads_that_providers_models() -> None:
+    options = options_by_role(
+        [
+            (ANTHROPIC, infos("claude-sonnet", "claude-haiku")),
+            (OPENAI, infos("gpt-4o", "gpt-4o-mini")),
+        ],
+        defaults={"openai": {"answer": "gpt-4o"}, "anthropic": {"answer": "claude-sonnet"}},
+    )
+
+    assert [(o.provider, o.model) for o in options[ModelRole.ANSWER]] == [
+        ("anthropic", "claude-sonnet"),
+        ("anthropic", "claude-haiku"),
+        ("openai", "gpt-4o"),
+        ("openai", "gpt-4o-mini"),
+    ]
+
+
+def test_openai_style_metadata_is_read_from_the_models_list() -> None:
+    info = parse_openai_model(
+        {"id": "gpt-x", "created": 1686935002, "shutdown_date": "2027-02-03", "owned_by": "o"}
+    )
+
+    assert info is not None
+    assert info.id == "gpt-x"
+    assert info.created == datetime(2023, 6, 16, 17, 3, 22, tzinfo=UTC)
+    assert info.shutdown_date == date(2027, 2, 3)
+
+
+def test_missing_or_odd_metadata_is_unknown_not_an_error() -> None:
+    bare = parse_openai_model({"id": "gpt-x"})
+    odd = parse_openai_model({"id": "gpt-y", "created": "soon", "shutdown_date": 5})
+
+    assert bare == ModelInfo(id="gpt-x")
+    assert odd == ModelInfo(id="gpt-y")
+    assert parse_openai_model({"object": "model"}) is None
+    assert parse_openai_model("nope") is None
+
+
+def test_anthropic_metadata_is_read_from_the_models_list() -> None:
+    info = parse_anthropic_model({"id": "claude-x", "created_at": "2026-07-24T00:00:00Z"})
+
+    assert info is not None
+    assert info.created == datetime(2026, 7, 24, tzinfo=UTC)
+    assert info.shutdown_date is None
+    assert parse_anthropic_model({"id": "claude-y", "created_at": "garbage"}) == ModelInfo(
+        id="claude-y"
+    )

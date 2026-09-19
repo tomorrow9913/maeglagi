@@ -6,11 +6,12 @@ fact about the models its key offers, not about the provider's name.
 """
 
 import re
+from datetime import date
 from enum import StrEnum
 
 from pydantic import BaseModel
 
-from app.modules.context_engine.application.provider import ProviderAdapter
+from app.modules.context_engine.application.provider import ModelInfo, ProviderAdapter
 
 
 class ModelRole(StrEnum):
@@ -72,16 +73,35 @@ def recommendation_rank(model_id: str) -> tuple[bool, bool, str]:
 
 
 def options_by_role(
-    listings: list[tuple[ProviderAdapter, list[str]]],
+    listings: list[tuple[ProviderAdapter, list[ModelInfo]]],
+    *,
+    defaults: dict[str, dict[str, str]] | None = None,
+    today: date | None = None,
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Sort what each key offered into roles. `listings` is in key priority order."""
+    """Sort what each key offered into roles. `listings` is in key priority order.
+
+    A model the provider has already retired is not offered. A provider's default model for a job
+    goes first when the key offers it; the rest keep a stable order.
+    """
+    today = today or date.today()
     options: dict[ModelRole, list[ModelOption]] = {role: [] for role in ROLE_ORDER}
-    for adapter, models in listings:
-        for model in sorted(set(models), key=recommendation_rank):
+    for adapter, infos in listings:
+        live = {i.id for i in infos if i.shutdown_date is None or i.shutdown_date > today}
+        preferred = (defaults or {}).get(adapter.id, {})
+        for model in sorted(live, key=recommendation_rank):
             for role in ROLE_ORDER:
                 if role in roles_for_model(model, adapter.capabilities):
                     option = ModelOption(provider=adapter.id, model=model)
-                    if option not in options[role]:
+                    if option in options[role]:
+                        continue
+                    if preferred.get(role.value) == model:
+                        # The default leads its provider's models, after earlier keys' models.
+                        first_of_provider = next(
+                            (i for i, o in enumerate(options[role]) if o.provider == adapter.id),
+                            len(options[role]),
+                        )
+                        options[role].insert(first_of_provider, option)
+                    else:
                         options[role].append(option)
     return options
 

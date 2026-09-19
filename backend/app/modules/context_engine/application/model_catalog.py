@@ -4,25 +4,30 @@ from uuid import UUID
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.config import get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
 from app.modules.context_engine.application.model_roles import (
     ModelOption,
     ModelRole,
     options_by_role,
 )
-from app.modules.context_engine.application.provider import ProviderAdapter
+from app.modules.context_engine.application.provider import ModelInfo, ProviderAdapter
 from app.modules.context_engine.infrastructure.models import Chunk
 from app.modules.context_engine.infrastructure.provider_adapters import ProviderError
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.workspaces.infrastructure.models import ProviderCredential
 
 
-async def models_of(adapter: ProviderAdapter, api_key: str) -> list[str]:
+async def models_of(adapter: ProviderAdapter, api_key: str) -> list[ModelInfo]:
     """What the key can use right now. A provider that cannot answer offers nothing."""
     try:
-        return await adapter.list_models(api_key)
+        return await adapter.list_model_infos(api_key)
     except ProviderError:
         return []
+
+
+def _defaults() -> dict[str, dict[str, str]]:
+    return get_settings().provider_default_models
 
 
 async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[ModelOption]]:
@@ -30,7 +35,7 @@ async def options_for_key(provider: str, api_key: str) -> dict[ModelRole, list[M
     adapter = provider_registry.get(provider)
     if adapter is None:
         return options_by_role([])
-    return options_by_role([(adapter, await models_of(adapter, api_key))])
+    return options_by_role([(adapter, await models_of(adapter, api_key))], defaults=_defaults())
 
 
 async def options_for_workspace(
@@ -46,7 +51,7 @@ async def options_for_workspace(
         )
         .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
     )
-    listings: list[tuple[ProviderAdapter, list[str]]] = []
+    listings: list[tuple[ProviderAdapter, list[ModelInfo]]] = []
     for credential in result.all():
         adapter = provider_registry.get(credential.provider)
         if adapter is None:
@@ -56,7 +61,7 @@ async def options_for_workspace(
         except CredentialUnavailableError:
             continue
         listings.append((adapter, await models_of(adapter, api_key)))
-    return options_by_role(listings)
+    return options_by_role(listings, defaults=_defaults())
 
 
 async def has_indexed_chunks(session: AsyncSession, workspace_id: UUID) -> bool:

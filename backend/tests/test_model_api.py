@@ -18,6 +18,7 @@ from app.modules.context_engine.application.model_roles import (
     ModelRole,
     options_by_role,
 )
+from app.modules.context_engine.application.provider import ModelInfo
 from app.modules.workspaces.infrastructure.models import Workspace
 
 # `app.api.workspaces.router` is shadowed by the package's `router` attribute, so load the module.
@@ -38,11 +39,14 @@ OPTIONS = options_by_role(
         (
             OPENAI,
             [
-                "gpt-4o-mini",
-                "gpt-4o",
-                "text-embedding-3-small",
-                "text-embedding-3-large",
-                "whisper-1",
+                ModelInfo(id=model)
+                for model in (
+                    "gpt-4o-mini",
+                    "gpt-4o",
+                    "text-embedding-3-small",
+                    "text-embedding-3-large",
+                    "whisper-1",
+                )
             ],
         )
     ]

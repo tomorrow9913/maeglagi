@@ -52,8 +52,13 @@ class IngestionPipeline:
             self.settings.chunk_size_chars, self.settings.chunk_overlap_chars
         )
 
+    def _default_model(self, provider_id: str, role: ModelRole) -> str:
+        """For a job nobody chose a model for: that provider's default, never another provider's."""
+        configured = self.settings.provider_default_models.get(provider_id, {})
+        return configured.get(role.value) or self._fallback_model(role)
+
     def _fallback_model(self, role: ModelRole) -> str:
-        """Only for workspaces that never chose: the deployment's configured default."""
+        """Last resort when a provider has no configured default: the deployment's flat setting."""
         return {
             ModelRole.ANSWER: self.settings.answer_model,
             ModelRole.EXTRACTION: self.settings.extraction_model,
@@ -94,7 +99,11 @@ class IngestionPipeline:
             except CredentialUnavailableError:
                 continue
             uses_choice = chosen is not None and chosen.provider == credential.provider
-            model = chosen.model if uses_choice and chosen else self._fallback_model(role)
+            model = (
+                chosen.model
+                if uses_choice and chosen
+                else self._default_model(credential.provider, role)
+            )
             return ResolvedProvider(adapter, api_key, model)
         raise IngestionError(f"{capability}을 지원하는 API key가 없습니다.")
 

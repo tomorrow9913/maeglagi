@@ -32,6 +32,19 @@ class Settings(BaseSettings):
     transcription_model: str = "whisper-1"
     extraction_model: str = "gpt-4o-mini"
     answer_model: str = "gpt-4o-mini"
+    # The model each provider preselects per job, before and after a key is entered. Operators
+    # keep it current (env PROVIDER_DEFAULT_MODELS takes JSON). A default the key does not offer,
+    # or that the provider has retired, is simply skipped.
+    provider_default_models: dict[str, dict[str, str]] = {
+        "openai": {
+            "answer": "gpt-4o-mini",
+            "extraction": "gpt-4o-mini",
+            "embedding": "text-embedding-3-small",
+            "transcription": "whisper-1",
+        },
+        "anthropic": {"answer": "claude-haiku-4-5"},
+        "nvidia": {"answer": "meta/llama-3.1-8b-instruct"},
+    }
     chunk_size_chars: int = 1200
     chunk_overlap_chars: int = 200
     sentry_dsn: SecretStr = SecretStr("")
