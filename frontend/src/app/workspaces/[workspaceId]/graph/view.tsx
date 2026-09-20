@@ -77,6 +77,19 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
     () => graph.nodes.find((node) => node.id === selectedNodeId),
     [graph, selectedNodeId],
   );
+  const personId = selectedNode?.directoryKind === "Person" ? selectedNode.directoryId : undefined;
+  const directory = useAsync(
+    async (signal) => {
+      if (!personId) return { people: [], projects: [] };
+      const [people, projects] = await Promise.all([
+        api.listPeople(workspaceId, signal),
+        api.listProjects(workspaceId, signal),
+      ]);
+      return { people, projects };
+    },
+    [api, workspaceId, personId],
+    { resetKey: `${workspaceId}:${personId ?? ""}` },
+  );
 
   const openSource = useCallback(
     (source: ContextItemSource) => {
@@ -279,6 +292,15 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
           )
         }
         isReadOnly={isDemo}
+        workspaceId={workspaceId}
+        person={directory.data?.people.find((item) => item.id === personId)}
+        projects={directory.data?.projects ?? []}
+        personLoading={Boolean(personId) && directory.isLoading && !directory.data}
+        personError={personId ? directory.error : undefined}
+        onPersonSaved={() => {
+          directory.reload();
+          reload();
+        }}
       />
     </>
   );

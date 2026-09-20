@@ -11,7 +11,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type { ContextItemSource, GraphNode, KnowledgeGraph } from "@/lib/api";
+import type {
+  ContextItemSource,
+  GraphNode,
+  KnowledgeGraph,
+  WorkspacePerson,
+  WorkspaceProject,
+} from "@/lib/api";
+import { PersonDirectoryDetails } from "./person-directory-details";
 
 import { entityLabel, materialLabel } from "../lib/graph-style";
 import { relationTail } from "../lib/relation-sentence";
@@ -58,6 +65,12 @@ export function NodeDetailSheet({
   onOpenSource,
   onOpenDirectory,
   isReadOnly = false,
+  workspaceId,
+  person,
+  projects,
+  personLoading,
+  personError,
+  onPersonSaved,
 }: {
   graph: KnowledgeGraph;
   node: GraphNode | undefined;
@@ -67,6 +80,12 @@ export function NodeDetailSheet({
   onOpenDirectory: (node: GraphNode) => void;
   /** 데모처럼 참여자·프로젝트를 편집할 수 없는 화면인지 */
   isReadOnly?: boolean;
+  workspaceId: string;
+  person?: WorkspacePerson;
+  projects: WorkspaceProject[];
+  personLoading: boolean;
+  personError?: Error;
+  onPersonSaved: () => void;
 }) {
   const connections = node ? connectionsOf(graph, node.id) : [];
   const typeLabel = node ? (node.material ? materialLabel : entityLabel[node.type]) : "";
@@ -84,6 +103,26 @@ export function NodeDetailSheet({
             </SheetHeader>
 
             <div className="space-y-6 overflow-y-auto px-4 pb-6">
+              {node.directoryKind === "Person" && node.directoryId ? (
+                person ? (
+                  <PersonDirectoryDetails
+                    key={`${workspaceId}:${person.id}:${person.updatedAt}:${projects.map((project) => `${project.id}:${project.revision}`).join(",")}`}
+                    workspaceId={workspaceId}
+                    person={person}
+                    projects={projects}
+                    readOnly={isReadOnly}
+                    onSaved={onPersonSaved}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground" role="status">
+                    {personError
+                      ? "참여자 정보를 불러오지 못했습니다."
+                      : personLoading
+                        ? "참여자 정보를 불러오는 중"
+                        : "등록된 참여자 정보가 없습니다."}
+                  </p>
+                )
+              ) : null}
               {node.material && node.sourceId ? (
                 <Button
                   variant="outline"
