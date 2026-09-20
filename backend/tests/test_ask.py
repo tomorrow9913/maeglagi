@@ -491,6 +491,30 @@ async def test_a_workspace_without_a_context_store_still_gets_a_prompt() -> None
     assert "아직 정리된 현재 상황이 없습니다" in user.content
 
 
+def test_follow_up_history_is_bounded_and_not_presented_as_evidence() -> None:
+    from pydantic import ValidationError
+
+    request = ask_module.AskRequest.model_validate(
+        {
+            "question": "그 결정은 언제?",
+            "history": [{"question": "Redis 결정은?", "answer": "도입했습니다."}],
+        }
+    )
+    system, user = build_messages(
+        request.question,
+        found(evidence(1, "회의에서 9월 8일 결정")),
+        None,
+        [(item.question, item.answer) for item in request.history],
+    )
+    assert "이전 대화" in user.content and "Redis 결정은?" in user.content
+    assert "현재 [근거]" in system.content
+    assert "[1]" in user.content
+    with pytest.raises(ValidationError):
+        ask_module.AskRequest.model_validate(
+            {"question": "후속", "history": [{"question": "q", "answer": "a"}] * 7}
+        )
+
+
 # --- the endpoint -------------------------------------------------------------------------------
 
 
@@ -630,6 +654,21 @@ def test_the_model_sees_the_workspaces_current_situation(client: TestClient) -> 
     user_message = FakeIngestion.adapter.requests[0].messages[1].content
     assert "Redis 도입이 결정됐다." in user_message
     assert "Redis 캐시 적용 후 p95가 320ms" in user_message
+
+
+def test_follow_up_passes_prior_turn_to_retrieval_and_prompt(client: TestClient) -> None:
+    response = client.post(
+        f"/api/v1/workspaces/{WORKSPACE}/ask",
+        json={
+            "question": "그 결정은 왜 했나요?",
+            "history": [{"question": "Redis 결정은?", "answer": "Redis를 도입했습니다."}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Redis 결정은?" in FakeIngestion.embed_calls[0]
+    prompt = FakeIngestion.adapter.requests[0].messages[1].content
+    assert "[이전 대화]" in prompt and "Redis를 도입했습니다." in prompt
 
 
 def test_no_matching_chunks_is_an_error_event_and_the_model_is_not_called(

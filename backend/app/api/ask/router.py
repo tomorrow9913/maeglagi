@@ -37,6 +37,7 @@ INTERNAL_ERROR = "답변을 만드는 중 문제가 생겼습니다. 잠시 후 
 
 class AskRequest(BaseModel):
     question: str = Field(max_length=2000)
+    history: list["AskHistoryTurn"] = Field(default_factory=list, max_length=6)
 
     @field_validator("question")
     @classmethod
@@ -45,6 +46,11 @@ class AskRequest(BaseModel):
         if not value:
             raise ValueError("질문을 입력해 주세요.")
         return value
+
+
+class AskHistoryTurn(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=4000)
 
 
 async def _sse(events: AsyncIterator[dict[str, Any]]) -> AsyncIterator[str]:
@@ -148,7 +154,13 @@ async def ask(
             lexical_search=lexical,
             graph=GraphNeighborhood(graph_store) if graph_store else None,
         )
-        retrieval = await retriever.retrieve(workspace_id, body.question)
+        # A short follow-up can depend on the subject of the preceding question.
+        retrieval_query = (
+            f"{body.question} {body.history[-1].question}"
+            if body.history and len(body.question) < 80
+            else body.question
+        )
+        retrieval = await retriever.retrieve(workspace_id, retrieval_query)
     except IngestionError as exc:  # e.g. no key that can embed the question
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     finally:
@@ -161,6 +173,7 @@ async def ask(
         api_key=provider.api_key,
         model=provider.model,
         question=body.question,
+        history=[(item.question, item.answer) for item in body.history],
         retrieval=retrieval,
         store=store,
     )

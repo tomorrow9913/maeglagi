@@ -242,7 +242,9 @@ export async function* apiStream(
   if (!response.body) throw new ApiError(0, "스트리밍 응답을 읽지 못했습니다.");
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  const cancel = () => { void reader.cancel().catch(() => {}); };
+  const cancel = () => {
+    void reader.cancel().catch(() => {});
+  };
   init.signal?.addEventListener("abort", cancel, { once: true });
   let buffer = "";
 
@@ -259,7 +261,9 @@ export async function* apiStream(
     for (const payload of parseSseFrames(`${buffer}\n\n`).payloads) yield JSON.parse(payload);
   } finally {
     init.signal?.removeEventListener("abort", cancel);
-    await reader.cancel().catch(() => {});
+    // A server/proxy may keep the SSE connection open after its terminal event.
+    // Waiting for cancel() here also keeps Ask's visible busy state alive.
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
