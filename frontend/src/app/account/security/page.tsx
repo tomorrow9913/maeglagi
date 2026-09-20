@@ -7,7 +7,6 @@ import { CheckCircle2, Link2, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { kakaoIdentityLinkOptions } from "@/lib/auth-redirect";
-import { isKakaoOAuthAvailable } from "@/lib/kakao-availability";
 import { createClient } from "@/lib/supabase/client";
 
 type AccountState = {
@@ -100,7 +99,7 @@ export default function AccountSecurityPage() {
                   <CheckCircle2 className="size-4" aria-hidden />
                   연결됨
                 </span>
-              ) : isKakaoOAuthAvailable ? (
+              ) : (
                 <Button disabled={pending} onClick={linkKakao} type="button">
                   {pending ? (
                     <Loader2 className="animate-spin" aria-hidden />
@@ -109,8 +108,6 @@ export default function AccountSecurityPage() {
                   )}
                   카카오 계정 연결
                 </Button>
-              ) : (
-                <span className="text-xs text-muted-foreground">이메일 동의 설정 후 연결 가능</span>
               )}
             </div>
           </div>
