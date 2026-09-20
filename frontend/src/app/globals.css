@@ -1,4 +1,11 @@
 @import "tailwindcss";
+
+/*
+ * 라이트 한 세트만 운영합니다(docs/brand.md 4절). 기본값대로 두면 `dark:` 유틸리티가 OS의
+ * 다크 모드를 따라가, 토큰은 라이트인데 입력칸·버튼만 어두운 색으로 채워집니다.
+ * `.dark` 클래스가 있을 때만 적용되게 묶어 둡니다. 이 앱은 그 클래스를 붙이지 않습니다.
+ */
+@custom-variant dark (&:is(.dark *));
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
