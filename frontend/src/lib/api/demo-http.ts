@@ -10,6 +10,7 @@ export const demoHttpApi: MaeglagiApi = {
   ...httpApi,
   listMcpTokens: loginRequired,
   createMcpToken: loginRequired,
+  extendMcpToken: loginRequired,
   revokeMcpToken: loginRequired,
   // This explicit write uses the authenticated client, unlike every public demo read below.
   cloneDemoWorkspace: (signal) => apiFetch<Workspace>("/demo/clone", { method: "POST", signal }),
