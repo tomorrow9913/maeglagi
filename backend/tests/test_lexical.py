@@ -3,7 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import literal, select, text, union_all
+from sqlalchemy import literal, select, text, true, union_all
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -35,8 +35,13 @@ async def test_postgres_bm25_prefers_shorter_equally_relevant_passage() -> None:
         select(literal(2), literal("redis " + "filler " * 100), literal(706)),
         select(literal(3), literal("unrelated note"), literal(14)),
     ).cte("corpus")
-    predicate, score = _bm25(corpus, ["redis"])
-    statement = select(corpus.c.id, score.label("score")).where(predicate).order_by(score.desc())
+    predicate, score, statistics = _bm25(corpus, ["redis"])
+    statement = (
+        select(corpus.c.id, score.label("score"))
+        .join(statistics, true())
+        .where(predicate)
+        .order_by(score.desc())
+    )
     try:
         async with engine.connect() as connection:
             rows = (await connection.execute(statement)).all()

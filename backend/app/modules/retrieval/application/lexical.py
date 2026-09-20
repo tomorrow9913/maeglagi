@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import Float, and_, case, cast, func, or_
+from sqlalchemy import Float, and_, case, cast, func, or_, true
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -51,29 +51,39 @@ def query_terms(question: str) -> list[str]:
     return terms
 
 
-def _bm25(corpus: object, terms: list[str]) -> tuple[object, object]:
+def _bm25(corpus: object, terms: list[str]) -> tuple[object, object, object]:
     """Rank character n-gram matches with corpus-wide BM25 (k1=1.2, b=0.75)."""
     text = corpus.c.text
     document_length = cast(corpus.c.doc_len, Float)
-    count = select(func.count()).select_from(corpus).scalar_subquery()
-    average_length = select(func.avg(corpus.c.doc_len)).select_from(corpus).scalar_subquery()
+    predicates = [text.contains(term, autoescape=True) for term in terms]
+    statistics = (
+        select(
+            func.count().label("document_count"),
+            func.avg(corpus.c.doc_len).label("average_length"),
+            *(
+                func.sum(case((match, 1), else_=0)).label(f"document_frequency_{index}")
+                for index, match in enumerate(predicates)
+            ),
+        )
+        .select_from(corpus)
+        .cte("bm25_statistics")
+    )
     scores = []
-    predicates = []
-    for term in terms:
-        match = text.contains(term, autoescape=True)
-        predicates.append(match)
+    for index, term in enumerate(terms):
         frequency = cast(
             (func.length(text) - func.length(func.replace(text, term, ""))) / len(term), Float
         )
-        document_frequency = select(func.count()).select_from(corpus).where(match).scalar_subquery()
+        document_frequency = getattr(statistics.c, f"document_frequency_{index}")
         inverse_frequency = func.ln(
-            1.0 + (count - document_frequency + 0.5) / (document_frequency + 0.5)
+            1.0
+            + (statistics.c.document_count - document_frequency + 0.5) / (document_frequency + 0.5)
         )
         normalized_frequency = (frequency * 2.2) / (
-            frequency + 1.2 * (0.25 + 0.75 * document_length / func.nullif(average_length, 0))
+            frequency
+            + 1.2 * (0.25 + 0.75 * document_length / func.nullif(statistics.c.average_length, 0))
         )
         scores.append(inverse_frequency * normalized_frequency)
-    return or_(*predicates), sum(scores, 0)
+    return or_(*predicates), sum(scores, 0), statistics
 
 
 async def search_lexically(
@@ -118,7 +128,7 @@ async def search_lexically(
         )
         .cte("chunk_corpus")
     )
-    predicate, rank = _bm25(chunk_corpus, terms)
+    predicate, rank, statistics = _bm25(chunk_corpus, terms)
     statement = (
         select(
             Chunk.id,
@@ -130,6 +140,7 @@ async def search_lexically(
         )
         .join(Source, Chunk.source_id == Source.id)
         .join(chunk_corpus, chunk_corpus.c.id == Chunk.id)
+        .join(statistics, true())
         .where(
             *eligible_chunks,
             Chunk.workspace_id == workspace_id,
@@ -185,7 +196,7 @@ async def search_lexically(
         )
         .cte("source_corpus")
     )
-    predicate, rank = _bm25(source_corpus, terms)
+    predicate, rank, statistics = _bm25(source_corpus, terms)
     position = case(
         *(
             (
@@ -200,6 +211,7 @@ async def search_lexically(
     statement = (
         select(Source.id, Source.kind, Source.title, excerpt)
         .join(source_corpus, source_corpus.c.id == Source.id)
+        .join(statistics, true())
         .where(
             *scope,
             source_ready,
