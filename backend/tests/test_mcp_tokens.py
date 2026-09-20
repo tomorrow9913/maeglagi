@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.mcp_tokens import router
+from app.api.mcp_tokens import TokenCreate, router
 from app.auth import mcp
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
@@ -96,6 +96,33 @@ async def test_expiry_and_active_token_limit(token_sessions):
         with pytest.raises(HTTPException) as exc:
             await mcp.issue_token(session, owner, "over limit")
         assert exc.value.status_code == 409
+
+
+async def test_custom_lifetime_is_persisted_and_enforced(token_sessions):
+    owner = uuid4()
+    before = datetime.now(UTC)
+    async with token_sessions() as session:
+        item, secret = await mcp.issue_token(session, owner, "short lived", 7)
+        assert before + timedelta(days=7) <= item.expires_at
+        assert item.expires_at <= datetime.now(UTC) + timedelta(days=7)
+        item.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        session.add(item)
+        await session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await mcp.authenticate_mcp_token(secret, Settings(_env_file=None))
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.parametrize("days", [0, 366, -1, 1.5, "forever", True])
+def test_invalid_lifetimes_rejected_by_request_schema(days):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        TokenCreate.model_validate({"label": "agent", "expiresInDays": days})
+
+
+def test_legacy_request_defaults_to_90_days():
+    assert TokenCreate.model_validate({"label": "agent"}).expires_in_days == 90
 
 
 @pytest.mark.parametrize("value", ["", "supabase-jwt", "mgmcp_" + "a" * 42, "mgmcp_" + "√" * 43])

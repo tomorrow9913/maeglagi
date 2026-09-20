@@ -16,7 +16,8 @@ from app.core.config import Settings
 from app.core.database import session_factory
 
 TOKEN_PATTERN = re.compile(r"mgmcp_[A-Za-z0-9_-]{43}\Z")
-TOKEN_LIFETIME = timedelta(days=90)
+DEFAULT_TOKEN_LIFETIME_DAYS = 90
+MAX_TOKEN_LIFETIME_DAYS = 365
 MAX_ACTIVE_TOKENS = 20
 
 
@@ -41,11 +42,22 @@ def token_digest(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-async def issue_token(session: AsyncSession, owner_id: UUID, label: str) -> tuple[McpToken, str]:
+async def issue_token(
+    session: AsyncSession,
+    owner_id: UUID,
+    label: str,
+    expires_in_days: int = DEFAULT_TOKEN_LIFETIME_DAYS,
+) -> tuple[McpToken, str]:
     """Return a secret once; only its SHA-256 digest is persisted."""
     label = label.strip()
     if not label or len(label) > 80 or any(ord(char) < 32 for char in label):
         raise HTTPException(422, "연결 이름을 1~80자로 입력해 주세요.")
+    if (
+        isinstance(expires_in_days, bool)
+        or not isinstance(expires_in_days, int)
+        or not 1 <= expires_in_days <= MAX_TOKEN_LIFETIME_DAYS
+    ):
+        raise HTTPException(422, "토큰 유효 기간은 1~365일로 설정해 주세요.")
     lock_key = int.from_bytes(
         hashlib.sha256(b"mcp-token:" + owner_id.bytes).digest()[:8], "big", signed=True
     )
@@ -69,7 +81,7 @@ async def issue_token(session: AsyncSession, owner_id: UUID, label: str) -> tupl
         label=label,
         token_hash=token_digest(secret),
         token_hint=secret[-6:],
-        expires_at=datetime.now(UTC) + TOKEN_LIFETIME,
+        expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
     )
     session.add(item)
     await session.commit()
