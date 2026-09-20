@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -12,6 +12,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.jobs.schemas import JobResponse
+from app.api.workspaces.source_event_broker import SourceEventBroker, SourceSubscription
 from app.auth import CurrentUser
 from app.core.database import session_factory
 from app.modules.workspaces.infrastructure.models import Source, Workspace
@@ -19,7 +20,6 @@ from app.modules.workspaces.infrastructure.models import Source, Workspace
 router = APIRouter(prefix="/{workspace_id}/source-events")
 
 MAX_SOURCES = 100
-POLL_SECONDS = 2.0
 HEARTBEAT_SECONDS = 15.0
 STREAM_SECONDS = 55.0
 
@@ -84,7 +84,7 @@ async def _load_jobs(
 
 
 async def _read_jobs(workspace_id: UUID, owner_id: UUID, source_ids: list[UUID]) -> dict[UUID, str]:
-    # Each poll owns one short session and closes it before the next sleep.
+    # A notification owns one short session; no database session is held by an idle stream.
     async with session_factory() as session:
         return await _load_jobs(session, workspace_id, owner_id, source_ids)
 
@@ -99,54 +99,47 @@ async def _stream_events(
     owner_id: UUID,
     source_ids: list[UUID],
     initial: dict[UUID, str],
+    subscription: SourceSubscription,
+    broker: SourceEventBroker,
     *,
-    poll_seconds: float = POLL_SECONDS,
     heartbeat_seconds: float = HEARTBEAT_SECONDS,
     stream_seconds: float = STREAM_SECONDS,
-    now: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> AsyncIterator[str]:
     seen = initial.copy()
-    if await request.is_disconnected():
-        return
-    for source_id in source_ids:
-        yield _job_event(initial[source_id])
-
-    started = now()
-    deadline = started + stream_seconds
-    next_poll = started + poll_seconds
-    next_heartbeat = started + heartbeat_seconds
-    while now() < deadline:
+    deadline = time.monotonic() + stream_seconds
+    try:
         if await request.is_disconnected():
             return
-        delay = min(next_poll, next_heartbeat, deadline) - now()
-        if delay > 0:
-            await sleep(delay)
-        if await request.is_disconnected():
-            return
-        current = now()
-        if current >= deadline:
-            return
-        if current >= next_poll:
+        for source_id in source_ids:
+            yield _job_event(initial[source_id])
+        while (remaining := deadline - time.monotonic()) > 0:
+            if await request.is_disconnected():
+                return
+            try:
+                event = await asyncio.wait_for(
+                    subscription.queue.get(), timeout=min(heartbeat_seconds, remaining)
+                )
+            except TimeoutError:
+                if time.monotonic() < deadline:
+                    yield ": heartbeat\n\n"
+                continue
+            if event is None or await request.is_disconnected():
+                return
             try:
                 latest = await asyncio.wait_for(
-                    _read_jobs(workspace_id, owner_id, source_ids),
-                    timeout=min(5.0, deadline - current),
+                    _read_jobs(workspace_id, owner_id, [event.source_id]), timeout=5.0
                 )
             except (TimeoutError, DBAPIError):
-                # End the stream so the authenticated client can reconnect.
+                # The client reconnects for a fresh, authenticated snapshot.
                 return
-            if now() >= deadline:
+            payload = latest.get(event.source_id)
+            if payload is None:
                 return
-            for source_id in source_ids:
-                payload = latest.get(source_id)
-                if payload is not None and payload != seen.get(source_id):
-                    seen[source_id] = payload
-                    yield _job_event(payload)
-            next_poll = current + poll_seconds
-        if current >= next_heartbeat:
-            yield ": heartbeat\n\n"
-            next_heartbeat = current + heartbeat_seconds
+            if payload != seen.get(event.source_id):
+                seen[event.source_id] = payload
+                yield _job_event(payload)
+    finally:
+        broker.unsubscribe(subscription)
 
 
 @router.get("")
@@ -154,15 +147,25 @@ async def source_events(
     workspace_id: UUID, source_ids: str, request: Request, user: CurrentUser
 ) -> StreamingResponse:
     ids = _parse_source_ids(source_ids)
+    broker: SourceEventBroker | None = getattr(request.app.state, "source_event_broker", None)
+    if broker is None or not broker.healthy:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Source event listener unavailable"
+        )
+    subscription = broker.subscribe(user.id, workspace_id, ids)
     async with session_factory() as session:
-        workspace = await session.get(Workspace, workspace_id)
-        if workspace is None or workspace.owner_id != user.id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-        initial = await _load_jobs(session, workspace_id, user.id, ids)
-        if len(initial) != len(ids):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
+        try:
+            workspace = await session.get(Workspace, workspace_id)
+            if workspace is None or workspace.owner_id != user.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+            initial = await _load_jobs(session, workspace_id, user.id, ids)
+            if len(initial) != len(ids):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
+        except BaseException:
+            broker.unsubscribe(subscription)
+            raise
     return StreamingResponse(
-        _stream_events(request, workspace_id, user.id, ids, initial),
+        _stream_events(request, workspace_id, user.id, ids, initial, subscription, broker),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
