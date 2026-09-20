@@ -35,6 +35,16 @@ docker compose --env-file .env.docker run --rm migrate
 
 운영 DB에는 백업과 변경 시간을 확보하세요. `/api/v1/health`는 API 프로세스를 확인하고 `/api/v1/ready`는 pgvector를 포함한 외부 저장소와 선택 graph의 연결 상태를 표시합니다. 컨테이너가 실행 중인 것만으로 Supabase 자격 증명까지 검증되지는 않습니다.
 
+### 소스 상태 SSE (PGMQ)
+
+`source-events`는 PostgreSQL의 `pgmq` 확장과 전용 `LISTEN` 연결을 사용합니다. 먼저 DB에서 `pgmq` 확장 설치 권한과 `pgmq.create` 권한을 확인한 다음 `202609260003` migration을 적용하세요. 이 migration은 `sources`의 삽입 및 작업 상태 변경을 같은 트랜잭션에서 PGMQ `source_events` 큐에 기록하고, 커밋 때 API 프로세스에 `NOTIFY`를 전달합니다. HTTP, worker, MCP에서 발생한 변경 모두 같은 DB 트리거를 거칩니다. 확장을 설치할 수 없으면 migration이 실패합니다. 큐와 트리거 없이 예전 Source 테이블 폴링으로 돌아가지 않습니다.
+
+Migration은 이 큐의 테이블·시퀀스에 대한 `PUBLIC`/브라우저 역할 권한만 회수해 기존의 다른 PGMQ 큐 권한을 유지하고, 고정된 `search_path`의 트리거 함수를 사용합니다. migration 역할과 API DB 역할이 다르면 API 역할에 `pgmq` 스키마 사용 및 `pgmq.q_source_events` 조회·삭제 권한을 별도로 부여해야 합니다. `render.yaml`은 migration을 먼저 적용한 뒤 배포하는 구성에서 SSE를 활성화합니다.
+
+API에 `SOURCE_EVENTS_ENABLED=true`를 설정하세요. 프로세스마다 한 개의 **직접 연결 또는 세션 풀러 연결**을 유지하며, 기본적으로 `DATABASE_URL`을 사용합니다. 일반 DB 연결이 transaction pooler라면 별도의 `SOURCE_EVENTS_LISTENER_DATABASE_URL`을 설정해 같은 DB의 직접/세션 URL로 덮어쓰세요. Supabase에서는 Dashboard의 Connect에서 직접 URL(접속 가능한 환경일 때) 또는 shared **Session pooler** URL을 그대로 복사하세요. `:6543` transaction pooler는 `LISTEN/NOTIFY`를 지원하지 않아 거부됩니다. URL은 서버 비밀 값으로 보관하고 프론트 변수에 넣지 마세요. [Supabase 연결 모드](https://supabase.com/docs/guides/database/connecting-to-postgres)와 [PGMQ SQL API](https://supabase.com/docs/guides/queues/pgmq)를 참고하세요.
+
+각 API 프로세스는 같은 큐의 메시지를 독립적으로 조회해 해당 프로세스의 인증된 SSE 연결에 전달합니다. 메시지를 선점하는 `pgmq.read`는 사용하지 않으므로 프로세스나 클라이언트끼리 이벤트를 빼앗지 않습니다. 연결이 끊기거나 구독 버퍼가 넘치면 스트림을 닫고 브라우저가 다시 연결하며, 재연결 시 소스 테이블에서 현재 상태를 다시 읽습니다. 큐 행은 API가 시작할 때와 이후 최대 한 시간마다 24시간 이전 기록을 정리합니다. 기능이 꺼져 있거나 리스너를 시작할 수 없으면 SSE는 명시적으로 503을 반환합니다. migration 후 API를 활성화하기 전에도 트리거는 이벤트를 기록하므로 활성화를 오래 미룰 경우 큐 크기를 확인하세요.
+
 ## PostgreSQL 실행기만 사용하는 PoC
 
 먼저 migration을 적용하고 API 환경에 `PROCESSING_EXECUTOR=postgres`를 설정합니다. 기존 Supabase PostgreSQL에 작업을 저장하고 API 프로세스가 실행하므로 Redis 주소와 별도 Celery worker는 필요하지 않습니다. 같은 자료를 서로 다른 실행기로 처리하지 않도록 전환 전 기존 작업을 정리하고 worker를 중지합니다. 이미 실패한 자료는 화면에서 재시도합니다.

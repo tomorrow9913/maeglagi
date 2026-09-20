@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     pg_executor_enabled: bool = True
     pg_executor_poll_seconds: float = Field(default=2.0, ge=0.2, le=60)
     pg_executor_lease_seconds: int = Field(default=120, ge=60, le=3600)
+    source_events_enabled: bool = False
+    # Overrides DATABASE_URL when its connection is not direct/session pooled.
+    source_events_listener_database_url: SecretStr = SecretStr("")
 
     @property
     def supabase_enabled(self) -> bool:
