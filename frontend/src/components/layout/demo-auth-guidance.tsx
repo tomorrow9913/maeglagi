@@ -49,16 +49,21 @@ export function DemoAuthGuidance() {
         공개 데모는 읽기 전용입니다. 복사본은 내 워크스페이스에서 편집할 수 있습니다.
       </p>
       <p className="text-sm text-muted-foreground">
-        결정·이벤트 이력과 편집 체험용 회의록 초안을 함께 복사합니다. 복사 후 소스에서
+        결정·이벤트 이력과 편집 체험용 회의록 초안을 함께 복사합니다. 복사한 뒤 소스에서
         ‘편집 체험용 초안’을 열어 발언과 화자를 수정해 보세요.
-        복사와 편집에는 API 키가 필요 없으며, AI 질문·분석에는 본인의 프로바이더 연결이 필요합니다.
+        복사와 편집에는 API key가 필요 없고, AI 질문·분석에는 내 계정의 AI 연결이 필요합니다.
       </p>
       {authState === "loading" ? (
-        <p className="text-sm text-muted-foreground" role="status">로그인 상태를 확인하는 중입니다.</p>
+        <p className="text-sm text-muted-foreground" role="status">로그인 상태를 확인하고 있어요</p>
       ) : authState === "signed-in" ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" disabled={copying} onClick={() => void copyDemo()}>
-            {copying ? "복사하는 중…" : "내 워크스페이스로 복사해서 체험"}
+          <Button
+            type="button"
+            pending={copying}
+            pendingLabel="복사하는 중…"
+            onClick={() => void copyDemo()}
+          >
+            내 워크스페이스로 복사해서 체험
           </Button>
           <Link href="/workspaces" className="text-sm text-muted-foreground underline">내 워크스페이스</Link>
         </div>

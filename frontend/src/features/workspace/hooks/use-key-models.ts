@@ -26,6 +26,8 @@ export function useKeyModels(
   const [isLoading, setIsLoading] = useState(false);
   const [selections, setSelections] = useState<ModelSelections>({});
   const [resolvedIdentity, setResolvedIdentity] = useState<string>();
+  // 실패한 뒤 같은 연결로 다시 받아 올 때 올립니다.
+  const [attempt, setAttempt] = useState(0);
   const identity = JSON.stringify([provider, validatedKey ?? null, baseUrl?.trim() ?? null, credentialId ?? null]);
   const canLoad = validatedKey !== undefined || Boolean(credentialId);
   // 기본 모델은 선택을 미리 고를 때만 읽습니다. 값이 바뀌어도 목록을 다시 받을 이유는 없으므로
@@ -63,7 +65,9 @@ export function useKeyModels(
       });
 
     return () => controller.abort();
-  }, [provider, validatedKey, baseUrl, credentialId, api, canLoad, identity]);
+  }, [provider, validatedKey, baseUrl, credentialId, api, canLoad, identity, attempt]);
+
+  const reload = useCallback(() => setAttempt((value) => value + 1), []);
 
   const select = useCallback((role: ModelRole, option: ModelOption) => {
     setSelections((current) => ({ ...current, [role]: option }));
@@ -76,5 +80,6 @@ export function useKeyModels(
     select,
     isLoading: canLoad && (!isCurrent || isLoading),
     error: isCurrent ? error : undefined,
+    reload,
   };
 }

@@ -16,7 +16,7 @@ import { modelRoleInfo, optionKey } from "../lib/model-roles";
 /**
  * 용도별로 쓸 모델을 고릅니다.
  *
- * 되고 안 되는 것은 provider가 아니라 그 키로 쓸 수 있는 모델에 달려 있어서, 고를 모델이
+ * 되고 안 되는 것은 AI 공급자가 아니라 그 키로 쓸 수 있는 모델에 달려 있어서, 고를 모델이
  * 하나도 없는 용도만 무엇이 안 되는지 알려줍니다.
  */
 export function ModelPicker({
@@ -28,6 +28,7 @@ export function ModelPicker({
   providers,
   credentials,
   showSavedStatus = false,
+  includesOllama = false,
 }: {
   idPrefix: string;
   roles: RoleModels[];
@@ -37,6 +38,8 @@ export function ModelPicker({
   providers?: readonly AiProvider[];
   credentials?: readonly WorkspaceSecrets[];
   showSavedStatus?: boolean;
+  /** 목록에 Ollama 연결이 섞여 있는지. 서버가 말없이 빼는 모델이 있어 이유를 알려줍니다. */
+  includesOllama?: boolean;
 }) {
   const modelLabel = (option: ModelOption) => {
     const providerName = providers?.find((provider) => provider.id === option.provider)?.displayName ?? option.provider;
@@ -63,9 +66,13 @@ export function ModelPicker({
 
         return (
           <div key={entry.role} className="space-y-1.5">
-            <label htmlFor={id} className="text-sm font-medium">
-              {info.label}
-            </label>
+            {options.length === 0 ? (
+              <p className="text-sm font-medium">{info.label}</p>
+            ) : (
+              <label htmlFor={id} className="text-sm font-medium">
+                {info.label}
+              </label>
+            )}
             {showSavedStatus ? (
               <p className="text-xs text-muted-foreground">
                 현재 저장됨: {saved ? modelLabel(saved) : "선택된 모델 없음"}
@@ -76,7 +83,7 @@ export function ModelPicker({
               <p className="flex items-start gap-1.5 text-xs text-warning">
                 <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
                 <span>
-                  {showSavedStatus ? "등록된 연결" : "이 연결"}로 쓸 수 있는 {info.label} 모델이 없어{" "}
+                  {showSavedStatus ? "저장된 AI 연결" : "이 연결"}로 쓸 수 있는 {info.label} 모델이 없어{" "}
                   {info.unavailable}
                 </span>
               </p>
@@ -86,8 +93,8 @@ export function ModelPicker({
                   <p className="flex items-start gap-1.5 text-xs text-warning">
                     <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
                     <span>
-                      {showSavedStatus ? "등록된 provider" : "선택한 provider"}에는 사용 가능한{" "}
-                      {info.label} 모델이 없습니다.
+                      {showSavedStatus ? "저장된 AI 연결" : "이 연결"}에는 지금 쓸 수 있는 {info.label}{" "}
+                      모델이 없습니다.
                     </span>
                   </p>
                 ) : null}
@@ -99,7 +106,7 @@ export function ModelPicker({
                   }}
                 >
                   <SelectTrigger id={id} disabled={disabled || entry.locked} className="w-full">
-                    <SelectValue placeholder="모델을 고르세요" />
+                    <SelectValue placeholder="모델을 골라 주세요" />
                   </SelectTrigger>
                   <SelectContent>
                     {options.map((option) => (
@@ -119,6 +126,11 @@ export function ModelPicker({
             )}
             <p className="text-xs text-muted-foreground">
               {info.description}
+              {includesOllama && entry.role === "embedding" && !entry.locked ? (
+                <span className="block">
+                  검색 임베딩은 1536차원 모델만 쓸 수 있어요. 클라우드(:cloud) 모델은 목록에서 빠집니다.
+                </span>
+              ) : null}
               {info.fixedNote ? (
                 <span className={entry.locked ? "block" : "block text-warning"}>
                   {entry.locked
