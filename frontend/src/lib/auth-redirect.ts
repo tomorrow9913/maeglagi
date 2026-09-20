@@ -24,9 +24,10 @@ export function safeNextPath(value: string | null): string {
   return value;
 }
 
-export function authCallbackUrl(origin: string, next: string): string {
+export function authCallbackUrl(origin: string, next: string, intent?: "link"): string {
   const callback = new URL("/auth/callback", origin);
   if (next !== DEFAULT_NEXT) callback.searchParams.set("next", next);
+  if (intent) callback.searchParams.set("intent", intent);
   return callback.toString();
 }
 
@@ -37,6 +38,17 @@ export function kakaoOAuthOptions(origin: string, next: string) {
     options: {
       queryParams: { scope: "profile_nickname profile_image" },
       redirectTo: authCallbackUrl(origin, next),
+    },
+  };
+}
+
+/** Link Kakao to the currently signed-in Supabase user instead of creating another user. */
+export function kakaoIdentityLinkOptions(origin: string) {
+  return {
+    provider: "kakao" as const,
+    options: {
+      queryParams: { scope: "profile_nickname profile_image" },
+      redirectTo: authCallbackUrl(origin, "/account/security", "link"),
     },
   };
 }
