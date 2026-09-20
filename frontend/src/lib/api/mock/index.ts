@@ -304,6 +304,9 @@ export const mockApi: MaeglagiApi = {
     await delay(MOCK_LATENCY_MS, signal);
     const label = input.label.trim();
     if (!label) throw new ApiError(422, "토큰 이름을 입력해 주세요.");
+    if (!Number.isInteger(input.expiresInDays) || input.expiresInDays < 1 || input.expiresInDays > 365) {
+      throw new ApiError(422, "토큰 유효 기간은 1~365일로 설정해 주세요.");
+    }
     const token = `mcp_mock_${crypto.randomUUID().replaceAll("-", "")}`;
     const now = new Date();
     const item = {
@@ -312,7 +315,7 @@ export const mockApi: MaeglagiApi = {
       tokenHint: token.slice(-6),
       createdAt: now.toISOString(),
       lastUsedAt: null,
-      expiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: new Date(now.getTime() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
     };
     state.mcpTokens.unshift(item);
     return { item: { ...item }, token };

@@ -38,7 +38,7 @@ import type {
  */
 export interface MaeglagiApi {
   listMcpTokens(signal?: AbortSignal): Promise<McpTokenList>;
-  createMcpToken(input: { label: string }, signal?: AbortSignal): Promise<CreatedMcpToken>;
+  createMcpToken(input: { label: string; expiresInDays: number }, signal?: AbortSignal): Promise<CreatedMcpToken>;
   revokeMcpToken(tokenId: string, signal?: AbortSignal): Promise<void>;
   listWorkspaces(signal?: AbortSignal): Promise<Workspace[]>;
   getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<Workspace>;
