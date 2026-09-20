@@ -13,6 +13,7 @@ from app.modules.context_engine.application.model_catalog import has_indexed_chu
 from app.modules.ingestion.application.pipeline import IngestionPipeline
 from app.modules.retrieval.application.hybrid import HybridRetriever
 from app.modules.retrieval.application.lexical import (
+    MAX_CANDIDATES,
     MAX_RESULTS,
     MAX_TEXT,
     _bm25,
@@ -163,10 +164,12 @@ async def test_null_embedding_chunk_is_returned_from_bounded_eligible_query() ->
     assert "sources.owner_id" in sql and "chunks.owner_id" in sql
     assert "sources.workspace_id" in sql and "chunks.workspace_id" in sql
     assert "WITH chunk_corpus AS" in sql
+    assert sql.index("chunks.owner_id") < sql.index("LIMIT")
     assert "ln(" in sql and "replace(" in sql and "avg(" in sql
     assert "SELECT count(*)" in sql
     assert 1 in compiled.params.values()  # substring starts at first character
     assert MAX_TEXT in compiled.params.values() and MAX_RESULTS in compiled.params.values()
+    assert MAX_CANDIDATES in compiled.params.values()
 
 
 async def test_postgres_null_vectors_and_confirmed_source_text() -> None:
@@ -362,6 +365,7 @@ async def test_processed_source_text_has_source_only_citation_and_scoped_excerpt
     assert "sources.status" in sql and "sources.review_state" in sql
     assert "sources.processing_stage" in sql and "sources.kind" in sql
     assert "WITH source_corpus AS" in sql and "ln(" in sql
+    assert MAX_CANDIDATES in statement.compile(dialect=postgresql.dialect()).params.values()
 
 
 async def test_no_terms_or_no_allowed_sources_do_not_query() -> None:

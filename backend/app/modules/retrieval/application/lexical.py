@@ -15,6 +15,8 @@ from app.modules.workspaces.infrastructure.models import Source
 MAX_TOKENS = 8
 MAX_TEXT = 1200
 MAX_RESULTS = 8
+# Keep BM25 statistics bounded even when a workspace has many matching passages.
+MAX_CANDIDATES = 2000
 STOP_WORDS = {"최근", "어떤", "무엇", "뭐가", "왜", "어떻게", "있나요", "알려줘", "해줘"}
 
 
@@ -52,7 +54,7 @@ def query_terms(question: str) -> list[str]:
 
 
 def _bm25(corpus: object, terms: list[str]) -> tuple[object, object, object]:
-    """Rank character n-gram matches with corpus-wide BM25 (k1=1.2, b=0.75)."""
+    """Rank the bounded candidate corpus with BM25 (k1=1.2, b=0.75)."""
     text = corpus.c.text
     document_length = cast(corpus.c.doc_len, Float)
     predicates = [text.contains(term, autoescape=True) for term in terms]
@@ -84,6 +86,11 @@ def _bm25(corpus: object, terms: list[str]) -> tuple[object, object, object]:
         )
         scores.append(inverse_frequency * normalized_frequency)
     return or_(*predicates), sum(scores, 0), statistics
+
+
+def _candidate_predicate(content: object, terms: list[str]) -> object:
+    """Use the same literal matching rule before the expensive scoring pass."""
+    return or_(*(func.lower(content).contains(term, autoescape=True) for term in terms))
 
 
 async def search_lexically(
@@ -125,7 +132,10 @@ async def search_lexically(
             *eligible_chunks,
             Chunk.workspace_id == workspace_id,
             Chunk.owner_id == owner_id,
+            _candidate_predicate(Chunk.content, terms),
         )
+        .order_by(Chunk.created_at.desc(), Chunk.id)
+        .limit(MAX_CANDIDATES)
         .cte("chunk_corpus")
     )
     predicate, rank, statistics = _bm25(chunk_corpus, terms)
@@ -193,7 +203,10 @@ async def search_lexically(
             Source.status != SourceStatus.AWAITING_REVIEW,
             content.is_not(None),
             func.length(func.trim(content)) > 0,
+            _candidate_predicate(content, terms),
         )
+        .order_by(Source.created_at.desc(), Source.id)
+        .limit(MAX_CANDIDATES)
         .cte("source_corpus")
     )
     predicate, rank, statistics = _bm25(source_corpus, terms)
