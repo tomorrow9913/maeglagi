@@ -4,6 +4,9 @@ import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
+// 공용 문구 모듈은 실제 구현을 그대로 씁니다.
+import * as copy from "../src/features/source-ingestion/lib/copy.ts";
+
 function load(path, modules, globals = {}) {
   const exports = {};
   const code = ts.transpileModule(fs.readFileSync(new URL(path, import.meta.url), "utf8"), {
@@ -13,7 +16,7 @@ function load(path, modules, globals = {}) {
   return exports;
 }
 
-const validation = { ACCEPTED_DOCUMENT_EXTENSIONS: [".pdf", ".docx", ".txt", ".md"] };
+const validation = { ACCEPTED_DOCUMENT_EXTENSIONS: [".pdf", ".docx", ".txt", ".md"], MAX_DOCUMENT_BYTES: 20 * 1024 * 1024 };
 const classifier = load("../src/features/source-ingestion/lib/classify-source-file.ts", { "./validate-file": validation });
 
 function file(name, type = "", size = 5) {
@@ -42,7 +45,7 @@ test("supported audio, empty MIME, and document classification match the backend
   assert.equal(classifier.classifySourceFile(file("recording.webm", "audio/mp4")).kind, "audio");
 });
 
-function componentHarness(onDocuments, onAudio) {
+function componentHarness(onDocuments, onAudio, projects = [{ id: "project-1", name: "Project" }]) {
   let cursor = 0;
   let first = true;
   const slots = [];
@@ -67,9 +70,9 @@ function componentHarness(onDocuments, onAudio) {
     "react/jsx-runtime": { jsx: element, jsxs: element },
     "next/link": { default: "Link" },
     sonner: { toast: { error: (message) => errors.push(message) } },
-    "@/components/ui/button": { Button: "Button" },
-    "@/lib/api/context": { useApi: () => ({ listProjects: async () => [{ id: "project-1", name: "Project" }] }), useWorkspacePath: () => () => "/directory" },
+    "@/lib/api/context": { useApi: () => ({ listProjects: async () => projects }), useWorkspacePath: () => () => "/directory" },
     "../lib/classify-source-file": classifier,
+    "../lib/copy": copy,
     "../lib/validate-file": validation,
     "./upload-dropzone": { UploadDropzone: "UploadDropzone" },
   });
@@ -116,22 +119,37 @@ test("mixed selection sends audio once to recording upload with projects and doc
   assert.equal(recordings.length, 1);
 });
 
-test("failed audio stays selectable for a single retry", async () => {
+// 실패한 녹음 파일의 사유와 "다시 시도"는 업로드 큐 항목 한 곳에만 보입니다(tests/recording.test.mjs).
+// 이 컴포넌트는 같은 실패를 따로 알리지 않고, 같은 파일을 다시 고를 수 있게만 둡니다.
+test("failed audio shows no duplicate inline alert and the same file can be chosen again", async () => {
   let calls = 0;
   const harness = componentHarness(async () => {}, async () => { calls++; if (calls === 1) throw new Error("offline"); });
   let tree = harness.render();
   const choose = allNodes(tree).find((node) => node.type === "UploadDropzone").props.onFilesSelected;
-  choose([file("failed.wav", "audio/wav")]);
+  const audio = file("failed.wav", "audio/wav");
+  choose([audio]);
+  choose([audio]);
   await new Promise(setImmediate);
+  assert.equal(calls, 1, "a duplicate selection while the upload is pending is ignored");
   tree = harness.render();
-  const retry = allNodes(tree).find((node) => node.type === "Button" && node.props.children === "업로드 다시 시도");
-  assert.ok(retry);
-  retry.props.onClick();
-  retry.props.onClick();
+  assert.equal(allNodes(tree).some((node) => node.props?.role === "alert"), false);
+  choose([audio]);
   await new Promise(setImmediate);
-  assert.equal(calls, 2);
-  tree = harness.render();
-  assert.equal(allNodes(tree).some((node) => node.type === "Button" && node.props.children === "업로드 다시 시도"), false);
+  assert.equal(calls, 2, "a failed file is not remembered as submitted");
+  choose([audio]);
+  await new Promise(setImmediate);
+  assert.equal(calls, 2, "an uploaded file is not sent twice");
+});
+
+test("dropzone hint states both size limits and an empty project list explains itself", async () => {
+  const harness = componentHarness(async () => {}, async () => {}, []);
+  harness.render();
+  await Promise.resolve();
+  const nodes = allNodes(harness.render());
+  const hint = nodes.find((node) => node.type === "UploadDropzone").props.hint;
+  assert.match(hint, /최대 20MB/);
+  assert.match(hint, /최대 50MB/);
+  assert.ok(nodes.some((node) => node.props?.children === copy.NO_PROJECTS_HINT));
 });
 
 test("meeting panel remains mounted when collapsed and review opens only on request", () => {
@@ -146,15 +164,17 @@ test("meeting panel remains mounted when collapsed and review opens only on requ
     useCallback(fn) { return fn; },
   };
   const element = (type, props) => ({ type, props });
+  let uploadItems = [];
   const exports = load("../src/features/source-ingestion/components/source-upload-dialog.tsx", {
     react,
     "react/jsx-runtime": { jsx: element, jsxs: element },
     sonner: { toast: { info(_message, options) { reviewAction = options?.action; }, error() {}, success() {} } },
     "lucide-react": { Mic: "Mic", Minus: "Minus" },
+    "../lib/copy": copy,
     "@/components/ui/button": { Button: "Button" },
     "@/components/ui/dialog": { Dialog: "Dialog", DialogContent: "DialogContent", DialogHeader: "DialogHeader", DialogTitle: "DialogTitle", DialogDescription: "DialogDescription" },
-    "../hooks/use-source-upload": { useSourceUpload: () => ({ items: [], uploadDocuments() {}, uploadRecording() {}, uploadTranscript() {}, dismiss() {} }) },
-    "../hooks/use-job-events": { useJobEvents: (_workspaceId, _jobs, callback) => { settled = callback; return {}; } },
+    "../hooks/use-source-upload": { useSourceUpload: () => ({ items: uploadItems, uploadDocuments() {}, uploadRecording() {}, uploadTranscript() {}, dismiss() {} }) },
+    "../hooks/use-job-events": { useJobEvents: (_workspaceId, _jobs, callback) => { settled = callback; return { jobs: {}, connection: "connected" }; } },
     "./meeting-capture": { MeetingCapture: "MeetingCapture" },
     "./meeting-review-dialog": { MeetingReviewDialog: "MeetingReviewDialog" },
     "./source-file-upload": { SourceFileUpload: "SourceFileUpload" },
@@ -173,4 +193,18 @@ test("meeting panel remains mounted when collapsed and review opens only on requ
   reviewAction.onClick();
   const review = allNodes(render()).find((node) => node.type === "MeetingReviewDialog");
   assert.equal(review.props.sourceId, "source-1");
+
+  // 전송 중에도 창을 닫을 수 있고, 업로드가 계속된다는 안내가 보입니다.
+  mode = "document";
+  uploadItems = [{ id: "upload-1", fileName: "notes.pdf", status: "uploading", progress: 0.3 }];
+  tree = render();
+  const dialog = allNodes(tree).find((node) => node.type === "Dialog");
+  const content = allNodes(tree).find((node) => node.type === "DialogContent");
+  assert.equal(content.props.showCloseButton, undefined);
+  assert.equal(content.props.onEscapeKeyDown, undefined);
+  assert.equal(content.props.onInteractOutside, undefined);
+  assert.ok(allNodes(tree).some((node) => node.props?.children === copy.UPLOAD_CONTINUES_IN_BACKGROUND));
+  assert.ok(allNodes(tree).some((node) => node.type === "Button" && node.props.children === "Ask로 돌아가기"));
+  dialog.props.onOpenChange(false);
+  assert.equal(mode, null);
 });

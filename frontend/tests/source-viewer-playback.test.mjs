@@ -77,8 +77,10 @@ function viewerHarness(api, { demo = true, content = { kind: "meeting", title: "
       if (name === "@/lib/utils") return { cn: (...parts) => parts.filter(Boolean).join(" ") };
       if (name === "sonner") return { toast: { error() {}, success() {} } };
       if (name === "@/lib/api/error-message") return errorMessage;
-      if (name === "lucide-react") return { FileText: "FileText", Loader2: "Loader2", Mic: "Mic" };
+      if (name === "lucide-react") return { FileText: "FileText", Mic: "Mic" };
       if (name === "@/components/ui/button") return { Button: "Button" };
+      if (name === "@/components/ui/spinner") return { Spinner: "Spinner" };
+      if (name === "@/components/common/state-views") return { ErrorState: "ErrorState" };
       if (name === "@/components/ui/sheet") return { Sheet: "Sheet", SheetContent: "SheetContent", SheetDescription: "SheetDescription", SheetHeader: "SheetHeader", SheetTitle: "SheetTitle" };
       throw new Error(name);
     },
@@ -158,7 +160,7 @@ test("saved review text remains visible without chunks and timestamps can seek r
   const saved = view.find((node) => node.type === "section" && node.props["aria-label"] === "저장된 원문");
   assert.ok(saved);
   assert.match(JSON.stringify(saved), /수정한 원문/);
-  assert.equal(view.find((node) => node.type === "section" && node.props["aria-label"] === "인덱싱된 근거"), undefined);
+  assert.equal(view.find((node) => node.type === "section" && node.props["aria-label"] === "인용된 구간"), undefined);
   view.find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("0:09")).props.onClick();
   await new Promise(setImmediate);
   view.render();
@@ -175,7 +177,7 @@ test("indexed evidence is still reachable by its real chunk ID", () => {
   } });
   view.render("s1", "real-chunk");
   assert.ok(view.find((node) => node.type === "section" && node.props["aria-label"] === "저장된 원문"));
-  assert.ok(view.find((node) => node.type === "section" && node.props["aria-label"] === "인덱싱된 근거"));
+  assert.ok(view.find((node) => node.type === "section" && node.props["aria-label"] === "인용된 구간"));
   assert.ok(view.find((node) => node.type === "li" && JSON.stringify(node.props.children).includes("Indexed excerpt")));
 });
 
@@ -262,4 +264,33 @@ test("late source-list response cannot restore associations from a previous sour
   pending[0]([source("s1", [{ personId: "person-1", role: "participant" }])]);
   await flush(); view.render("s2");
   assert.equal(selected().props.checked, false);
+});
+
+test("a failed association load shows the reason with a retry instead of rendering nothing", async () => {
+  let calls = 0;
+  const api = sourceApi([source("s1")], async () => { throw new Error("unexpected save"); });
+  api.listSources = async () => { calls += 1; if (calls === 1) throw new Error("boom"); return [source("s1")]; };
+  const view = viewerHarness(api, { demo: false });
+  const alert = () => view.find((node) => node.type === "div" && node.props.role === "alert");
+  const saveButton = () => view.find((node) => node.type === "Button" && node.props.children === "연결 저장");
+  view.render();
+  assert.ok(view.find((node) => node.type === "p" && node.props.role === "status"), "loading placeholder before the first response");
+  await flush(); view.render();
+  assert.match(JSON.stringify(alert()), /프로젝트·사람 연결을 불러오지 못했습니다/);
+  assert.equal(saveButton(), undefined);
+  view.find((node) => node.type === "Button" && node.props.children === "다시 시도").props.onClick();
+  view.render(); await flush(); view.render();
+  assert.equal(alert(), undefined);
+  assert.ok(saveButton());
+});
+
+test("a missing evidence chunk is announced and timestamps describe the playback action", () => {
+  const api = { listSources: async () => [], listPeople: async () => [], listProjects: async () => [] };
+  const view = viewerHarness(api, { content: {
+    kind: "meeting", title: "Meeting", hasRecording: true, originalText: "민규: 원문",
+    utterances: [{ id: "turn-1", speakerName: "민규", text: "원문", startSeconds: 83 }], chunks: [{ id: "other", text: "Other" }],
+  } });
+  view.render("s1", "missing-chunk");
+  assert.ok(view.find((node) => node.type === "p" && JSON.stringify(node.props.children).includes("인용된 구간을 찾지 못해 원문 전체를 보여줍니다.")));
+  assert.equal(view.find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("1:23")).props["aria-label"], "1:23부터 녹음 듣기");
 });

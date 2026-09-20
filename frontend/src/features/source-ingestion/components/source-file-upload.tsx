@@ -3,13 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { WorkspaceProject } from "@/lib/api";
-import { ACCEPTED_AUDIO_EXTENSIONS, classifySourceFile } from "../lib/classify-source-file";
-import { ACCEPTED_DOCUMENT_EXTENSIONS } from "../lib/validate-file";
+import { ACCEPTED_AUDIO_EXTENSIONS, MAX_AUDIO_BYTES, classifySourceFile } from "../lib/classify-source-file";
+import { NO_PROJECTS_HINT } from "../lib/copy";
+import { ACCEPTED_DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES } from "../lib/validate-file";
 import { UploadDropzone } from "./upload-dropzone";
 
+const megabytes = (bytes: number) => `${Math.round(bytes / (1024 * 1024))}MB`;
+// 파일 이름에는 "/"가 들어갈 수 없어 구분자로 씁니다.
+const fileKey = (file: File) => `${file.name}/${file.size}/${file.lastModified}`;
+
+/**
+ * 문서와 녹음 파일을 한 드롭존으로 받습니다.
+ *
+ * 전송 상태, 실패 사유, 다시 시도는 모두 업로드 큐(`UploadQueue`)에 한 줄로 보이므로
+ * 이 컴포넌트는 같은 실패를 따로 다시 알리지 않습니다.
+ */
 export function SourceFileUpload({ workspaceId, onDocuments, onAudio }: {
   workspaceId: string;
   onDocuments: (files: File[]) => Promise<void>;
@@ -17,9 +27,8 @@ export function SourceFileUpload({ workspaceId, onDocuments, onAudio }: {
 }) {
   const api = useApi();
   const workspacePath = useWorkspacePath();
-  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [projects, setProjects] = useState<WorkspaceProject[]>();
   const [projectIds, setProjectIds] = useState<string[]>([]);
-  const [failed, setFailed] = useState<Map<string, File>>(new Map());
   const [busy, setBusy] = useState(false);
   const submitted = useRef(new Set<string>());
   const pending = useRef(new Set<string>());
@@ -32,16 +41,16 @@ export function SourceFileUpload({ workspaceId, onDocuments, onAudio }: {
   }, [api, workspaceId]);
 
   const uploadAudio = useCallback(async (file: File, ids: string[]) => {
-    const key = `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
+    const key = fileKey(file);
+    // 같은 파일을 연달아 고르거나 끌어다 놓아도 한 번만 올립니다.
     if (submitted.current.has(key) || pending.current.has(key)) return;
     pending.current.add(key);
     setBusy(true);
     try {
       await onAudio(file, 0, undefined, ids[0], ids);
       submitted.current.add(key);
-      setFailed((current) => { const next = new Map(current); next.delete(key); return next; });
     } catch {
-      setFailed((current) => new Map(current).set(key, file));
+      // 실패·취소는 업로드 큐 항목에 남고 거기서 다시 시도합니다. 같은 파일을 다시 골라도 됩니다.
     } finally {
       pending.current.delete(key);
       setBusy(pending.current.size > 0);
@@ -54,7 +63,7 @@ export function SourceFileUpload({ workspaceId, onDocuments, onAudio }: {
     for (const file of files) {
       const result = classifySourceFile(file);
       if (result.kind === "document") {
-        const key = `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
+        const key = fileKey(file);
         if (!pendingDocuments.current.has(key)) {
           pendingDocuments.current.add(key);
           documentKeys.push(key);
@@ -69,17 +78,39 @@ export function SourceFileUpload({ workspaceId, onDocuments, onAudio }: {
     });
   }, [onDocuments, projectIds, uploadAudio]);
 
-  return <div className="space-y-3">
-    <div className="space-y-2 rounded-lg border p-3">
-      <div className="flex items-center justify-between"><p className="text-sm font-medium">녹음 파일 프로젝트</p><Link href={workspacePath(workspaceId, "directory")} className="text-xs underline">프로젝트·참여자 관리</Link></div>
-      <div className="flex flex-wrap gap-3">{projects.filter((project) => !project.archivedAt || projectIds.includes(project.id)).map((project) => <label key={project.id} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={projectIds.includes(project.id)} disabled={busy || Boolean(project.archivedAt)} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}</label>)}</div>
-      <p className="text-xs text-muted-foreground">선택한 프로젝트는 녹음 파일에 적용됩니다. 대본 검토에서 변경할 수 있습니다. 음성 인식 후 대본을 확인해야 분석이 시작됩니다.</p>
+  const visibleProjects = projects?.filter((project) => !project.archivedAt || projectIds.includes(project.id)) ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded-lg border p-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">녹음 파일 프로젝트</p>
+          <Link href={workspacePath(workspaceId, "directory")} className="text-xs underline">프로젝트·참여자 관리</Link>
+        </div>
+        {projects && visibleProjects.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{NO_PROJECTS_HINT}</p>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {visibleProjects.map((project) => (
+              <label key={project.id} className="flex items-center gap-1 text-sm">
+                <input
+                  type="checkbox"
+                  checked={projectIds.includes(project.id)}
+                  disabled={busy || Boolean(project.archivedAt)}
+                  onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))}
+                />
+                {project.name}
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">선택한 프로젝트는 녹음 파일에 적용되고, 대본 검토에서 바꿀 수 있습니다. 받아쓰기가 끝난 뒤 대본을 확인하면 분석을 시작합니다.</p>
+      </div>
+      <UploadDropzone
+        accept={[...ACCEPTED_DOCUMENT_EXTENSIONS, ...ACCEPTED_AUDIO_EXTENSIONS].join(",")}
+        hint={`문서 PDF, DOCX, TXT, MD · 최대 ${megabytes(MAX_DOCUMENT_BYTES)} / 녹음 WebM, MP4, M4A, WAV, MP3, OGG, FLAC · 최대 ${megabytes(MAX_AUDIO_BYTES)}`}
+        onFilesSelected={selectFiles}
+      />
     </div>
-    <UploadDropzone
-      accept={[...ACCEPTED_DOCUMENT_EXTENSIONS, ...ACCEPTED_AUDIO_EXTENSIONS].join(",")}
-      hint="문서 PDF, DOCX, TXT, MD · 녹음 WebM, MP4, M4A, WAV, MP3, OGG, FLAC"
-      onFilesSelected={selectFiles}
-    />
-    {[...failed].map(([key, file]) => <div key={key} role="alert" className="space-x-2 text-sm text-destructive"><span>{file.name}: 업로드에 실패했습니다. 파일은 이 화면에 남아 있습니다.</span><Button size="sm" variant="outline" disabled={pending.current.has(key)} onClick={() => void uploadAudio(file, [...projectIds])}>업로드 다시 시도</Button><Button size="sm" variant="ghost" disabled={pending.current.has(key)} onClick={() => setFailed((current) => { const next = new Map(current); next.delete(key); return next; })}>파일 선택 취소</Button></div>)}
-  </div>;
+  );
 }

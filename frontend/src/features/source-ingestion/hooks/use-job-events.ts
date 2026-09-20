@@ -7,7 +7,7 @@ import { useWorkspaceSourceEvents } from "./use-workspace-source-events";
 const isTerminal = (job: ProcessingJob) => job.status === "succeeded" || job.status === "failed" || job.status === "awaiting_review" || job.status === "awaiting_agent";
 export type LiveJob = ProcessingJob & { eventError?: string };
 
-/** Tracks uploaded jobs through the shared source stream and keeps their last state across reconnects. */
+/** Tracks uploaded jobs through the shared source stream and keeps their last state across reconnects. Also reports the stream connection state. */
 export function useJobEvents(workspaceId: string, initialJobs: ProcessingJob[], onSettled?: (job: ProcessingJob) => void, restartKey = 0) {
   const [state, setState] = useState<{ workspaceId: string; restartKey: number; jobs: Record<string, LiveJob> }>({ workspaceId, restartKey, jobs: {} });
   const [invalidState, setInvalid] = useState<{ workspaceId: string; ids: Set<string> }>({ workspaceId, ids: new Set() });
@@ -32,7 +32,7 @@ export function useJobEvents(workspaceId: string, initialJobs: ProcessingJob[], 
   useEffect(() => { for (const job of initialJobs) notify(job); }, [initialKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sourceIds = initialJobs.filter((job) => !invalidIds.has(job.sourceId) && (restartKey > 0 && !jobs[job.id] || !isTerminal(jobs[job.id] ?? job))).map((job) => job.sourceId);
-  useWorkspaceSourceEvents(workspaceId, sourceIds, (job) => {
+  const connection = useWorkspaceSourceEvents(workspaceId, sourceIds, (job) => {
     setState((current) => {
       const previous = current.workspaceId === workspaceId && current.restartKey === restartKey ? current.jobs[job.id] : undefined;
       if (previous && JSON.stringify(previous) === JSON.stringify(job)) return current;
@@ -49,11 +49,11 @@ export function useJobEvents(workspaceId: string, initialJobs: ProcessingJob[], 
       const jobs = current.workspaceId === workspaceId && current.restartKey === restartKey ? { ...current.jobs } : {};
       for (const initial of initialJobs) if (initial.sourceId === sourceId) jobs[initial.id] = {
         ...(jobs[initial.id] ?? initial),
-        eventError: "처리 상태를 확인할 수 없습니다. 소스 목록을 새로고침해 주세요.",
+        eventError: "처리 상태를 확인하지 못했습니다. 소스 목록에서 확인해 주세요.",
       };
       return { workspaceId, restartKey, jobs };
     });
   });
 
-  return jobs;
+  return { jobs, connection };
 }

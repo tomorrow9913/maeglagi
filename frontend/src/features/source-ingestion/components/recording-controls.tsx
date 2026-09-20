@@ -15,6 +15,8 @@ export type RecordingControlsProps = {
   onStart: () => void;
   onStop: () => void;
   disableStart?: boolean;
+  /** 끝난 녹음을 올리는 중인지. 상태 문구를 "녹음 준비됨" 대신 업로드 중으로 보여줍니다. */
+  isUploading?: boolean;
 };
 
 function formatElapsed(totalSeconds: number): string {
@@ -30,7 +32,7 @@ const statusLabel: Record<RecorderStatus, string> = {
   stopping: "녹음 마무리 중",
   denied: "마이크 권한 필요",
   unsupported: "녹음을 지원하지 않는 브라우저",
-  error: "마이크를 열지 못함",
+  error: "녹음 실패",
 };
 
 /**
@@ -45,6 +47,7 @@ export function RecordingControls({
   onStart,
   onStop,
   disableStart = false,
+  isUploading = false,
 }: RecordingControlsProps) {
   const isRecording = status === "recording";
   const isBusy = status === "requesting" || status === "stopping";
@@ -63,7 +66,7 @@ export function RecordingControls({
           )}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{statusLabel[status]}</p>
+          <p className="text-sm font-medium">{status === "idle" && isUploading ? "녹음을 올리는 중" : statusLabel[status]}</p>
           <p
             className="font-mono text-xs text-muted-foreground tabular-nums"
             aria-live={isRecording ? "off" : "polite"}

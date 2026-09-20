@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Loader2, Mic } from "lucide-react";
+import { FileText, Mic } from "lucide-react";
 import { toast } from "sonner";
 
+import { ErrorState } from "@/components/common/state-views";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -12,6 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
 import { useAsync } from "@/hooks/use-async";
 import { useApi, useDemoMode } from "@/lib/api/context";
 import type { Source, SourceAssociation, WorkspacePerson, WorkspaceProject } from "@/lib/api";
@@ -101,6 +103,10 @@ export function SourceViewer({
   const [associationBusy, setAssociationBusy] = useState(false);
   const [associationError, setAssociationError] = useState<string>();
   const associationGenerationRef = useRef(0);
+  // 어느 소스의 연결 정보를 불러오는 중인지 함께 들고 있어, 소스를 바꾼 첫 렌더에 이전 상태가 비치지 않게 합니다.
+  const [associationLoad, setAssociationLoad] = useState<{ sourceId: string; phase: "loading" | "ready" | "error"; message?: string }>();
+  const [associationReloadKey, setAssociationReloadKey] = useState(0);
+  const [associationRefreshing, setAssociationRefreshing] = useState(false);
 
   useEffect(() => {
     associationGenerationRef.current += 1;
@@ -111,6 +117,8 @@ export function SourceViewer({
     setPersonRoles({});
     setAssociationBusy(false);
     setAssociationError(undefined);
+    setAssociationRefreshing(false);
+    setAssociationLoad(sourceId ? { sourceId, phase: "loading" } : undefined);
     if (!sourceId) return;
     let active = true;
     Promise.all([api.listSources(workspaceId), api.listPeople(workspaceId), api.listProjects(workspaceId)])
@@ -123,10 +131,13 @@ export function SourceViewer({
         setProjectIds(nextSource?.projectIds ?? (nextSource?.projectId ? [nextSource.projectId] : []));
         setPersonRoles(rolesByPerson(nextSource?.associations ?? []));
         setAssociationError(undefined);
+        setAssociationLoad({ sourceId, phase: "ready" });
       })
-      .catch((cause) => { if (active) setAssociationError(toUserMessage(cause, "연결 정보를 불러오지 못했습니다.")); });
+      .catch((cause) => {
+        if (active) setAssociationLoad({ sourceId, phase: "error", message: toUserMessage(cause, "프로젝트·사람 연결을 불러오지 못했습니다.") });
+      });
     return () => { active = false; };
-  }, [api, sourceId, workspaceId]);
+  }, [api, sourceId, workspaceId, associationReloadKey]);
 
   const saveAssociations = async () => {
     const currentSource = source;
@@ -146,6 +157,27 @@ export function SourceViewer({
     } catch (cause) {
       if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(toUserMessage(cause, "연결을 저장하지 못했습니다."));
     } finally { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationBusy(false); }
+  };
+
+  /** 저장이 거절됐을 때(다른 곳에서 먼저 바뀐 경우 등) 서버의 최신 연결 정보로 되돌립니다. */
+  const refreshAssociations = async () => {
+    if (!sourceId || associationRefreshing) return;
+    const generation = associationGenerationRef.current;
+    const isCurrent = () => generation === associationGenerationRef.current && sourceIdRef.current === sourceId;
+    setAssociationRefreshing(true);
+    try {
+      const sources = await api.listSources(workspaceId);
+      if (!isCurrent()) return;
+      const latest = sources.find((item) => item.id === sourceId);
+      setSource(latest);
+      setProjectIds(latest?.projectIds ?? (latest?.projectId ? [latest.projectId] : []));
+      setPersonRoles(rolesByPerson(latest?.associations ?? []));
+      setAssociationError(undefined);
+    } catch (cause) {
+      if (isCurrent()) setAssociationError(toUserMessage(cause, "최신 연결 정보를 불러오지 못했습니다."));
+    } finally {
+      if (isCurrent()) setAssociationRefreshing(false);
+    }
   };
 
   const { data, error, isLoading, reload } = useAsync(
@@ -168,6 +200,7 @@ export function SourceViewer({
   const originalText = data?.originalText?.trim() ?? "";
   const hasPersistedText = utterances.length > 0 || Boolean(originalText);
   const hasHighlightedChunk = Boolean(highlightChunkId && data?.chunks.some((chunk) => chunk.id === highlightChunkId));
+  const associationPhase = sourceId && associationLoad?.sourceId === sourceId ? associationLoad.phase : "loading";
   sourceIdRef.current = sourceId;
   useEffect(() => {
     requestGenerationRef.current += 1;
@@ -276,14 +309,35 @@ export function SourceViewer({
         </SheetHeader>
 
         <div className="overflow-y-auto px-4 pb-6">
-          {sourceId && source?.id === sourceId && <section className="mb-4 space-y-2 rounded-lg border p-3 text-sm">
+          {sourceId && associationPhase === "loading" && (
+            <p role="status" className="mb-4 flex items-center gap-2 rounded-lg border p-3 text-xs text-muted-foreground">
+              <Spinner className="size-3.5" />
+              프로젝트·사람 연결을 불러오는 중…
+            </p>
+          )}
+          {sourceId && associationPhase === "error" && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border p-3 text-xs text-destructive">
+              <span>{associationLoad?.message}</span>
+              <Button size="sm" variant="outline" onClick={() => setAssociationReloadKey((value) => value + 1)}>
+                다시 시도
+              </Button>
+            </div>
+          )}
+          {sourceId && associationPhase === "ready" && source?.id === sourceId && <section className="mb-4 space-y-2 rounded-lg border p-3 text-sm">
             <h3 className="font-medium">프로젝트·사람 연결</h3>
             <div className="flex flex-wrap gap-2">{projects.filter((project) => !project.archivedAt || projectIds.includes(project.id)).map((project) => <label key={project.id} className="flex items-center gap-1"><input type="checkbox" disabled={isDemo || associationBusy || (Boolean(project.archivedAt) && !projectIds.includes(project.id))} checked={projectIds.includes(project.id)} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}{project.archivedAt ? " (보관됨)" : ""}</label>)}</div>
             <div className="space-y-1">{people.filter((person) => !person.archivedAt || personRoles[person.id]?.length).map((person) => <div key={person.id} className="flex flex-wrap items-center gap-2"><span>{person.name}{person.archivedAt ? " (보관됨)" : ""}</span>{(["participant", "author"] as const).map((role) => <label key={role} className="flex items-center gap-1"><input type="checkbox" aria-label={`${person.name} ${role === "participant" ? "참여자" : "작성자"}`} disabled={isDemo || associationBusy || (Boolean(person.archivedAt) && !personRoles[person.id]?.includes(role))} checked={personRoles[person.id]?.includes(role) ?? false} onChange={(event) => setPersonRoles((current) => { const selected = current[person.id] ?? []; const next = event.target.checked ? [...selected, role] : selected.filter((item) => item !== role); if (!next.length) { const remaining = { ...current }; delete remaining[person.id]; return remaining; } return { ...current, [person.id]: next }; })} />{role === "participant" ? "참여자" : "작성자"}</label>)}</div>)}</div>
-            {associationError && <div role="alert" className="flex items-center gap-2 text-xs text-destructive"><span>{associationError}</span><Button size="sm" variant="ghost" onClick={() => { const generation = associationGenerationRef.current; void api.listSources(workspaceId).then((sources) => { if (generation !== associationGenerationRef.current || sourceIdRef.current !== sourceId) return; const latest = sources.find((item) => item.id === sourceId); setSource(latest); setProjectIds(latest?.projectIds ?? (latest?.projectId ? [latest.projectId] : [])); setPersonRoles(rolesByPerson(latest?.associations ?? [])); setAssociationError(undefined); }).catch((cause) => { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(toUserMessage(cause, "다시 불러오지 못했습니다.")); }); }}>최신 정보 불러오기</Button></div>}
-            {!isDemo && <Button size="sm" variant="outline" disabled={associationBusy || source?.id !== sourceId} onClick={() => void saveAssociations()}>{associationBusy ? "저장 중…" : "연결 저장"}</Button>}
+            {associationError && (
+              <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-destructive">
+                <span>{associationError}</span>
+                <Button size="sm" variant="ghost" pending={associationRefreshing} pendingLabel="불러오는 중…" disabled={associationBusy} onClick={() => void refreshAssociations()}>
+                  최신 정보 불러오기
+                </Button>
+              </div>
+            )}
+            {!isDemo && <Button size="sm" variant="outline" pending={associationBusy} pendingLabel="저장하는 중…" disabled={source?.id !== sourceId} onClick={() => void saveAssociations()}>연결 저장</Button>}
           </section>}
-          {data?.kind === "meeting" && <div className="mb-3 flex flex-wrap items-center gap-2">{data.hasRecording && <Button size="sm" variant="outline" disabled={audioBusy} onClick={() => void loadAudio()}>{audioBusy ? "녹음 여는 중…" : audioError ? "녹음 다시 시도" : "녹음 듣기"}</Button>}<Button size="sm" variant="outline" disabled={exportBusy} onClick={() => void exportMarkdown()}>{exportBusy ? "내려받는 중…" : "Markdown 내보내기"}</Button>{playback && <audio ref={audioRef} controls preload="metadata" src={playback.url} className="w-full" onTimeUpdate={(event) => { retrySeekRef.current = event.currentTarget.currentTime; }} onError={(event) => {
+          {data?.kind === "meeting" && <div className="mb-3 flex flex-wrap items-center gap-2">{data.hasRecording && <Button size="sm" variant="outline" pending={audioBusy} pendingLabel="녹음 여는 중…" onClick={() => void loadAudio()}>{audioError ? "녹음 다시 시도" : "녹음 듣기"}</Button>}<Button size="sm" variant="outline" pending={exportBusy} pendingLabel="내려받는 중…" onClick={() => void exportMarkdown()}>Markdown 내보내기</Button>{playback && <audio ref={audioRef} controls preload="metadata" src={playback.url} className="w-full" onTimeUpdate={(event) => { retrySeekRef.current = event.currentTarget.currentTime; }} onError={(event) => {
             if (event.currentTarget.currentSrc && event.currentTarget.currentSrc !== playbackRef.current?.url) return;
             retrySeekRef.current = event.currentTarget.currentTime || retrySeekRef.current;
             requestGenerationRef.current += 1;
@@ -295,30 +349,30 @@ export function SourceViewer({
             setAudioError(true);
           }} />}</div>}
           {isLoading ? (
-            <p className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden />
+            <p role="status" className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
+              <Spinner />
               원문을 불러오는 중…
             </p>
           ) : error ? (
-            <div className="py-10 text-center">
-              <p className="text-sm">{error.message}</p>
-              <Button variant="outline" size="sm" className="mt-4" onClick={reload}>
-                다시 시도
-              </Button>
-            </div>
+            <ErrorState compact error={error} onRetry={reload} title="원문을 불러오지 못했습니다" className="my-6" />
           ) : !data || (!hasPersistedText && data.chunks.length === 0) ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
               {source?.status === "awaiting_agent" ? "에이전트가 원문·대본 또는 분석 결과를 등록하기를 기다리고 있습니다." : "표시할 원문이 없습니다."}
             </p>
           ) : (
             <div className="space-y-5">
+              {highlightChunkId && !hasHighlightedChunk && (
+                <p role="status" className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+                  인용된 구간을 찾지 못해 원문 전체를 보여줍니다.
+                </p>
+              )}
               {hasPersistedText && <section aria-label="저장된 원문" className="space-y-2">
                 {hasHighlightedChunk && <h3 className="text-sm font-medium">저장된 원문</h3>}
                 {utterances.length > 0 ? (
                   <ol className="space-y-1">
                     {utterances.map((utterance) => (
                       <li key={utterance.id} className="px-1 py-1 text-sm leading-relaxed">
-                        {utterance.startSeconds != null && <button type="button" disabled={!data.hasRecording || audioBusy} onClick={() => void loadAudio(utterance.startSeconds ?? undefined)} className="mb-1 block font-mono text-xs text-muted-foreground hover:underline disabled:cursor-default disabled:no-underline">
+                        {utterance.startSeconds != null && <button type="button" aria-label={data.hasRecording ? `${formatTimestamp(utterance.startSeconds)}부터 녹음 듣기` : undefined} disabled={!data.hasRecording || audioBusy} onClick={() => void loadAudio(utterance.startSeconds ?? undefined)} className="mb-1 block font-mono text-xs text-muted-foreground hover:underline disabled:cursor-default disabled:no-underline">
                           {formatTimestamp(utterance.startSeconds)}
                           {utterance.endSeconds != null ? ` – ${formatTimestamp(utterance.endSeconds)}` : ""}
                         </button>}
@@ -331,8 +385,8 @@ export function SourceViewer({
                   </ol>
                 ) : <p className={cn("whitespace-pre-wrap text-sm leading-relaxed", data.kind === "meeting" ? "px-1 py-1" : "rounded-lg bg-muted/40 p-3")}>{originalText}</p>}
               </section>}
-              {(!hasPersistedText || hasHighlightedChunk) && data.chunks.length > 0 && <section aria-label="인덱싱된 근거" className="space-y-2">
-                {hasPersistedText && <h3 className="text-sm font-medium">인덱싱된 근거</h3>}
+              {(!hasPersistedText || hasHighlightedChunk) && data.chunks.length > 0 && <section aria-label="인용된 구간" className="space-y-2">
+                {hasPersistedText && <h3 className="text-sm font-medium">인용된 구간</h3>}
             <ol className={data.kind === "meeting" ? "space-y-1" : "space-y-3"}>
               {data.chunks.map((chunk) => {
                 const isHighlighted = chunk.id === highlightChunkId;
@@ -351,7 +405,7 @@ export function SourceViewer({
                     )}
                   >
                     {chunk.startSeconds != null ? (
-                      <button type="button" disabled={!data.hasRecording || audioBusy} onClick={() => chunk.startSeconds != null && void loadAudio(chunk.startSeconds)} className="mb-1 block font-mono text-xs text-muted-foreground hover:underline disabled:cursor-default disabled:no-underline">
+                      <button type="button" aria-label={data.hasRecording ? `${formatTimestamp(chunk.startSeconds)}부터 녹음 듣기` : undefined} disabled={!data.hasRecording || audioBusy} onClick={() => chunk.startSeconds != null && void loadAudio(chunk.startSeconds)} className="mb-1 block font-mono text-xs text-muted-foreground hover:underline disabled:cursor-default disabled:no-underline">
                         {formatTimestamp(chunk.startSeconds)}
                         {chunk.endSeconds != null ? ` – ${formatTimestamp(chunk.endSeconds)}` : ""}
                       </button>

@@ -7,7 +7,7 @@ export function sourcePresentation(status: ProcessingStatus, kind: SourceKind) {
   return {
     label: {
       queued: "대기 중",
-      enqueue_pending: "분석 연결 중",
+      enqueue_pending: "분석 준비 중",
       processing: "처리 중",
       awaiting_review: "대본 검토 필요",
       awaiting_agent: "에이전트 작업 대기",
@@ -33,12 +33,12 @@ export function sourcePresentation(status: ProcessingStatus, kind: SourceKind) {
 export function reviewConfirmationCopy(analysisMode?: "server" | "agent") {
   return analysisMode === "agent"
     ? {
-        description: "프로젝트와 화자·내용을 저장한 뒤 확인하세요. 이후 연결한 에이전트가 분석 결과를 저장합니다.",
+        description: "프로젝트와 화자·내용을 저장한 뒤 확인해 주세요. 이후 연결한 에이전트가 분석 결과를 저장합니다.",
         button: "확인하고 에이전트 대기",
         success: "회의 대본을 확인했습니다. 에이전트 분석을 기다립니다.",
       }
     : {
-        description: "프로젝트와 화자·내용을 저장한 뒤 확인하면 분석과 색인을 시작합니다.",
+        description: "프로젝트와 화자·내용을 저장한 뒤 확인하면 분석을 시작합니다.",
         button: "확인하고 분석 시작",
         success: "회의 대본을 확인했습니다. 분석을 시작합니다.",
       };

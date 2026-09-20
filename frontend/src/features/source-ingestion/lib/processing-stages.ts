@@ -2,9 +2,9 @@ import type { ProcessingStage, SourceKind } from "@/lib/api";
 
 export const stageLabel: Record<ProcessingStage, string> = {
   uploaded: "업로드",
-  transcribing: "음성 인식",
+  transcribing: "받아쓰기",
   awaiting_review: "대본 검토",
-  confirmed: "분석 연결",
+  confirmed: "분석 준비",
   awaiting_agent: "에이전트 작업 대기",
   analyzing: "분석",
   graphing: "그래프 반영",
