@@ -33,6 +33,8 @@ SYSTEM_PROMPT = (
     "4. [현재 상황]과 [관계]는 방향을 잡는 참고일 뿐입니다. 사실 주장은 반드시 [근거]로 "
     "뒷받침합니다.\n"
     "5. 한국어로, 짧고 분명하게 답합니다."
+    "\n6. [이전 대화]는 대명사와 질문 의도를 이해하는 참고일 뿐 사실의 근거가 아닙니다. "
+    "현재 [근거]로 확인되지 않은 과거 답변의 내용은 사실로 반복하지 않습니다."
 )
 
 
@@ -66,14 +68,22 @@ def _facts_section(retrieval: RetrievalResult) -> str:
 
 
 def build_messages(
-    question: str, retrieval: RetrievalResult, store: ContextStoreState | None
+    question: str,
+    retrieval: RetrievalResult,
+    store: ContextStoreState | None,
+    history: list[tuple[str, str]] | None = None,
 ) -> list[ChatMessage]:
     evidence = "\n\n".join(
         f"[{item.source.index}] ({'회의' if item.source.kind == 'meeting' else '문서'}: "
         f"{item.source.title}{_format_time(item.source.timestamp)})\n{item.text}"
         for item in retrieval.evidence
     )
+    previous = "\n".join(
+        f"질문: {past_question}\n답변: {past_answer}"
+        for past_question, past_answer in (history or [])[-6:]
+    )
     user = (
+        f"[이전 대화]\n{previous or '(없음)'}\n\n"
         f"[현재 상황]\n{_store_section(store)}\n\n"
         f"[관계]\n{_facts_section(retrieval)}\n\n"
         f"[근거]\n{evidence}\n\n"
@@ -151,6 +161,7 @@ async def answer_events(
     api_key: str,
     model: str,
     question: str,
+    history: list[tuple[str, str]] | None = None,
     retrieval: RetrievalResult,
     store: ContextStoreState | None,
 ) -> AsyncIterator[dict[str, Any]]:
@@ -165,7 +176,7 @@ async def answer_events(
     yield sources_event([item.source for item in retrieval.evidence])
 
     request = ChatRequest(
-        messages=build_messages(question, retrieval, store),
+        messages=build_messages(question, retrieval, store, history),
         model=model,
         temperature=0.2,
     )

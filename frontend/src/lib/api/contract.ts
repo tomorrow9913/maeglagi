@@ -182,5 +182,10 @@ export interface MaeglagiApi {
    *
    * 호출부는 `for await`로 소비하고, 중단은 `signal`로 합니다.
    */
-  ask(workspaceId: string, question: string, signal?: AbortSignal): AsyncIterable<AnswerEvent>;
+  ask(
+    workspaceId: string,
+    question: string,
+    signal?: AbortSignal,
+    history?: { question: string; answer: string }[],
+  ): AsyncIterable<AnswerEvent>;
 }

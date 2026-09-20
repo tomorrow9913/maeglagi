@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Check, Copy, RotateCcw, Upload } from "lucide-react";
+import { AlertCircle, Check, Copy, GitBranch, RotateCcw, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export function AskTurn({
   onUpload,
   settingsHref,
   retryDisabled = false,
+  onContinueFrom,
 }: {
   turn: Turn;
   onOpenSource: (source: AnswerSource) => void;
@@ -33,6 +34,7 @@ export function AskTurn({
   settingsHref?: string;
   /** 다른 질문이 진행 중이면 다시 시도를 잠급니다. */
   retryDisabled?: boolean;
+  onContinueFrom?: (turnId: string) => void;
 }) {
   const isStreaming = turn.status === "streaming";
   const isWaiting = isStreaming && turn.answer.length === 0;
@@ -168,6 +170,18 @@ export function AskTurn({
             >
               {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
               답변 복사
+            </Button>
+          ) : null}
+          {turn.status === "done" && onContinueFrom ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={retryDisabled}
+              className="text-muted-foreground"
+              onClick={() => onContinueFrom(turn.id)}
+            >
+              <GitBranch aria-hidden /> 이 시점부터 이어가기
             </Button>
           ) : null}
         </div>

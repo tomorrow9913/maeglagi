@@ -223,10 +223,10 @@ export const httpApi: MaeglagiApi = {
     );
   },
 
-  ask(workspaceId, question, signal) {
+  ask(workspaceId, question, signal, history = []) {
     return apiStream(`/workspaces/${workspaceId}/ask`, {
       method: "POST",
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, history }),
       signal,
     }) as AsyncIterable<AnswerEvent>;
   },
