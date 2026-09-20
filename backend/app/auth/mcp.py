@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import Column, DateTime, String, func, text, update
+from sqlalchemy import Column, DateTime, String, func, or_, text, update
 from sqlmodel import Field, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -33,7 +33,9 @@ class McpToken(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
-    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    expires_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
     last_used_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     revoked_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
 
@@ -42,7 +44,9 @@ def token_digest(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def validate_lifetime(days: int) -> None:
+def validate_lifetime(days: int | None) -> None:
+    if days is None:
+        return
     if (
         isinstance(days, bool)
         or not isinstance(days, int)
@@ -55,7 +59,7 @@ async def issue_token(
     session: AsyncSession,
     owner_id: UUID,
     label: str,
-    expires_in_days: int = DEFAULT_TOKEN_LIFETIME_DAYS,
+    expires_in_days: int | None = DEFAULT_TOKEN_LIFETIME_DAYS,
 ) -> tuple[McpToken, str]:
     """Return a secret once; only its SHA-256 digest is persisted."""
     label = label.strip()
@@ -73,7 +77,7 @@ async def issue_token(
             .where(
                 McpToken.owner_id == owner_id,
                 McpToken.revoked_at.is_(None),
-                McpToken.expires_at > func.now(),
+                or_(McpToken.expires_at.is_(None), McpToken.expires_at > func.now()),
             )
         )
     ).one()
@@ -85,7 +89,11 @@ async def issue_token(
         label=label,
         token_hash=token_digest(secret),
         token_hint=secret[-6:],
-        expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
+        expires_at=(
+            datetime.now(UTC) + timedelta(days=expires_in_days)
+            if expires_in_days is not None
+            else None
+        ),
     )
     session.add(item)
     await session.commit()
@@ -94,23 +102,23 @@ async def issue_token(
 
 
 async def extend_token(
-    session: AsyncSession, owner_id: UUID, token_id: UUID, expires_in_days: int
+    session: AsyncSession, owner_id: UUID, token_id: UUID, expires_in_days: int | None
 ) -> McpToken:
     """Extend a live token to at least N days from now; never revive or shorten it."""
     validate_lifetime(expires_in_days)
-    new_expiry = datetime.now(UTC) + timedelta(days=expires_in_days)
-    result = await session.execute(
-        update(McpToken)
-        .where(
-            McpToken.id == token_id,
-            McpToken.owner_id == owner_id,
-            McpToken.revoked_at.is_(None),
-            McpToken.expires_at > func.now(),
-            McpToken.expires_at < new_expiry,
-        )
-        .values(expires_at=new_expiry)
-        .returning(McpToken.id)
+    new_expiry = (
+        datetime.now(UTC) + timedelta(days=expires_in_days) if expires_in_days is not None else None
     )
+    statement = update(McpToken).where(
+        McpToken.id == token_id,
+        McpToken.owner_id == owner_id,
+        McpToken.revoked_at.is_(None),
+        McpToken.expires_at.is_not(None),
+        McpToken.expires_at > func.now(),
+    )
+    if new_expiry is not None:
+        statement = statement.where(McpToken.expires_at < new_expiry)
+    result = await session.execute(statement.values(expires_at=new_expiry).returning(McpToken.id))
     if result.scalar_one_or_none() is None:
         existing = (
             await session.exec(
@@ -118,7 +126,7 @@ async def extend_token(
                     McpToken.id == token_id,
                     McpToken.owner_id == owner_id,
                     McpToken.revoked_at.is_(None),
-                    McpToken.expires_at > func.now(),
+                    or_(McpToken.expires_at.is_(None), McpToken.expires_at > func.now()),
                 )
             )
         ).first()
@@ -144,7 +152,7 @@ async def authenticate_mcp_token(token: str, settings: Settings) -> AuthUser:
             .where(
                 McpToken.token_hash == token_digest(token),
                 McpToken.revoked_at.is_(None),
-                McpToken.expires_at > func.now(),
+                or_(McpToken.expires_at.is_(None), McpToken.expires_at > func.now()),
             )
             .values(last_used_at=func.now())
             .returning(McpToken.owner_id)

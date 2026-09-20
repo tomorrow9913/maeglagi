@@ -31,7 +31,7 @@ class TokenInfo(BaseModel):
     token_hint: str = Field(serialization_alias="tokenHint")
     created_at: datetime = Field(serialization_alias="createdAt")
     last_used_at: datetime | None = Field(serialization_alias="lastUsedAt")
-    expires_at: datetime = Field(serialization_alias="expiresAt")
+    expires_at: datetime | None = Field(serialization_alias="expiresAt")
 
 
 class TokenList(BaseModel):
@@ -41,7 +41,7 @@ class TokenList(BaseModel):
 class TokenCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     label: str = Field(min_length=1, max_length=80)
-    expires_in_days: int = Field(
+    expires_in_days: int | None = Field(
         default=DEFAULT_TOKEN_LIFETIME_DAYS,
         ge=1,
         le=MAX_TOKEN_LIFETIME_DAYS,
@@ -57,7 +57,7 @@ class IssuedToken(BaseModel):
 
 class TokenExtension(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    expires_in_days: int = Field(
+    expires_in_days: int | None = Field(
         ge=1, le=MAX_TOKEN_LIFETIME_DAYS, strict=True, validation_alias="expiresInDays"
     )
 
