@@ -422,7 +422,7 @@ async def test_no_evidence_ends_in_an_error_without_calling_the_model() -> None:
 
     events = await collect(adapter, found())
 
-    assert events == [{"type": "error", "message": NO_EVIDENCE}]
+    assert events == [{"type": "error", "message": NO_EVIDENCE, "code": "no_evidence"}]
     assert adapter.requests == []
 
 
@@ -639,7 +639,7 @@ def test_no_matching_chunks_is_an_error_event_and_the_model_is_not_called(
 
     events = read_events(ask(client))
 
-    assert events == [{"type": "error", "message": NO_EVIDENCE}]
+    assert events == [{"type": "error", "message": NO_EVIDENCE, "code": "no_evidence"}]
     assert FakeIngestion.adapter.requests == []
 
 

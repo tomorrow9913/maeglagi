@@ -34,5 +34,9 @@ def done_event() -> dict[str, Any]:
     return {"type": "done"}
 
 
-def error_event(message: str) -> dict[str, Any]:
-    return {"type": "error", "message": message}
+def error_event(message: str, code: str | None = None) -> dict[str, Any]:
+    """`code` marks an outcome the client should not treat as a failure (e.g. `no_evidence`)."""
+    event: dict[str, Any] = {"type": "error", "message": message}
+    if code is not None:
+        event["code"] = code
+    return event
