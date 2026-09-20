@@ -3,9 +3,19 @@ import fs from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import { webcrypto } from "node:crypto";
 
 import * as errorMessage from "../src/lib/api/error-message.ts";
 import * as askTurns from "../src/features/ask/lib/ask-turns.ts";
+
+const conversationExports = {};
+vm.runInNewContext(
+  ts.transpileModule(
+    fs.readFileSync(new URL("../src/features/ask/lib/ask-conversations.ts", import.meta.url), "utf8"),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+  ).outputText,
+  { exports: conversationExports, require: () => askTurns, Date, JSON },
+);
 
 class ApiError extends Error {
   constructor(status, message, kind) {
@@ -58,6 +68,7 @@ function mountUseAsk(api, { storage = new Map(), workspaceId = "ws-1" } = {}) {
     "@/lib/api/context": { useApi: () => api },
     "@/lib/api/error-message": errorMessage,
     "../lib/ask-turns": askTurns,
+    "../lib/ask-conversations": conversationExports,
   };
   const exports = {};
   const code = ts.transpileModule(
@@ -71,6 +82,9 @@ function mountUseAsk(api, { storage = new Map(), workspaceId = "ws-1" } = {}) {
       return modules[name];
     },
     window: { sessionStorage },
+    sessionStorage,
+    localStorage: sessionStorage,
+    crypto: webcrypto,
     AbortController,
     DOMException,
     Date,
@@ -98,8 +112,8 @@ function scriptedApi(scripts) {
   const calls = [];
   return {
     calls,
-    async *ask(workspaceId, question, signal) {
-      calls.push({ workspaceId, question });
+    async *ask(workspaceId, question, signal, history) {
+      calls.push({ workspaceId, question, history });
       const script = scripts.shift();
       for (const step of script) {
         if (step instanceof Error) throw step;
@@ -202,7 +216,7 @@ test("finished turns survive a remount, and clear can be undone", async () => {
 
   const removed = second.render().clear();
   assert.equal(second.render().turns.length, 0);
-  assert.equal(second.storage.size, 0);
+  assert.equal(second.storage.size, 1);
 
   second.render().restore(removed);
   assert.deepEqual(plain(second.render().turns), plain(removed));
@@ -211,4 +225,30 @@ test("finished turns survive a remount, and clear can be undone", async () => {
   // 다른 워크스페이스에는 보이지 않습니다.
   const other = mountUseAsk(scriptedApi([]), { storage: first.storage, workspaceId: "ws-2" });
   assert.equal(other.render().turns.length, 0);
+});
+
+test("recent conversations reopen, and branching continues from the chosen answer", async () => {
+  const api = scriptedApi([
+    [{ type: "token", text: "첫 답" }, { type: "done" }],
+    [{ type: "token", text: "둘째 답" }, { type: "done" }],
+    [{ type: "token", text: "분기 답" }, { type: "done" }],
+  ]);
+  const hook = mountUseAsk(api);
+  await hook.render().ask("첫 질문");
+  await hook.render().ask("둘째 질문");
+  const original = hook.render();
+  assert.deepEqual(plain(api.calls[1].history), [{ question: "첫 질문", answer: "첫 답" }]);
+
+  original.branchFrom(original.turns[0].id);
+  assert.equal(hook.render().conversations.length, 2);
+  assert.equal(hook.render().turns.length, 1);
+  await hook.render().ask("분기 질문");
+  assert.deepEqual(plain(api.calls[2].history), [{ question: "첫 질문", answer: "첫 답" }]);
+  hook.render().selectConversation(original.activeId);
+  assert.deepEqual(plain(hook.render().turns.map((turn) => turn.question)), ["첫 질문", "둘째 질문"]);
+
+  hook.render();
+  const restored = mountUseAsk(scriptedApi([]), { storage: hook.storage }).render();
+  assert.equal(restored.conversations.length, 2);
+  assert.equal(restored.activeId, original.activeId);
 });

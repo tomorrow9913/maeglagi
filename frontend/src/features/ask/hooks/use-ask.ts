@@ -5,108 +5,120 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { useApi } from "@/lib/api/context";
 import { toUserMessage } from "@/lib/api/error-message";
-
+import {
+  conversationsStorageKey,
+  historyBefore,
+  newConversation,
+  parseConversations,
+  recentConversations,
+  serializeConversations,
+  withTurns,
+  type AskConversation,
+} from "../lib/ask-conversations";
 import {
   ASK_FAILED_MESSAGE,
   failTurn,
   newTurn,
   parseTurns,
   reduceTurn,
-  serializeTurns,
   settleTurn,
   turnsStorageKey,
   type AskTurn,
 } from "../lib/ask-turns";
 
 export type { AskTurn };
+type State = { workspaceId?: string; activeId: string; conversations: AskConversation[] };
+const EMPTY: AskTurn[] = [];
 
-/** 저장소를 못 쓰는 환경(사파리 개인정보 보호 모드 등)에서도 화면은 그대로 동작해야 합니다. */
-function readStoredTurns(workspaceId: string): AskTurn[] {
+function identifier(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function readStored(workspaceId: string): State {
   try {
-    return parseTurns(window.sessionStorage.getItem(turnsStorageKey(workspaceId)));
+    const stored = parseConversations(localStorage.getItem(conversationsStorageKey(workspaceId)));
+    if (stored) return { workspaceId, ...stored };
+    const legacy = parseTurns(sessionStorage.getItem(turnsStorageKey(workspaceId)));
+    const first = withTurns(newConversation(identifier("conversation")), legacy);
+    sessionStorage.removeItem(turnsStorageKey(workspaceId));
+    return { workspaceId, activeId: first.id, conversations: [first] };
   } catch {
-    return [];
+    const first = newConversation(identifier("conversation"));
+    return { workspaceId, activeId: first.id, conversations: [first] };
   }
 }
 
-function writeStoredTurns(workspaceId: string, turns: AskTurn[]) {
-  try {
-    const key = turnsStorageKey(workspaceId);
-    if (turns.some((turn) => turn.status !== "streaming")) {
-      window.sessionStorage.setItem(key, serializeTurns(turns));
-    } else {
-      window.sessionStorage.removeItem(key);
-    }
-  } catch {
-    // 저장에 실패해도 대화 자체에는 영향이 없습니다.
-  }
-}
-
-/**
- * Ask 대화를 관리합니다.
- *
- * 한 번에 한 질문만 처리합니다. 끝난 질문은 워크스페이스별로 sessionStorage에 남겨
- * 다른 화면에 다녀와도 이어서 볼 수 있게 합니다. 진행 중이던 질문은 되살리지 않습니다.
- */
 export function useAsk(workspaceId: string) {
   const api = useApi();
-  // 어느 워크스페이스의 대화인지 함께 기억해, 복원 전이나 전환 직후에 엉뚱한 내용을 저장하지 않습니다.
-  const [state, setState] = useState<{ workspaceId?: string; turns: AskTurn[] }>({ turns: [] });
+  const [state, setState] = useState<State>({ activeId: "", conversations: [] });
   const [isStreaming, setIsStreaming] = useState(false);
-
   const controllerRef = useRef<AbortController>(null);
   const inFlightRef = useRef(false);
-  const sequence = useRef(0);
 
   const isRestored = state.workspaceId === workspaceId;
-  const turns = isRestored ? state.turns : EMPTY;
+  const conversations = isRestored ? state.conversations : [];
+  const activeId = isRestored ? state.activeId : "";
+  const turns = conversations.find((item) => item.id === activeId)?.turns ?? EMPTY;
 
   useEffect(() => {
-    setState({ workspaceId, turns: readStoredTurns(workspaceId) });
+    setState(readStored(workspaceId));
     setIsStreaming(false);
     inFlightRef.current = false;
     return () => controllerRef.current?.abort();
   }, [workspaceId]);
 
   useEffect(() => {
-    if (state.workspaceId === workspaceId) writeStoredTurns(workspaceId, state.turns);
-  }, [state, workspaceId]);
+    if (!isRestored || isStreaming) return;
+    try {
+      localStorage.setItem(
+        conversationsStorageKey(workspaceId),
+        serializeConversations(state.conversations, state.activeId),
+      );
+    } catch {
+      // Storage may be unavailable; the current conversation still works.
+    }
+  }, [state, workspaceId, isRestored, isStreaming]);
 
-  const setTurns = useCallback((update: (current: AskTurn[]) => AskTurn[]) => {
-    setState((current) => ({ ...current, turns: update(current.turns) }));
-  }, []);
+  const setTurns = useCallback(
+    (update: (current: AskTurn[]) => AskTurn[]) => {
+      setState((current) => {
+        if (current.workspaceId !== workspaceId) return current;
+        return {
+          ...current,
+          conversations: current.conversations.map((conversation) =>
+            conversation.id === current.activeId
+              ? withTurns(conversation, update(conversation.turns))
+              : conversation,
+          ),
+        };
+      });
+    },
+    [workspaceId],
+  );
 
   const run = useCallback(
     async (question: string, replaceId?: string) => {
       const trimmed = question.trim();
-      if (!trimmed || inFlightRef.current) return;
+      if (!trimmed || inFlightRef.current || !isRestored) return;
       inFlightRef.current = true;
-
-      // 복원된 질문과 겹치지 않도록 시각을 섞어 id를 만듭니다.
-      const id = `turn-${Date.now().toString(36)}-${++sequence.current}`;
+      const history = historyBefore(turns.filter((item) => item.id !== replaceId));
+      const id = identifier("turn");
       let turn = newTurn(id, trimmed);
       const commit = (next: AskTurn) => {
         turn = next;
         setTurns((current) => current.map((item) => (item.id === id ? next : item)));
       };
 
-      // 다시 시도는 실패한 질문을 지우고 같은 질문을 맨 아래에서 새로 시작합니다.
       setTurns((current) => [...current.filter((item) => item.id !== replaceId), turn]);
       setIsStreaming(true);
-
       const controller = new AbortController();
       controllerRef.current = controller;
 
       try {
-        for await (const event of api.ask(workspaceId, trimmed, controller.signal)) {
+        for await (const event of api.ask(workspaceId, trimmed, controller.signal, history)) {
           commit(reduceTurn(turn, event));
           if (turn.status !== "streaming") break;
         }
-        /*
-         * 스트림이 `done`/`error` 없이 끝나는 경우가 둘 있습니다. 중단을 누르면 reader가
-         * 취소되면서 예외 없이 끝나고, 프록시 타임아웃처럼 연결이 끊겨도 그냥 끝납니다.
-         * 어느 쪽이든 "streaming"으로 남겨 두면 대기 표시가 영원히 돕니다.
-         */
         commit(settleTurn(turn, controller.signal.aborted ? "aborted" : "disconnected"));
       } catch (error) {
         const aborted =
@@ -115,7 +127,6 @@ export function useAsk(workspaceId: string) {
         if (aborted) {
           commit(settleTurn(turn, "aborted"));
         } else {
-          // 422는 답변 모델이나 AI 연결이 없을 때 옵니다. 설정으로 가는 길을 함께 보여줍니다.
           const needsModel =
             error instanceof ApiError && error.kind === "invalid" && error.status === 422;
           commit(
@@ -132,31 +143,61 @@ export function useAsk(workspaceId: string) {
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     },
-    [workspaceId, setTurns, api],
+    [workspaceId, setTurns, api, turns, isRestored],
   );
 
   const ask = useCallback((question: string) => run(question), [run]);
-
-  /** 실패한 질문을 같은 문장으로 다시 묻습니다. 질문이 두 번 쌓이지 않게 실패한 쪽은 지웁니다. */
   const retry = useCallback(
     (turnId: string) => {
-      const target = state.turns.find((turn) => turn.id === turnId);
+      const target = turns.find((turn) => turn.id === turnId);
       if (target) void run(target.question, turnId);
     },
-    [run, state.turns],
+    [run, turns],
   );
-
   const stop = useCallback(() => controllerRef.current?.abort(), []);
 
-  /** 대화를 비우고, 되돌릴 수 있게 지운 내용을 돌려줍니다. 진행 중이던 질문은 멈춘 상태로 담깁니다. */
+  const createConversation = useCallback(() => {
+    if (inFlightRef.current) return;
+    const conversation = newConversation(identifier("conversation"));
+    setState((current) => ({
+      ...current,
+      activeId: conversation.id,
+      conversations: recentConversations([conversation, ...current.conversations]),
+    }));
+  }, []);
+
+  const selectConversation = useCallback((id: string) => {
+    if (inFlightRef.current) return;
+    setState((current) =>
+      current.conversations.some((item) => item.id === id) ? { ...current, activeId: id } : current,
+    );
+  }, []);
+
+  const branchFrom = useCallback(
+    (turnId: string) => {
+      if (inFlightRef.current) return;
+      const index = turns.findIndex((turn) => turn.id === turnId);
+      if (index < 0) return;
+      const conversation = withTurns(
+        newConversation(identifier("conversation")),
+        turns.slice(0, index + 1).filter((turn) => turn.status !== "streaming"),
+      );
+      setState((current) => ({
+        ...current,
+        activeId: conversation.id,
+        conversations: recentConversations([conversation, ...current.conversations]),
+      }));
+    },
+    [turns],
+  );
+
   const clear = useCallback((): AskTurn[] => {
     controllerRef.current?.abort();
-    const removed = state.turns.map((turn) => settleTurn(turn, "aborted"));
+    const removed = turns.map((turn) => settleTurn(turn, "aborted"));
     setTurns(() => []);
     return removed;
-  }, [setTurns, state.turns]);
+  }, [setTurns, turns]);
 
-  /** `clear`가 돌려준 내용을 되살립니다. 그 사이 새로 물은 질문은 뒤에 그대로 둡니다. */
   const restore = useCallback(
     (removed: AskTurn[]) => {
       setTurns((current) => {
@@ -167,7 +208,19 @@ export function useAsk(workspaceId: string) {
     [setTurns],
   );
 
-  return { turns, isStreaming, isRestored, ask, retry, stop, clear, restore };
+  return {
+    turns,
+    conversations,
+    activeId,
+    isStreaming,
+    isRestored,
+    ask,
+    retry,
+    stop,
+    clear,
+    restore,
+    createConversation,
+    selectConversation,
+    branchFrom,
+  };
 }
-
-const EMPTY: AskTurn[] = [];
