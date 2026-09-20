@@ -11,6 +11,7 @@ from pydantic import Field
 from app.core.config import Settings
 from app.mcp.context import current_user
 from app.mcp.errors import workflow_call
+from app.mcp.workflow_hints import next_step
 
 READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 CREATE = ToolAnnotations(destructiveHint=False, idempotentHint=False, openWorldHint=False)
@@ -79,9 +80,9 @@ def register(server: MCPServer, settings: Settings) -> None:
             Field(max_length=50, description="Project IDs to associate within this workspace."),
         ] = None,
     ) -> dict[str, Any]:
-        """Save text or a meeting draft without server AI; optionally associate projects."""
+        """Save text, then follow nextAction through agent analysis before reporting completion."""
         owner_id = current_user(ctx).id
-        return await workflow_call(
+        source = await workflow_call(
             settings,
             lambda svc: svc.create_text_source(
                 owner_id=owner_id,
@@ -92,6 +93,10 @@ def register(server: MCPServer, settings: Settings) -> None:
                 project_ids=project_ids,
             ),
         )
+        return {
+            **source,
+            "nextAction": next_step(workspace_id, UUID(source["id"]), kind=kind, has_media=False),
+        }
 
     @server.tool(annotations=EDIT)
     async def save_document_text(

@@ -19,6 +19,7 @@ import { useApi, useDemoMode } from "@/lib/api/context";
 import type { Source, SourceAssociation, WorkspacePerson, WorkspaceProject } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toUserMessage } from "@/lib/api/error-message";
+import { agentAnalysisRequest } from "../lib/source-presentation";
 
 /**
  * 소스 원문 뷰어입니다.
@@ -291,6 +292,16 @@ export function SourceViewer({
     finally { setExportBusy(false); }
   };
 
+  const copyAgentRequest = async () => {
+    if (!sourceId) return;
+    try {
+      await navigator.clipboard.writeText(agentAnalysisRequest(workspaceId, sourceId));
+      toast.success("에이전트에게 보낼 요청을 복사했습니다.");
+    } catch {
+      toast.error("복사하지 못했습니다. 아래 요청 내용을 직접 선택해 복사해 주세요.");
+    }
+  };
+
   return (
     <Sheet open={Boolean(sourceId)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="w-full gap-0 sm:max-w-xl">
@@ -309,6 +320,14 @@ export function SourceViewer({
         </SheetHeader>
 
         <div className="overflow-y-auto px-4 pb-6">
+          {sourceId && source?.id === sourceId && source.analysisMode === "agent" && source.status === "awaiting_agent" && (
+            <section className="mb-4 space-y-2 rounded-lg border p-3 text-sm">
+              <h3 className="font-medium">에이전트 분석 마무리</h3>
+              <p className="text-xs text-muted-foreground">연결된 MCP 에이전트와의 대화에 아래 요청을 보내세요. 에이전트가 분석을 저장하면 이 소스를 질문 근거로 사용할 수 있습니다.</p>
+              <Button size="sm" variant="outline" onClick={() => void copyAgentRequest()}>에이전트 요청 복사</Button>
+              <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">요청 내용 보기</summary><p className="mt-2 whitespace-pre-wrap break-all select-text">{agentAnalysisRequest(workspaceId, sourceId)}</p></details>
+            </section>
+          )}
           {sourceId && associationPhase === "loading" && (
             <p role="status" className="mb-4 flex items-center gap-2 rounded-lg border p-3 text-xs text-muted-foreground">
               <Spinner className="size-3.5" />

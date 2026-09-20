@@ -62,11 +62,15 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
             source_calls.append(kwargs)
             return {"id": str(uuid4())}
 
+        async def submit_analysis(self, **kwargs):
+            return {"sourceId": str(kwargs["source_id"]), "phase": "done", "warnings": []}
+
     async def call(_settings, operation):
         return await operation(FakeService())
 
     monkeypatch.setattr("app.mcp.tools.workspaces.workflow_call", call)
     monkeypatch.setattr("app.mcp.tools.sources.workflow_call", call)
+    monkeypatch.setattr("app.mcp.tools.analysis.workflow_call", call)
 
     class FakeKnowledge:
         def __init__(self, session, graph_store):
@@ -123,6 +127,15 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
             "create_text_source", {**source_args, "project_ids": [str(project_id)]}
         )
         assert associated.is_error is False
+        assert associated.structured_content["nextAction"] == {
+            "tool": "analysis_context",
+            "arguments": {
+                "workspace_id": str(workspace_id),
+                "source_id": associated.structured_content["id"],
+            },
+            "instruction": associated.structured_content["nextAction"]["instruction"],
+        }
+        assert "submit_analysis" in associated.structured_content["nextAction"]["instruction"]
         assert source_calls[-1] == {
             "owner_id": owner_id,
             "workspace_id": workspace_id,
@@ -134,6 +147,8 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
         unassociated = await client.call_tool("create_text_source", source_args)
         assert unassociated.is_error is False
         assert source_calls[-1]["project_ids"] is None
+        meeting = await client.call_tool("create_text_source", {**source_args, "kind": "meeting"})
+        assert meeting.structured_content["nextAction"]["tool"] == "source_content"
         invalid = await client.call_tool(
             "create_text_source", {**source_args, "project_ids": ["not-a-uuid"]}
         )
@@ -142,7 +157,19 @@ async def test_sdk_initialize_list_call_resource_prompt_and_keyless_creation(mon
             "create_text_source", {**source_args, "project_ids": [str(uuid4())] * 51}
         )
         assert too_many.is_error is True
-        assert len(source_calls) == 2
+        assert len(source_calls) == 3
+        submitted = await client.call_tool(
+            "submit_analysis",
+            {
+                "workspace_id": str(workspace_id),
+                "source_id": associated.structured_content["id"],
+                "expected_revision": 0,
+                "expected_fingerprint": "a" * 64,
+                "result": {},
+            },
+        )
+        assert submitted.structured_content["phase"] == "done"
+        assert "완료" in submitted.structured_content["completionMessage"]
         resources = await client.list_resources()
         assert any(str(item.uri) == "maeglagi://ontology/schema" for item in resources.resources)
         schema = await client.read_resource("maeglagi://ontology/schema")
