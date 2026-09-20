@@ -262,16 +262,29 @@ async def test_retry_returns_own_workspace_without_replacing_edits():
 
 
 @pytest.mark.asyncio
-async def test_missing_graph_or_binary_source_rejects_without_private_workspace():
+async def test_missing_graph_preserves_sql_demo_and_binary_source_is_rejected():
     plan, db, graph = state()
     owner = uuid4()
-    with pytest.raises(demo_clone.CloneUnavailable, match="graph database"):
-        await demo_clone.clone_demo(db, None, plan.workspace, owner)
-    assert await db.get(Workspace, demo_clone.target_id(owner, PUBLIC_ID)) is None
+    cloned, count = await demo_clone.clone_demo(db, None, plan.workspace, owner)
+    assert count == 4
+    assert len([row for row in db.rows[ContextRecord] if row.workspace_id == cloned.id]) == 6
+    plan, db, graph = state()
+    owner = uuid4()
     plan.sources[0].content_type = "audio/wav"
     with pytest.raises(demo_clone.CloneUnavailable, match="normalized text"):
         await demo_clone.clone_demo(db, graph, plan.workspace, owner)
     assert await db.get(Workspace, demo_clone.target_id(owner, PUBLIC_ID)) is None
+
+
+@pytest.mark.asyncio
+async def test_empty_public_graph_still_creates_editable_sql_clone():
+    plan, db, graph = state()
+    plan.graph_nodes = []
+    plan.graph_edges = []
+    cloned, count = await demo_clone.clone_demo(db, graph, plan.workspace, uuid4())
+    assert count == 4
+    assert graph.writes == 0
+    assert len([row for row in db.rows[ContextStoreRecord] if row.workspace_id == cloned.id]) == 1
 
 
 @pytest.mark.asyncio
