@@ -28,11 +28,14 @@ const dateLabel = (value: string | null) =>
     ? new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium" }).format(new Date(value))
     : "아직 없음";
 
+const expiryLabel = (value: string | null) => value ? `만료 ${dateLabel(value)}` : "만료 없음";
+
 const TOKEN_PERIODS = [
   { days: 7, label: "7일" },
   { days: 30, label: "30일" },
   { days: 90, label: "90일" },
   { days: 365, label: "1년" },
+  { days: null, label: "만료 없음" },
 ] as const;
 
 function CopyButton({ value, label }: { value: string; label: string }) {
@@ -63,12 +66,12 @@ export default function AccountMcpPage() {
   const { data, error, isLoading, reload } = useAsync((signal) => api.listMcpTokens(signal));
   const [createOpen, setCreateOpen] = useState(false);
   const [label, setLabel] = useState("");
-  const [expiresInDays, setExpiresInDays] = useState(90);
+  const [expiresInDays, setExpiresInDays] = useState<number | null>(90);
   const [created, setCreated] = useState<CreatedMcpToken | null>(null);
   const [busy, setBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<McpToken | null>(null);
   const [extendTarget, setExtendTarget] = useState<McpToken | null>(null);
-  const [extensionDays, setExtensionDays] = useState(365);
+  const [extensionDays, setExtensionDays] = useState<number | null>(365);
 
   const closeCreate = () => {
     setCreateOpen(false);
@@ -116,7 +119,7 @@ export default function AccountMcpPage() {
       setExtendTarget(null);
       setExtensionDays(365);
       reload();
-      toast.success("MCP 토큰 만료일을 연장했습니다.");
+      toast.success(extensionDays === null ? "MCP 토큰을 만료 없이 설정했습니다." : "MCP 토큰 만료일을 연장했습니다.");
     } catch (cause) {
       toast.error(toUserMessage(cause, "토큰을 연장하지 못했습니다."));
     } finally {
@@ -236,14 +239,14 @@ export default function AccountMcpPage() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{item.label}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      끝자리 ····{item.tokenHint} · {new Date(item.expiresAt).getTime() <= Date.now() ? "만료됨" : "만료"} {dateLabel(item.expiresAt)}
+                      끝자리 ····{item.tokenHint} · {item.expiresAt === null ? "만료 없음" : new Date(item.expiresAt).getTime() <= Date.now() ? "만료됨" : expiryLabel(item.expiresAt)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       생성 {dateLabel(item.createdAt)} · 마지막 사용 {dateLabel(item.lastUsedAt)}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {new Date(item.expiresAt).getTime() > Date.now() && (
+                    {item.expiresAt !== null && new Date(item.expiresAt).getTime() > Date.now() && (
                       <Button size="sm" variant="outline" onClick={() => setExtendTarget(item)}>
                         연장
                       </Button>
@@ -291,7 +294,7 @@ export default function AccountMcpPage() {
               <div className="flex items-center gap-2">
                 <CopyButton value={created.token} label="토큰 복사" />
                 <span className="text-xs text-muted-foreground">
-                  만료 {dateLabel(created.item.expiresAt)}
+                  {expiryLabel(created.item.expiresAt)}
                 </span>
               </div>
             </div>
@@ -316,12 +319,12 @@ export default function AccountMcpPage() {
               <select
                 id="mcp-token-period"
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={expiresInDays}
+                value={expiresInDays ?? "never"}
                 disabled={busy}
-                onChange={(event) => setExpiresInDays(Number(event.target.value))}
+                onChange={(event) => setExpiresInDays(event.target.value === "never" ? null : Number(event.target.value))}
               >
                 {TOKEN_PERIODS.map((period) => (
-                  <option key={period.days} value={period.days}>{period.label}</option>
+                  <option key={period.label} value={period.days ?? "never"}>{period.label}</option>
                 ))}
               </select>
             </form>
@@ -361,12 +364,12 @@ export default function AccountMcpPage() {
           <select
             id="mcp-extension-period"
             className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            value={extensionDays}
+            value={extensionDays ?? "never"}
             disabled={busy}
-            onChange={(event) => setExtensionDays(Number(event.target.value))}
+            onChange={(event) => setExtensionDays(event.target.value === "never" ? null : Number(event.target.value))}
           >
             {TOKEN_PERIODS.map((period) => (
-              <option key={period.days} value={period.days}>{period.label}</option>
+              <option key={period.label} value={period.days ?? "never"}>{period.label}</option>
             ))}
           </select>
           <DialogFooter>
