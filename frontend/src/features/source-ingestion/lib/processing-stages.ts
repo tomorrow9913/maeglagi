@@ -5,6 +5,7 @@ export const stageLabel: Record<ProcessingStage, string> = {
   transcribing: "음성 인식",
   awaiting_review: "대본 검토",
   confirmed: "분석 연결",
+  awaiting_agent: "에이전트 작업 대기",
   analyzing: "분석",
   graphing: "그래프 반영",
   completed: "완료",
@@ -21,11 +22,15 @@ const sequence: Record<SourceKind, ProcessingStage[]> = {
   meeting: ["uploaded", "transcribing", "awaiting_review", "confirmed", "analyzing", "graphing", "completed"],
 };
 const browserSequence: ProcessingStage[] = ["uploaded", "awaiting_review", "confirmed", "analyzing", "graphing", "completed"];
+const agentDocumentSequence: ProcessingStage[] = ["uploaded", "awaiting_agent", "analyzing", "graphing", "completed"];
+const agentMeetingSequence: ProcessingStage[] = ["uploaded", "awaiting_review", "awaiting_agent", "analyzing", "graphing", "completed"];
 
 export function stagesFor(
   kind: SourceKind,
-  transcriptSource?: "server" | "browser",
+  transcriptSource?: "server" | "browser" | "agent",
+  analysisMode?: "server" | "agent",
 ): ProcessingStage[] {
+  if (analysisMode === "agent" || transcriptSource === "agent") return kind === "meeting" ? agentMeetingSequence : agentDocumentSequence;
   return transcriptSource === "browser" ? browserSequence : sequence[kind];
 }
 
@@ -33,7 +38,8 @@ export function stagesFor(
 export function stageIndexOf(
   kind: SourceKind,
   stage: ProcessingStage,
-  transcriptSource?: "server" | "browser",
+  transcriptSource?: "server" | "browser" | "agent",
+  analysisMode?: "server" | "agent",
 ): number {
-  return Math.max(stagesFor(kind, transcriptSource).indexOf(stage), 0);
+  return Math.max(stagesFor(kind, transcriptSource, analysisMode).indexOf(stage), 0);
 }

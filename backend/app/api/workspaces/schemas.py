@@ -37,6 +37,7 @@ class SourceResponse(BaseModel):
     kind: str
     title: str
     status: SourceStatus
+    analysis_mode: str = Field(default="server", serialization_alias="analysisMode")
     created_at: datetime = Field(serialization_alias="createdAt")
     size_bytes: int | None = Field(default=None, serialization_alias="sizeBytes")
     duration_seconds: float | None = Field(default=None, serialization_alias="durationSeconds")

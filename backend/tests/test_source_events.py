@@ -185,7 +185,7 @@ class Session:
 
 
 def source_row(source_id: UUID) -> tuple:
-    return (source_id, "meeting", "server", "queued", 0.0, "uploaded", None)
+    return (source_id, "meeting", "server", "queued", "server", 0.0, "uploaded", None)
 
 
 @pytest.mark.asyncio
@@ -312,6 +312,7 @@ async def test_initial_response_uses_job_schema_and_closes_session(monkeypatch) 
         "sourceId": str(SOURCE_A),
         "sourceKind": "meeting",
         "transcriptSource": "server",
+        "analysisMode": "server",
         "status": "queued",
         "progress": 0.0,
         "stage": "uploaded",

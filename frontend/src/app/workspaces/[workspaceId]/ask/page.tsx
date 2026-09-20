@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { ArrowUpRight, Send, Square, Plus, FileUp, Mic } from "lucide-react";
 
 import { DropdownMenu } from "radix-ui";
@@ -86,6 +87,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
           ) : undefined
         }
       />
+      <p className="-mt-3 mb-6 text-xs text-muted-foreground">이 화면의 Ask는 서비스 AI 연결을 사용합니다. 내 에이전트의 답변은 <Link href="/account/mcp" className="text-primary underline-offset-2 hover:underline">계정 MCP 연결</Link>을 통해 에이전트에서 받으세요.</p>
 
       {/* 대화가 없을 때는 안내를 입력창과 헤더 사이 가운데에 둬 빈 화면이 한쪽으로 쏠리지 않게 합니다. */}
       <div className={cn("flex-1", turns.length === 0 && "flex flex-col justify-center")}>

@@ -27,7 +27,7 @@ async def recovery_db():
             text("""
             CREATE TABLE sources (
                 id uuid PRIMARY KEY, kind text, status text, review_state text,
-                processing_stage text NOT NULL
+                processing_stage text NOT NULL, analysis_mode text NOT NULL DEFAULT 'server'
             )
         """)
         )
@@ -46,12 +46,16 @@ async def recovery_db():
     await engine.dispose()
 
 
-async def seed(factory, *, kind="meeting", status="queued", review="confirmed"):
+async def seed(factory, *, kind="meeting", status="queued", review="confirmed", mode="server"):
     identifier = uuid4()
     async with factory() as session:
         await session.execute(
-            text("""INSERT INTO sources VALUES (:id, :kind, :status, :review, 'confirmed')"""),
-            {"id": identifier, "kind": kind, "status": status, "review": review},
+            text("""
+                INSERT INTO sources
+                  (id, kind, status, review_state, processing_stage, analysis_mode)
+                VALUES (:id, :kind, :status, :review, 'confirmed', :mode)
+            """),
+            {"id": identifier, "kind": kind, "status": status, "review": review, "mode": mode},
         )
         await session.commit()
     return identifier
@@ -65,6 +69,7 @@ async def test_recovery_respects_review_gate_and_terminal_states(recovery_db):
     }
     await seed(recovery_db, review="awaiting_review")
     await seed(recovery_db, review=None)
+    await seed(recovery_db, mode="agent")
     for state in ("failed", "succeeded", "awaiting_review"):
         await seed(recovery_db, status=state)
     async with recovery_db() as session:

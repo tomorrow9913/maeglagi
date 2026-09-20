@@ -268,7 +268,9 @@ export function SourceViewer({
           <SheetDescription>
             {hasHighlightedChunk
               ? "근거로 인용된 구간을 강조했습니다."
-              : "저장된 원문입니다."}
+              : source?.status === "awaiting_agent"
+                ? "소스가 저장됐습니다. 에이전트가 분석 결과를 저장하면 질문 근거로 사용할 수 있습니다."
+                : "저장된 원문입니다."}
           </SheetDescription>
         </SheetHeader>
 
@@ -305,7 +307,7 @@ export function SourceViewer({
             </div>
           ) : !data || (!hasPersistedText && data.chunks.length === 0) ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              표시할 원문이 없습니다.
+              {source?.status === "awaiting_agent" ? "에이전트가 원문·대본 또는 분석 결과를 등록하기를 기다리고 있습니다." : "표시할 원문이 없습니다."}
             </p>
           ) : (
             <div className="space-y-5">

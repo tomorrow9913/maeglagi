@@ -26,5 +26,6 @@ test("live mode keeps real workspace API and auth separate from demo API", () =>
   assert.equal(selectRouteApi(true, httpApi, seededApi), seededApi);
   assert.equal(requiresWorkspaceAuth("/workspaces"), true);
   assert.equal(requiresWorkspaceAuth("/workspaces/real-id/ask"), true);
+  assert.equal(requiresWorkspaceAuth("/account/mcp"), true);
   assert.equal(requiresWorkspaceAuth("/workspaces-demo"), false);
 });

@@ -19,7 +19,8 @@ async def recover_missing_jobs(session: AsyncSession) -> int:
             )
             SELECT s.id, 'pending', s.processing_stage, 0, 0, now(), now(), now()
             FROM sources AS s
-            WHERE s.status IN ('queued', 'processing', 'enqueue_pending')
+            WHERE s.analysis_mode = 'server'
+              AND s.status IN ('queued', 'processing', 'enqueue_pending')
               AND (
                 s.kind = 'document'
                 OR (s.kind = 'meeting' AND s.review_state IN ('confirmed', 'transcribing'))

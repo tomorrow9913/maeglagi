@@ -99,6 +99,7 @@ class ReviewResponse(BaseModel):
     transcript_source: str | None = Field(serialization_alias="transcriptSource")
     review_state: ReviewState = Field(serialization_alias="reviewState")
     status: SourceStatus
+    analysis_mode: str = Field(default="server", serialization_alias="analysisMode")
     stage: ProcessingStage
     error_message: str | None = Field(serialization_alias="errorMessage")
     revision: int
@@ -136,6 +137,7 @@ def review_payload(
             else ReviewState.AWAITING_REVIEW
         ),
         status=source.status,
+        analysis_mode=source.analysis_mode,
         stage=source.processing_stage,
         error_message=source.error_message,
         revision=source.review_revision,
@@ -159,6 +161,7 @@ def job_payload(source: Source) -> JobResponse:
         source_kind=source.kind,
         transcript_source=source.transcript_source,
         status=source.status,
+        analysis_mode=source.analysis_mode,
         progress=source.progress,
         stage=source.processing_stage,
         error_message=source.error_message,
@@ -433,6 +436,13 @@ async def confirm_review(
         source.review_state = ReviewState.CONFIRMED
     else:
         raise HTTPException(status.HTTP_409_CONFLICT, "Meeting is not awaiting review")
+    if source.analysis_mode == "agent":
+        source.status = SourceStatus.AWAITING_AGENT
+        source.processing_stage = ProcessingStage.AWAITING_AGENT
+        source.error_message = None
+        session.add(source)
+        await session.commit()
+        return job_payload(source)
     source.status = SourceStatus.ENQUEUE_PENDING
     source.processing_stage = ProcessingStage.CONFIRMED
     source.error_message = None

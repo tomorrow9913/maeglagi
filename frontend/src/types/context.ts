@@ -9,7 +9,7 @@
 export type SourceKind = "document" | "meeting";
 
 /** 업로드 이후 비동기 파이프라인의 상태 */
-export type ProcessingStatus = "queued" | "enqueue_pending" | "processing" | "awaiting_review" | "succeeded" | "failed";
+export type ProcessingStatus = "queued" | "enqueue_pending" | "processing" | "awaiting_review" | "awaiting_agent" | "succeeded" | "failed";
 
 /** Ontology에서 Timeline과 Graph에 함께 쓰는 항목 종류 */
 export type ContextKind = "decision" | "issue" | "task" | "event";
@@ -26,6 +26,7 @@ export const processingStatusLabel: Record<ProcessingStatus, string> = {
   enqueue_pending: "분석 연결 중",
   processing: "처리 중",
   awaiting_review: "대본 검토 필요",
+  awaiting_agent: "에이전트 작업 대기",
   succeeded: "완료",
   failed: "실패",
 };

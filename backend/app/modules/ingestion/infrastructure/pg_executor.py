@@ -58,10 +58,12 @@ def _report_terminal_failure(
     # Logging integration records ERROR as a Sentry event; WARN plus the scoped
     # exception below produces one terminal event instead of two.
     logger.warning(
-        "PostgreSQL ingestion failed (source_id=%s, generation=%s, stage=%s, code=%s, type=%s)",
+        "PostgreSQL ingestion failed (source_id=%s, generation=%s, stage=%s, "
+        "extraction_stage=%s, code=%s, type=%s)",
         source_id,
         generation,
         safe_error.stage,
+        safe_error.extraction_stage,
         safe_error.code,
         safe_error.error_type,
     )
@@ -69,6 +71,8 @@ def _report_terminal_failure(
         scope.set_tag("source_id", str(source_id))
         scope.set_tag("job_generation", str(generation))
         scope.set_tag("failure_stage", safe_error.stage)
+        if safe_error.extraction_stage:
+            scope.set_tag("extraction_stage", safe_error.extraction_stage)
         scope.set_tag("failure_code", safe_error.code)
         scope.set_tag("error_type", safe_error.error_type)
         if safe_error.cause_type:
