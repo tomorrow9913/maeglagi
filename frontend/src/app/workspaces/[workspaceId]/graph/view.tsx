@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -8,42 +8,31 @@ import { EmptyState, ErrorState } from "@/components/common/state-views";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { List, Network } from "lucide-react";
+
 import { GraphCanvas } from "@/features/knowledge-graph/components/graph-canvas";
+import { GraphNodeList } from "@/features/knowledge-graph/components/graph-node-list";
 import { NodeDetailSheet } from "@/features/knowledge-graph/components/node-detail-sheet";
+import { NodeShapeIcon } from "@/features/knowledge-graph/components/node-shape-icon";
 import {
   entityLabel,
-  readGraphPalette,
-  type GraphPalette,
+  entityTypes,
+  materialLabel,
+  nodeLook,
 } from "@/features/knowledge-graph/lib/graph-style";
+import { filterGraph } from "@/features/knowledge-graph/lib/graph-visibility";
 import { useAsync } from "@/hooks/use-async";
 import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
-import type { ContextItemSource, EntityType, KnowledgeGraph } from "@/lib/api";
+import type { ContextItemSource, EntityType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const entityTypes: EntityType[] = ["person", "project", "decision", "task", "event"];
+const EMPTY_GRAPH = { nodes: [], edges: [] };
 
-/**
- * 선택한 종류만 남기고, 한쪽 끝이 사라진 엣지도 함께 걸러냅니다.
- * 기준일을 골랐다면 그 시점에 아직 어떤 관계도 없던 노드는 숨깁니다(아직 없던 결정이 떠다니지 않게).
- */
-function filterGraph(
-  graph: KnowledgeGraph,
-  hidden: EntityType[],
-  hideIsolated: boolean,
-): KnowledgeGraph {
-  if (hidden.length === 0 && !hideIsolated) return graph;
-
-  const connected = new Set(graph.edges.flatMap((edge) => [edge.source, edge.target]));
-  const nodes = graph.nodes.filter(
-    (node) => !hidden.includes(node.type) && (!hideIsolated || connected.has(node.id)),
+const chipClass = (isOn: boolean) =>
+  cn(
+    "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs transition-colors",
+    isOn ? "text-foreground" : "text-muted-foreground line-through",
   );
-  const visible = new Set(nodes.map((node) => node.id));
-
-  return {
-    nodes,
-    edges: graph.edges.filter((edge) => visible.has(edge.source) && visible.has(edge.target)),
-  };
-}
 
 export default function GraphPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -61,21 +50,29 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
   // 비우면 지금 유효한 관계, 날짜를 고르면 그날 유효했던 관계를 보여줍니다.
   const [asOf, setAsOf] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
-
-  // 토큰 값은 브라우저에서만 읽을 수 있어 마운트 후 한 번만 가져옵니다.
-  const [palette, setPalette] = useState<GraphPalette>();
-  useEffect(() => setPalette(readGraphPalette()), []);
+  // 캔버스는 마우스·터치 전용이라, 같은 노드를 키보드로 열 수 있는 목록을 함께 둡니다.
+  const [viewMode, setViewMode] = useState<"canvas" | "list">("canvas");
 
   const { data, error, isLoading, isRefetching, reload } = useAsync(
-    (signal) => api.getKnowledgeGraph(workspaceId, { ...(asOf ? { at: asOf } : {}), includeMaterials: showMaterials }, signal),
+    (signal) =>
+      api.getKnowledgeGraph(
+        workspaceId,
+        { ...(asOf ? { at: asOf } : {}), includeMaterials: showMaterials },
+        signal,
+      ),
     [workspaceId, asOf, showMaterials],
     { resetKey: workspaceId },
   );
 
-  const graph = useMemo(
-    () => filterGraph(data ?? { nodes: [], edges: [] }, hidden, Boolean(asOf)),
-    [data, hidden, asOf],
+  /*
+   * 두 단계로 거릅니다. 캔버스는 종류 필터를 적용하기 전의 `baseGraph`를 받아 숨긴 종류를
+   * 가리기만 하고(배치와 확대 상태 유지), 목록과 상세 패널은 실제로 보이는 `graph`를 씁니다.
+   */
+  const baseGraph = useMemo(
+    () => filterGraph(data ?? EMPTY_GRAPH, [], Boolean(asOf)),
+    [data, asOf],
   );
+  const graph = useMemo(() => filterGraph(baseGraph, hidden, false), [baseGraph, hidden]);
   const selectedNode = useMemo(
     () => graph.nodes.find((node) => node.id === selectedNodeId),
     [graph, selectedNodeId],
@@ -88,6 +85,28 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
       router.push(`${workspacePath(workspaceId, "sources")}?${query.toString()}`);
     },
     [router, workspaceId, workspacePath],
+  );
+
+  const isCanvasCovered = graph.nodes.length === 0 || viewMode === "list";
+
+  const filterEmptyState = (
+    <EmptyState
+      className="size-full justify-center border-0"
+      title="선택한 종류의 노드가 없습니다"
+      description="필터를 해제하면 다른 종류의 노드를 볼 수 있어요."
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setHidden([]);
+            setShowMaterials(true);
+          }}
+        >
+          필터 해제
+        </Button>
+      }
+    />
   );
 
   return (
@@ -118,7 +137,15 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <button type="button" aria-pressed={showMaterials} onClick={() => setShowMaterials((shown) => !shown)} className={cn("inline-flex items-center rounded-full border px-3 py-1 text-xs", showMaterials ? "border-border text-foreground" : "border-border text-muted-foreground/60 line-through")}>회의·문서 자료</button>
+        <button
+          type="button"
+          aria-pressed={showMaterials}
+          onClick={() => setShowMaterials((shown) => !shown)}
+          className={chipClass(showMaterials)}
+        >
+          <NodeShapeIcon {...nodeLook("material")} />
+          {materialLabel}
+        </button>
         {entityTypes.map((type) => {
           const isVisible = !hidden.includes(type);
 
@@ -134,22 +161,25 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
                     : [...current, type],
                 )
               }
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors",
-                isVisible
-                  ? "border-border text-foreground"
-                  : "border-border text-muted-foreground/60 line-through",
-              )}
+              className={chipClass(isVisible)}
             >
-              <span
-                aria-hidden
-                className="size-2 rounded-full"
-                style={palette ? { backgroundColor: palette[type] } : undefined}
-              />
+              {/* 캔버스의 노드와 같은 모양·색입니다. 색을 구분하기 어려워도 모양으로 읽을 수 있습니다. */}
+              <NodeShapeIcon {...nodeLook(type)} />
               {entityLabel[type]}
             </button>
           );
         })}
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setViewMode((mode) => (mode === "list" ? "canvas" : "list"))}
+        >
+          {viewMode === "list" ? <Network aria-hidden /> : <List aria-hidden />}
+          {viewMode === "list" ? "그래프로 보기" : "목록으로 보기"}
+        </Button>
       </div>
 
       {/* 기준일·자료 토글로 다시 받을 때는 캔버스를 유지합니다. 언마운트하면 확대와 배치가 초기화됩니다. */}
@@ -176,26 +206,10 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
             onRetry={reload}
             className="size-full justify-center border-0"
           />
-        ) : graph.nodes.length === 0 ? (
-          // 왜 비었는지에 따라 다음 행동이 다릅니다: 종류 필터, 기준일, 아직 소스가 없는 경우.
-          hidden.length > 0 || !showMaterials ? (
-            <EmptyState
-              className="size-full justify-center border-0"
-              title="선택한 종류의 노드가 없습니다"
-              description="필터를 해제하면 다른 종류의 노드를 볼 수 있어요."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setHidden([]);
-                    setShowMaterials(true);
-                  }}
-                >
-                  필터 해제
-                </Button>
-              }
-            />
+        ) : baseGraph.nodes.length === 0 ? (
+          // 왜 비었는지에 따라 다음 행동이 다릅니다: 자료 토글, 기준일, 아직 소스가 없는 경우.
+          !showMaterials ? (
+            filterEmptyState
           ) : asOf ? (
             <EmptyState
               className="size-full justify-center border-0"
@@ -226,11 +240,30 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
             />
           )
         ) : (
-          <GraphCanvas
-            graph={graph}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={setSelectedNodeId}
-          />
+          <>
+            {/*
+             * 목록이나 빈 상태를 보여줄 때도 캔버스는 그대로 둡니다. 언마운트하면 옮겨 둔
+             * 노드와 확대 상태가 사라집니다. 가려진 동안에는 `inert`로 초점과 읽기를 막습니다.
+             */}
+            <div className="size-full" inert={isCanvasCovered}>
+              <GraphCanvas
+                graph={baseGraph}
+                hiddenTypes={hidden}
+                selectedNodeId={selectedNode?.id}
+                onSelectNode={setSelectedNodeId}
+              />
+            </div>
+            {graph.nodes.length === 0 ? (
+              <div className="absolute inset-0 bg-card">{filterEmptyState}</div>
+            ) : viewMode === "list" ? (
+              <GraphNodeList
+                className="absolute inset-0 bg-card"
+                nodes={graph.nodes}
+                selectedNodeId={selectedNode?.id}
+                onSelectNode={setSelectedNodeId}
+              />
+            ) : null}
+          </>
         )}
       </div>
 
@@ -240,7 +273,12 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
         onClose={() => setSelectedNodeId(undefined)}
         onSelectNode={setSelectedNodeId}
         onOpenSource={openSource}
-        onOpenDirectory={(node) => router.push(`${workspacePath(workspaceId, "directory")}?${node.directoryKind === "Person" ? "person" : "project"}=${encodeURIComponent(node.directoryId ?? "")}`)}
+        onOpenDirectory={(node) =>
+          router.push(
+            `${workspacePath(workspaceId, "directory")}?${node.directoryKind === "Person" ? "person" : "project"}=${encodeURIComponent(node.directoryId ?? "")}`,
+          )
+        }
+        isReadOnly={isDemo}
       />
     </>
   );

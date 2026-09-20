@@ -13,12 +13,13 @@ import {
 } from "@/components/ui/sheet";
 import type { ContextItemSource, GraphNode, KnowledgeGraph } from "@/lib/api";
 
-import { entityLabel, relationLabel } from "../lib/graph-style";
+import { entityLabel, materialLabel } from "../lib/graph-style";
+import { relationTail } from "../lib/relation-sentence";
 
 type Connection = {
   edgeId: string;
-  relation: string;
-  direction: "out" | "in";
+  /** 상대 이름 뒤에 붙는 말. 이름과 이어 읽으면 "홍길동이 참여" 같은 문장이 됩니다. */
+  tail: string;
   node: GraphNode;
 };
 
@@ -26,19 +27,25 @@ function connectionsOf(graph: KnowledgeGraph, nodeId: string): Connection[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
 
   return graph.edges.flatMap<Connection>((edge) => {
-    if (edge.source === nodeId) {
-      const node = byId.get(edge.target);
-      return node
-        ? [{ edgeId: edge.id, relation: relationLabel[edge.type], direction: "out" as const, node }]
-        : [];
-    }
-    if (edge.target === nodeId) {
-      const node = byId.get(edge.source);
-      return node
-        ? [{ edgeId: edge.id, relation: relationLabel[edge.type], direction: "in" as const, node }]
-        : [];
-    }
-    return [];
+    const direction = edge.source === nodeId ? "out" : edge.target === nodeId ? "in" : undefined;
+    if (!direction) return [];
+
+    const other = byId.get(direction === "out" ? edge.target : edge.source);
+    const source = byId.get(edge.source);
+    if (!other || !source) return [];
+
+    return [
+      {
+        edgeId: edge.id,
+        tail: relationTail({
+          relation: edge.type,
+          direction,
+          sourceType: source.type,
+          otherLabel: other.label,
+        }),
+        node: other,
+      },
+    ];
   });
 }
 
@@ -50,6 +57,7 @@ export function NodeDetailSheet({
   onSelectNode,
   onOpenSource,
   onOpenDirectory,
+  isReadOnly = false,
 }: {
   graph: KnowledgeGraph;
   node: GraphNode | undefined;
@@ -57,8 +65,11 @@ export function NodeDetailSheet({
   onSelectNode: (nodeId: string) => void;
   onOpenSource: (source: ContextItemSource) => void;
   onOpenDirectory: (node: GraphNode) => void;
+  /** 데모처럼 참여자·프로젝트를 편집할 수 없는 화면인지 */
+  isReadOnly?: boolean;
 }) {
   const connections = node ? connectionsOf(graph, node.id) : [];
+  const typeLabel = node ? (node.material ? materialLabel : entityLabel[node.type]) : "";
 
   return (
     <Sheet open={Boolean(node)} onOpenChange={(open) => !open && onClose()}>
@@ -68,25 +79,41 @@ export function NodeDetailSheet({
             <SheetHeader>
               <SheetTitle>{node.label}</SheetTitle>
               <SheetDescription>
-                {entityLabel[node.type]} · 연결 {node.degree}개
+                {typeLabel} · 연결 {node.degree}개
               </SheetDescription>
             </SheetHeader>
 
             <div className="space-y-6 overflow-y-auto px-4 pb-6">
-              {node.material && node.sourceId && <Button variant="outline" size="sm" onClick={() => onOpenSource({ id: node.sourceId!, kind: node.kind === "Meeting" ? "meeting" : "document", title: node.label })}>자료 원문 열기</Button>}
-              {node.directoryId && (node.directoryKind === "Person" || node.directoryKind === "Project") && <Button variant="outline" size="sm" onClick={() => onOpenDirectory(node)}>디렉터리에서 편집</Button>}
+              {node.material && node.sourceId ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    onOpenSource({
+                      id: node.sourceId!,
+                      kind: node.kind === "Meeting" ? "meeting" : "document",
+                      title: node.label,
+                    })
+                  }
+                >
+                  자료 원문 열기
+                </Button>
+              ) : null}
+              {/* 화면 이름은 메뉴와 같은 "참여자·프로젝트"입니다. 데모에서는 편집할 수 없으므로 "보기"로 씁니다. */}
+              {node.directoryId &&
+              (node.directoryKind === "Person" || node.directoryKind === "Project") ? (
+                <Button variant="outline" size="sm" onClick={() => onOpenDirectory(node)}>
+                  {isReadOnly ? "참여자·프로젝트에서 보기" : "참여자·프로젝트에서 편집"}
+                </Button>
+              ) : null}
               <section>
                 <h3 className="mb-2 text-xs font-medium text-muted-foreground">속성</h3>
                 <dl className="space-y-1.5 text-sm">
                   <div className="flex gap-3">
                     <dt className="w-16 shrink-0 text-muted-foreground">종류</dt>
                     <dd>
-                      <StatusBadge tone="neutral">{entityLabel[node.type]}</StatusBadge>
+                      <StatusBadge tone="neutral">{typeLabel}</StatusBadge>
                     </dd>
-                  </div>
-                  <div className="flex gap-3">
-                    <dt className="w-16 shrink-0 text-muted-foreground">ID</dt>
-                    <dd className="font-mono text-xs break-all text-muted-foreground">{node.id}</dd>
                   </div>
                 </dl>
               </section>
@@ -106,12 +133,13 @@ export function NodeDetailSheet({
                           onClick={() => onSelectNode(connection.node.id)}
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
                         >
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {connection.direction === "out"
-                              ? connection.relation
-                              : `←${connection.relation}`}
+                          {/* 이름과 꼬리를 붙여 한 문장으로 읽히게 합니다. 이름만 말줄임합니다. */}
+                          <span className="flex min-w-0 items-baseline">
+                            <span className="truncate">{connection.node.label}</span>
+                            <span className="shrink-0 whitespace-pre text-muted-foreground">
+                              {connection.tail}
+                            </span>
                           </span>
-                          <span className="truncate">{connection.node.label}</span>
                           <ArrowRight
                             className="ml-auto size-3 shrink-0 text-muted-foreground"
                             aria-hidden
