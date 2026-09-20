@@ -9,6 +9,7 @@ import type {
   CreateWorkspaceInput,
   KnowledgeGraph,
   KnowledgeGraphQuery,
+  McpToken,
   McpTokenList,
   CreatedMcpToken,
   ProcessingJob,
@@ -39,6 +40,7 @@ import type {
 export interface MaeglagiApi {
   listMcpTokens(signal?: AbortSignal): Promise<McpTokenList>;
   createMcpToken(input: { label: string; expiresInDays: number }, signal?: AbortSignal): Promise<CreatedMcpToken>;
+  extendMcpToken(tokenId: string, expiresInDays: number, signal?: AbortSignal): Promise<McpToken>;
   revokeMcpToken(tokenId: string, signal?: AbortSignal): Promise<void>;
   listWorkspaces(signal?: AbortSignal): Promise<Workspace[]>;
   getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<Workspace>;

@@ -1,6 +1,6 @@
 import os
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.mcp_tokens import TokenCreate, router
+from app.api.mcp_tokens import TokenCreate, TokenExtension, router
 from app.auth import mcp
 from app.auth.dependencies import get_current_user
 from app.auth.models import AuthUser
@@ -123,6 +123,69 @@ def test_invalid_lifetimes_rejected_by_request_schema(days):
 
 def test_legacy_request_defaults_to_90_days():
     assert TokenCreate.model_validate({"label": "agent"}).expires_in_days == 90
+
+
+@pytest.mark.parametrize("days", [0, 366, -1, 1.5, "forever", True])
+def test_extension_requires_valid_lifetime(days):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        TokenExtension.model_validate({"expiresInDays": days})
+
+
+async def test_extension_owner_boundary_and_no_revive_or_shorten(token_sessions):
+    owner, other = uuid4(), uuid4()
+    application = FastAPI()
+    application.include_router(router, prefix="/api/v1")
+    user = AuthUser(id=owner)
+
+    async def session_dependency():
+        async with token_sessions() as session:
+            yield session
+
+    application.dependency_overrides[get_session] = session_dependency
+    application.dependency_overrides[get_current_user] = lambda: user
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(application), base_url="http://test"
+    ) as client:
+        issued = await client.post(
+            "/api/v1/mcp-tokens", json={"label": "extend me", "expiresInDays": 30}
+        )
+        assert issued.status_code == 201
+        token_id = issued.json()["item"]["id"]
+        original_expiry = issued.json()["item"]["expiresAt"]
+        url = f"/api/v1/mcp-tokens/{token_id}"
+
+        user = AuthUser(id=other)
+        assert (await client.patch(url, json={"expiresInDays": 30})).status_code == 404
+        user = AuthUser(id=owner)
+        unchanged = await client.patch(url, json={"expiresInDays": 7})
+        assert unchanged.status_code == 409
+        listed = await client.get("/api/v1/mcp-tokens")
+        assert listed.json()["items"][0]["expiresAt"] == original_expiry
+
+        extended = await client.patch(url, json={"expiresInDays": 365})
+        assert extended.status_code == 200
+        assert extended.headers["cache-control"] == "no-store"
+        assert extended.json()["expiresAt"] > original_expiry
+        assert "token" not in extended.json() and "token_hash" not in extended.text
+        assert (await client.patch(url, json={"expiresInDays": 30})).status_code == 409
+        listed = await client.get("/api/v1/mcp-tokens")
+        assert listed.json()["items"][0]["expiresAt"] == extended.json()["expiresAt"]
+
+        assert (await client.delete(url)).status_code == 204
+        assert (await client.patch(url, json={"expiresInDays": 365})).status_code == 404
+
+        another = await client.post("/api/v1/mcp-tokens", json={"label": "expired"})
+        another_id = another.json()["item"]["id"]
+        async with token_sessions() as session:
+            item = await session.get(mcp.McpToken, UUID(another_id))
+            assert item is not None
+            item.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            await session.commit()
+        assert (
+            await client.patch(f"/api/v1/mcp-tokens/{another_id}", json={"expiresInDays": 365})
+        ).status_code == 404
 
 
 @pytest.mark.parametrize("value", ["", "supabase-jwt", "mgmcp_" + "a" * 42, "mgmcp_" + "√" * 43])
