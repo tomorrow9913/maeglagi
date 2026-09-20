@@ -9,6 +9,8 @@ import type {
   CreateWorkspaceInput,
   KnowledgeGraph,
   KnowledgeGraphQuery,
+  McpTokenList,
+  CreatedMcpToken,
   ProcessingJob,
   MeetingReview,
   MeetingUtterance,
@@ -35,6 +37,9 @@ import type {
  * 추가할 때는 여기 → 실 구현 → mock 구현 순서로 넓힙니다.
  */
 export interface MaeglagiApi {
+  listMcpTokens(signal?: AbortSignal): Promise<McpTokenList>;
+  createMcpToken(input: { label: string }, signal?: AbortSignal): Promise<CreatedMcpToken>;
+  revokeMcpToken(tokenId: string, signal?: AbortSignal): Promise<void>;
   listWorkspaces(signal?: AbortSignal): Promise<Workspace[]>;
   getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<Workspace>;
   createWorkspace(input: CreateWorkspaceInput, signal?: AbortSignal): Promise<Workspace>;
@@ -145,6 +150,7 @@ export interface MaeglagiApi {
   sourceEvents(workspaceId: string, sourceIds: string[], signal?: AbortSignal): AsyncIterable<ProcessingJob>;
   getMeetingReview(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<MeetingReview>;
   retryMeetingTranscription(workspaceId: string, sourceId: string, signal?: AbortSignal): Promise<ProcessingJob>;
+  submitBrowserTranscript(workspaceId: string, sourceId: string, input: { revision: number; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
   saveMeetingReview(workspaceId: string, sourceId: string, input: { revision: number; projectId?: string | null; projectIds?: string[]; utterances: MeetingUtterance[] }, signal?: AbortSignal): Promise<MeetingReview>;
   confirmMeetingReview(workspaceId: string, sourceId: string, revision: number, signal?: AbortSignal): Promise<ProcessingJob>;
 

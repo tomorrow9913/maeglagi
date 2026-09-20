@@ -8,6 +8,9 @@ const loginRequired = () => { throw new ApiError(403, "데모는 읽기 전용�
 /** Public demo data is read from the configured database workspace, never fixtures. */
 export const demoHttpApi: MaeglagiApi = {
   ...httpApi,
+  listMcpTokens: loginRequired,
+  createMcpToken: loginRequired,
+  revokeMcpToken: loginRequired,
   // This explicit write uses the authenticated client, unlike every public demo read below.
   cloneDemoWorkspace: (signal) => apiFetch<Workspace>("/demo/clone", { method: "POST", signal }),
   listWorkspaces: async (signal) => [await apiPublicFetch<Workspace>("/demo/workspace", { signal })],
@@ -58,6 +61,7 @@ export const demoHttpApi: MaeglagiApi = {
   uploadTranscript: loginRequired,
   getMeetingReview: loginRequired,
   retryMeetingTranscription: loginRequired,
+  submitBrowserTranscript: loginRequired,
   saveMeetingReview: loginRequired,
   confirmMeetingReview: loginRequired,
   async *ask() { throw new ApiError(403, "데모에서는 AI 질문을 실행하지 않습니다. 로그인해 내 워크스페이스에서 사용하세요."); },

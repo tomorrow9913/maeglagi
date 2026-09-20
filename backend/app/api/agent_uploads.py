@@ -1,0 +1,72 @@
+"""Binary upload adapter for MCP clients; shares validation/storage with web uploads."""
+
+from typing import Annotated, Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.auth import bearer
+from app.auth.mcp import authenticate_mcp_token
+from app.core.database import get_session
+from app.modules.ingestion.application.source_upload import (
+    SourceUploadService,
+    UploadServiceError,
+    store_source_bytes,
+)
+from app.modules.workspaces.infrastructure.models import Source
+
+router = APIRouter(prefix="/agent-uploads", tags=["agent-media"])
+
+
+@router.post("/workspaces/{workspace_id}", status_code=201)
+async def upload_agent_media(
+    workspace_id: UUID,
+    request: Request,
+    file: UploadFile,
+    kind: Annotated[Literal["document", "meeting"], Form()],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    settings = request.app.state.settings
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(401, "MCP token is required")
+    user = await authenticate_mcp_token(credentials.credentials, settings)
+    content = await file.read(settings.max_upload_bytes + 1)
+
+    async def writer(source: Source, data: bytes) -> None:
+        await store_source_bytes(
+            source,
+            data,
+            settings=settings,
+            storage_token=settings.supabase_service_role_key.get_secret_value(),
+        )
+
+    try:
+        source = await SourceUploadService(session, settings).upload(
+            owner_id=user.id,
+            workspace_id=workspace_id,
+            filename=file.filename,
+            content_type=file.content_type,
+            content=content,
+            kind=kind,
+            write_object=writer,
+        )
+    except UploadServiceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    source.analysis_mode = "agent"
+    source.status = "awaiting_agent"
+    source.processing_stage = "awaiting_agent"
+    source.review_state = "awaiting_review" if kind == "meeting" else None
+    source.transcript_source = "agent" if kind == "meeting" else None
+    session.add(source)
+    await session.commit()
+    return {
+        "sourceId": str(source.id),
+        "workspaceId": str(source.workspace_id),
+        "title": source.title,
+        "kind": source.kind,
+        "status": source.status,
+        "analysisMode": "agent",
+    }

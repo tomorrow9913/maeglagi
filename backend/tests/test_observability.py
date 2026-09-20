@@ -20,6 +20,7 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 from app.core import observability
 from app.core.config import Settings
 from app.middleware.http.request_logging import RequestLoggingMiddleware
+from app.modules.context_engine.application.extraction import ExtractionError
 from app.modules.ingestion.application.pipeline import (
     IngestionPipeline,
     MissingCapabilityCredentialError,
@@ -199,6 +200,18 @@ def test_pg_terminal_event_keeps_safe_location_type_and_stage_without_content() 
         for frame in exception["stacktrace"]["frames"]
     )
     assert "synthetic-provider-response-secret" not in json.dumps(event)
+
+
+def test_pg_terminal_event_tags_only_allowlisted_extraction_stage() -> None:
+    safe = source_processor._safe_attempt_error(
+        ExtractionError("entity", "synthetic-provider-response-secret"), "graphing"
+    )
+    with _captured_sentry() as events:
+        pg_executor._report_terminal_failure(uuid4(), 4, safe)
+    assert len(events) == 1
+    assert events[0]["tags"]["failure_stage"] == "graphing"
+    assert events[0]["tags"]["extraction_stage"] == "entity"
+    assert "synthetic-provider-response-secret" not in json.dumps(events[0])
 
 
 async def test_missing_capability_credential_stops_retry_with_safe_message(monkeypatch) -> None:

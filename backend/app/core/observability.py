@@ -17,6 +17,7 @@ _SAFE_EVENT_TAGS = frozenset(
         "source_id",
         "job_generation",
         "failure_stage",
+        "extraction_stage",
         "failure_code",
         "error_type",
         "cause_type",
@@ -29,6 +30,9 @@ _SAFE_FAILURE_MESSAGES = {
     "missing_capability_credential": "A provider credential for this capability is required",
 }
 _SAFE_PROVIDERS = frozenset({"openai", "anthropic", "nvidia", "ollama"})
+_SAFE_EXTRACTION_STAGES = frozenset(
+    {"classification", "entity", "event", "relation", "context", "context_update"}
+)
 _TRACE_ID = re.compile(r"[0-9a-fA-F]{32}\Z")
 _SPAN_ID = re.compile(r"[0-9a-fA-F]{16}\Z")
 _TRACE_OPERATIONS = frozenset({"http.server", "http.client", "db", "task", "queue.process"})
@@ -87,6 +91,10 @@ def _redact_sentry_event(event: dict, _hint: dict) -> dict:
         for key, value in tags.items()
         if key in _SAFE_EVENT_TAGS
         and (key != "provider" or (isinstance(value, str) and value in _SAFE_PROVIDERS))
+        and (
+            key != "extraction_stage"
+            or (isinstance(value, str) and value in _SAFE_EXTRACTION_STAGES)
+        )
     }
     safe_message = _SAFE_FAILURE_MESSAGES.get(tags.get("failure_code"), "Message redacted")
     for entry in event.get("exception", {}).get("values", []):

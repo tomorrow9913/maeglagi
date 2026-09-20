@@ -1,19 +1,10 @@
 import { ChevronRight, FileText, Mic } from "lucide-react";
 
-import { StatusBadge, type StatusTone } from "@/components/common/status-badge";
+import { StatusBadge } from "@/components/common/status-badge";
 import type { Source } from "@/lib/api";
-import { processingStatusLabel, type ProcessingStatus } from "@/types/context";
 
 import { formatBytes } from "../lib/format";
-
-const statusTone: Record<ProcessingStatus, StatusTone> = {
-  queued: "neutral",
-  enqueue_pending: "info",
-  processing: "info",
-  awaiting_review: "warning",
-  succeeded: "success",
-  failed: "danger",
-};
+import { sourcePresentation } from "../lib/source-presentation";
 
 function detailOf(source: Source): string {
   if (source.kind === "meeting" && source.durationSeconds !== undefined) {
@@ -37,13 +28,14 @@ export function SourceList({
     <ul className="divide-y divide-border rounded-xl border border-border bg-card">
       {sources.map((source) => {
         const Icon = source.kind === "meeting" ? Mic : FileText;
+        const presentation = sourcePresentation(source.status, source.kind);
 
         return (
           <li key={source.id}>
             <button
               type="button"
               onClick={() => onOpen(source.id)}
-              disabled={source.status !== "succeeded" && source.status !== "awaiting_review" && !(source.kind === "meeting" && source.status === "failed")}
+              disabled={!presentation.canOpen}
               className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-accent/40 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -53,10 +45,10 @@ export function SourceList({
                   {[detailOf(source), source.createdAt.slice(0, 10)].filter(Boolean).join(" · ")}
                 </p>
               </div>
-              <StatusBadge tone={statusTone[source.status]}>
-                {processingStatusLabel[source.status]}{progress?.[source.id] !== undefined && (source.status === "processing" || source.status === "queued" || source.status === "enqueue_pending") ? ` · ${Math.round(progress[source.id] * 100)}%` : ""}
+              <StatusBadge tone={presentation.tone}>
+                {presentation.label}{progress?.[source.id] !== undefined && presentation.isProcessing ? ` · ${Math.round(progress[source.id] * 100)}%` : ""}
               </StatusBadge>
-              {source.status === "succeeded" || source.status === "awaiting_review" || (source.kind === "meeting" && source.status === "failed") ? (
+              {presentation.canOpen ? (
                 <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               ) : null}
             </button>

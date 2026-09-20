@@ -2,6 +2,13 @@
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
+/** MCP lives at the API origin's root, beside /api/v1. */
+export function mcpEndpointUrl(apiBaseUrl: string): string {
+  return `${apiBaseUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "")}/mcp`;
+}
+
+export const MCP_ENDPOINT_URL = mcpEndpointUrl(API_BASE_URL);
+
 /**
  * mock 사용 여부.
  *

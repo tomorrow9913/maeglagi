@@ -6,6 +6,8 @@
 
 제품 정의와 슬로건, 브랜드 자산, 디자인 토큰의 기준은 [docs/brand.md](docs/brand.md), 화면 문구와 AI 답변의 말투 기준은 [docs/voice.md](docs/voice.md)에 있습니다.
 
+버그 제보와 개선 제안, 코드·문서 기여를 환영합니다. [GitHub 이슈](https://github.com/tomorrow9913/maeglagi/issues)와 [기여 안내](CONTRIBUTING.md)를 확인해 주세요.
+
 ## 구조
 
 ```text
@@ -18,6 +20,22 @@
 ```
 
 백엔드는 모듈 경계를 분명히 한 모듈러 모놀리스이며, API와 Celery worker를 별도 프로세스로 배포합니다.
+
+### 내 에이전트로 사용하기
+
+AI 제공업체 API 키 없이도 계정을 만들고 [MCP 연결](docs/mcp.md)을 등록해 사용할 수 있습니다. 사용자 에이전트가 전사·분석·질문 답변을 수행하고, 맥락이는 녹음과 자료, 검토된 회의록, 분석 결과와 온톨로지를 보관합니다. 계정 화면 `/account/mcp`에서 만료·해제가 가능한 전용 연결 토큰을 발급합니다. 음성 처리는 사용하는 에이전트가 지원해야 합니다.
+
+```mermaid
+flowchart LR
+    Web[웹 클라이언트] --> HTTP[HTTP API]
+    Agent[사용자 에이전트] --> MCP[MCP 도구·리소스·프롬프트]
+    HTTP --> Services[공통 애플리케이션 서비스]
+    MCP --> Services
+    Services --> Sources[자료·녹음·검토된 대본]
+    Services --> Knowledge[분석 결과·맥락·그래프]
+```
+
+HTTP와 MCP는 인증된 요청을 공통 서비스에 전달하는 진입 계층입니다. MCP 도구에 별도 DB·그래프 저장 규칙을 구현하지 않으며, 원문 근거·소유권·버전·중복 제출 검증은 서비스에서 적용합니다.
 
 ## 빠른 시작
 
@@ -151,6 +169,19 @@ Ollama API 규약: [소개](https://docs.ollama.com/api/introduction),
 [cloud 비활성화](https://docs.ollama.com/faq#how-can-i-disable-ollama-cloud-features).
 
 ## 설계 원칙
+
+NIM 비스트리밍 요청의 읽기 제한은 `NVIDIA_CHAT_READ_TIMEOUT_SECONDS`로 조절합니다
+(기본 180초, 허용 범위 60–600초). `z-ai/glm-5.3-flash`의 추출 단계는
+`NVIDIA_GLM_EXTRACTION_REASONING_EFFORT=low`를 기본으로 사용하며 `high`, `max`도
+설정할 수 있습니다. 다른 모델과 Ask의 추론 설정에는 적용하지 않습니다.
+[NVIDIA 모델 문서](https://docs.api.nvidia.com/nim/re/reference/z-ai-glm-5-3-flash)에 따르면
+이 모델의 공급자 기본 추론 강도는 `max`입니다.
+
+실패한 서버 음성 인식은 저장된 녹음으로 브라우저 받아쓰기를 다시 시도할 수 있습니다.
+오디오 트랙 입력을 지원하는 데스크톱 Chrome/Edge 135 이상에서 제공하며,
+브라우저의 음성 인식 서비스에 녹음이 전송될 수 있습니다. 결과는 같은 소스의 초안으로
+저장하고 사용자가 편집·확정한 뒤 분석합니다. 실제 음성 서비스와 긴 녹음의 재생 URL
+만료 동작은 [후속 검증 항목](https://github.com/tomorrow9913/maeglagi/issues/80)입니다.
 
 - 원문, 관계형 메타데이터, 임베딩, 그래프를 각각 Object Storage, PostgreSQL, Vector Store, Graph DB에 저장합니다.
 - LLM 호출은 `context_engine` 모듈의 provider port 뒤로 격리합니다.
