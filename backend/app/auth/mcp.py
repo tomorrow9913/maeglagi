@@ -42,6 +42,15 @@ def token_digest(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
+def validate_lifetime(days: int) -> None:
+    if (
+        isinstance(days, bool)
+        or not isinstance(days, int)
+        or not 1 <= days <= MAX_TOKEN_LIFETIME_DAYS
+    ):
+        raise HTTPException(422, "토큰 유효 기간은 1~365일로 설정해 주세요.")
+
+
 async def issue_token(
     session: AsyncSession,
     owner_id: UUID,
@@ -52,12 +61,7 @@ async def issue_token(
     label = label.strip()
     if not label or len(label) > 80 or any(ord(char) < 32 for char in label):
         raise HTTPException(422, "연결 이름을 1~80자로 입력해 주세요.")
-    if (
-        isinstance(expires_in_days, bool)
-        or not isinstance(expires_in_days, int)
-        or not 1 <= expires_in_days <= MAX_TOKEN_LIFETIME_DAYS
-    ):
-        raise HTTPException(422, "토큰 유효 기간은 1~365일로 설정해 주세요.")
+    validate_lifetime(expires_in_days)
     lock_key = int.from_bytes(
         hashlib.sha256(b"mcp-token:" + owner_id.bytes).digest()[:8], "big", signed=True
     )
@@ -87,6 +91,46 @@ async def issue_token(
     await session.commit()
     await session.refresh(item)
     return item, secret
+
+
+async def extend_token(
+    session: AsyncSession, owner_id: UUID, token_id: UUID, expires_in_days: int
+) -> McpToken:
+    """Extend a live token to at least N days from now; never revive or shorten it."""
+    validate_lifetime(expires_in_days)
+    new_expiry = datetime.now(UTC) + timedelta(days=expires_in_days)
+    result = await session.execute(
+        update(McpToken)
+        .where(
+            McpToken.id == token_id,
+            McpToken.owner_id == owner_id,
+            McpToken.revoked_at.is_(None),
+            McpToken.expires_at > func.now(),
+            McpToken.expires_at < new_expiry,
+        )
+        .values(expires_at=new_expiry)
+        .returning(McpToken.id)
+    )
+    if result.scalar_one_or_none() is None:
+        existing = (
+            await session.exec(
+                select(McpToken.id).where(
+                    McpToken.id == token_id,
+                    McpToken.owner_id == owner_id,
+                    McpToken.revoked_at.is_(None),
+                    McpToken.expires_at > func.now(),
+                )
+            )
+        ).first()
+        if existing is None:
+            raise HTTPException(
+                404, "활성 MCP 토큰을 찾을 수 없습니다. 만료된 토큰은 새로 발급해 주세요."
+            )
+        raise HTTPException(409, "선택한 기간으로는 현재 만료일이 늘어나지 않습니다.")
+    await session.commit()
+    item = await session.get(McpToken, token_id)
+    assert item is not None
+    return item
 
 
 async def authenticate_mcp_token(token: str, settings: Settings) -> AuthUser:

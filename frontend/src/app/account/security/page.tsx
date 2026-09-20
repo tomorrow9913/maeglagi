@@ -62,7 +62,10 @@ export default function AccountSecurityPage() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      await apiFetch<void>("/auth/me", { method: "DELETE" });
+      await apiFetch<void>("/auth/me", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: deleteText }),
+      });
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "계정을 삭제하지 못했습니다.");
       setDeleting(false);

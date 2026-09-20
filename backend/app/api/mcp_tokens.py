@@ -11,7 +11,13 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import CurrentUser
-from app.auth.mcp import DEFAULT_TOKEN_LIFETIME_DAYS, MAX_TOKEN_LIFETIME_DAYS, McpToken, issue_token
+from app.auth.mcp import (
+    DEFAULT_TOKEN_LIFETIME_DAYS,
+    MAX_TOKEN_LIFETIME_DAYS,
+    McpToken,
+    extend_token,
+    issue_token,
+)
 from app.core.database import get_session
 
 router = APIRouter(prefix="/mcp-tokens", tags=["mcp-connections"])
@@ -49,6 +55,13 @@ class IssuedToken(BaseModel):
     token: str
 
 
+class TokenExtension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expires_in_days: int = Field(
+        ge=1, le=MAX_TOKEN_LIFETIME_DAYS, strict=True, validation_alias="expiresInDays"
+    )
+
+
 @router.get("", response_model=TokenList)
 async def list_tokens(user: CurrentUser, session: Session, response: Response) -> TokenList:
     response.headers["Cache-Control"] = "no-store"
@@ -70,6 +83,15 @@ async def create_token(
     response.headers["Cache-Control"] = "no-store"
     item, secret = await issue_token(session, user.id, body.label, body.expires_in_days)
     return IssuedToken(item=TokenInfo.model_validate(item), token=secret)
+
+
+@router.patch("/{token_id}", response_model=TokenInfo)
+async def extend_token_expiry(
+    token_id: UUID, body: TokenExtension, user: CurrentUser, session: Session, response: Response
+) -> TokenInfo:
+    response.headers["Cache-Control"] = "no-store"
+    item = await extend_token(session, user.id, token_id, body.expires_in_days)
+    return TokenInfo.model_validate(item)
 
 
 @router.delete("/{token_id}", status_code=204)

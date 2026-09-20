@@ -9,6 +9,7 @@ import type {
   ContextTimelineQuery,
   CreateWorkspaceInput,
   KnowledgeGraph,
+  McpToken,
   McpTokenList,
   CreatedMcpToken,
   ProcessingJob,
@@ -47,6 +48,12 @@ export const httpApi: MaeglagiApi = {
     apiFetch<CreatedMcpToken>("/mcp-tokens", {
       method: "POST",
       body: JSON.stringify(input),
+      signal,
+    }),
+  extendMcpToken: (tokenId, expiresInDays, signal) =>
+    apiFetch<McpToken>(`/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ expiresInDays }),
       signal,
     }),
   revokeMcpToken: (tokenId, signal) =>

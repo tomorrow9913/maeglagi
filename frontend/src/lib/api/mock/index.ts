@@ -321,6 +321,23 @@ export const mockApi: MaeglagiApi = {
     return { item: { ...item }, token };
   },
 
+  async extendMcpToken(tokenId, expiresInDays, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const item = state.mcpTokens.find((token) => token.id === tokenId);
+    if (!item || new Date(item.expiresAt).getTime() <= Date.now()) {
+      throw new ApiError(404, "활성 MCP 토큰을 찾을 수 없습니다. 만료된 토큰은 새로 발급해 주세요.");
+    }
+    if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365) {
+      throw new ApiError(422, "토큰 유효 기간은 1~365일로 설정해 주세요.");
+    }
+    const expiry = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
+    if (expiry.getTime() <= new Date(item.expiresAt).getTime()) {
+      throw new ApiError(409, "선택한 기간으로는 현재 만료일이 늘어나지 않습니다.");
+    }
+    item.expiresAt = expiry.toISOString();
+    return { ...item };
+  },
+
   async revokeMcpToken(tokenId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     const index = state.mcpTokens.findIndex((item) => item.id === tokenId);

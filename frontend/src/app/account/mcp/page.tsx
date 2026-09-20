@@ -67,6 +67,8 @@ export default function AccountMcpPage() {
   const [created, setCreated] = useState<CreatedMcpToken | null>(null);
   const [busy, setBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<McpToken | null>(null);
+  const [extendTarget, setExtendTarget] = useState<McpToken | null>(null);
+  const [extensionDays, setExtensionDays] = useState(365);
 
   const closeCreate = () => {
     setCreateOpen(false);
@@ -101,6 +103,22 @@ export default function AccountMcpPage() {
       toast.success("MCP 토큰을 해지했습니다.");
     } catch (cause) {
       toast.error(toUserMessage(cause, "토큰을 해지하지 못했습니다."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const extend = async () => {
+    if (!extendTarget || busy) return;
+    setBusy(true);
+    try {
+      await api.extendMcpToken(extendTarget.id, extensionDays);
+      setExtendTarget(null);
+      setExtensionDays(365);
+      reload();
+      toast.success("MCP 토큰 만료일을 연장했습니다.");
+    } catch (cause) {
+      toast.error(toUserMessage(cause, "토큰을 연장하지 못했습니다."));
     } finally {
       setBusy(false);
     }
@@ -224,15 +242,22 @@ export default function AccountMcpPage() {
                       생성 {dateLabel(item.createdAt)} · 마지막 사용 {dateLabel(item.lastUsedAt)}
                     </p>
                   </div>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`${item.label} 토큰 해지`}
-                    title="토큰 해지"
-                    onClick={() => setRevokeTarget(item)}
-                  >
-                    <Trash2 aria-hidden />
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {new Date(item.expiresAt).getTime() > Date.now() && (
+                      <Button size="sm" variant="outline" onClick={() => setExtendTarget(item)}>
+                        연장
+                      </Button>
+                    )}
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`${item.label} 토큰 해지`}
+                      title="토큰 해지"
+                      onClick={() => setRevokeTarget(item)}
+                    >
+                      <Trash2 aria-hidden />
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -309,6 +334,48 @@ export default function AccountMcpPage() {
                 {busy ? <Loader2 className="animate-spin" aria-hidden /> : null}만들기
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(extendTarget)}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setExtendTarget(null);
+            setExtensionDays(365);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>MCP 토큰 기간 연장</DialogTitle>
+            <DialogDescription>
+              {extendTarget?.label}의 현재 만료일은 {dateLabel(extendTarget?.expiresAt ?? null)}입니다.
+              만료일을 줄일 수 없으며, 이미 만료된 토큰은 새로 발급해야 합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <label htmlFor="mcp-extension-period" className="text-sm font-medium">
+            지금부터 유지할 기간
+          </label>
+          <select
+            id="mcp-extension-period"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={extensionDays}
+            disabled={busy}
+            onChange={(event) => setExtensionDays(Number(event.target.value))}
+          >
+            {TOKEN_PERIODS.map((period) => (
+              <option key={period.days} value={period.days}>{period.label}</option>
+            ))}
+          </select>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExtendTarget(null)} disabled={busy}>
+              취소
+            </Button>
+            <Button onClick={() => void extend()} disabled={busy}>
+              {busy ? <Loader2 className="animate-spin" aria-hidden /> : null}연장하기
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

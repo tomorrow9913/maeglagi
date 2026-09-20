@@ -23,7 +23,9 @@ def test_delete_account_requires_authentication() -> None:
         supabase_publishable_key="public-key",
     )
     try:
-        response = TestClient(app).delete("/api/v1/auth/me")
+        response = TestClient(app).request(
+            "DELETE", "/api/v1/auth/me", json={"confirmation": "계정 탈퇴"}
+        )
     finally:
         app.dependency_overrides.clear()
     assert response.status_code == 401
@@ -38,11 +40,31 @@ def test_delete_account_uses_authenticated_identity(monkeypatch) -> None:
     app.dependency_overrides[get_current_user] = lambda: AuthUser(id=owner_id)
     app.dependency_overrides[get_session] = lambda: AsyncMock()
     try:
-        response = TestClient(app).delete("/api/v1/auth/me")
+        response = TestClient(app).request(
+            "DELETE", "/api/v1/auth/me", json={"confirmation": "계정 탈퇴"}
+        )
     finally:
         app.dependency_overrides.clear()
     assert response.status_code == 204
     assert deletion.await_args.args[0] == owner_id
+
+
+def test_delete_account_requires_exact_confirmation(monkeypatch) -> None:
+    owner_id = uuid4()
+    deletion = AsyncMock()
+    monkeypatch.setattr(
+        importlib.import_module("app.api.auth.router"), "delete_account_data", deletion
+    )
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(id=owner_id)
+    app.dependency_overrides[get_session] = lambda: AsyncMock()
+    try:
+        response = TestClient(app).request(
+            "DELETE", "/api/v1/auth/me", json={"confirmation": "삭제"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 422
+    deletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
