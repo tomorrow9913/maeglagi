@@ -31,12 +31,12 @@ export function authCallbackUrl(origin: string, next: string, intent?: "link"): 
   return callback.toString();
 }
 
-/** Override Supabase Kakao's default scope, which includes account_email. */
+/** Request email explicitly; Supabase is configured to require it for every account. */
 export function kakaoOAuthOptions(origin: string, next: string) {
   return {
     provider: "kakao" as const,
     options: {
-      queryParams: { scope: "profile_nickname profile_image" },
+      queryParams: { scope: "account_email profile_nickname profile_image" },
       redirectTo: authCallbackUrl(origin, next),
     },
   };
@@ -47,7 +47,7 @@ export function kakaoIdentityLinkOptions(origin: string) {
   return {
     provider: "kakao" as const,
     options: {
-      queryParams: { scope: "profile_nickname profile_image" },
+      queryParams: { scope: "account_email profile_nickname profile_image" },
       redirectTo: authCallbackUrl(origin, "/account/security", "link"),
     },
   };

@@ -44,19 +44,19 @@ test("OAuth callback keeps a valid next path as a query parameter", () => {
   );
 });
 
-test("Kakao OAuth overrides Supabase's email scope default", () => {
+test("Kakao OAuth requests an email for the required-email policy", () => {
   const config = kakaoOAuthOptions("https://app.example", "/workspaces");
   assert.equal(config.provider, "kakao");
-  assert.equal(config.options.queryParams.scope, "profile_nickname profile_image");
+  assert.equal(config.options.queryParams.scope, "account_email profile_nickname profile_image");
   assert.equal(config.options.redirectTo, "https://app.example/auth/callback");
   assert.equal("scopes" in config.options, false);
-  assert.equal(JSON.stringify(config).includes("account_email"), false);
+  assert.equal(JSON.stringify(config).includes("account_email"), true);
 });
 
 test("Kakao identity linking returns to the authenticated account page", () => {
   const config = kakaoIdentityLinkOptions("https://app.example");
   assert.equal(config.provider, "kakao");
-  assert.equal(config.options.queryParams.scope, "profile_nickname profile_image");
+  assert.equal(config.options.queryParams.scope, "account_email profile_nickname profile_image");
   assert.equal(
     config.options.redirectTo,
     "https://app.example/auth/callback?next=%2Faccount%2Fsecurity&intent=link",
