@@ -15,6 +15,7 @@ from app.modules.workspaces.infrastructure.models import Source
 MAX_TOKENS = 8
 MAX_TEXT = 1200
 MAX_RESULTS = 8
+BM25_PLUS_DELTA = 1.0
 STOP_WORDS = {"최근", "어떤", "무엇", "뭐가", "왜", "어떻게", "있나요", "알려줘", "해줘"}
 
 
@@ -52,7 +53,7 @@ def query_terms(question: str) -> list[str]:
 
 
 def _bm25(corpus: object, terms: list[str]) -> tuple[object, object, object]:
-    """Rank character n-gram matches with corpus-wide BM25 (k1=1.2, b=0.75)."""
+    """Rank literal matches with BM25+ (k1=1.2, b=0.75, delta=1)."""
     text = corpus.c.text
     document_length = cast(corpus.c.doc_len, Float)
     predicates = [text.contains(term, autoescape=True) for term in terms]
@@ -82,7 +83,12 @@ def _bm25(corpus: object, terms: list[str]) -> tuple[object, object, object]:
             frequency
             + 1.2 * (0.25 + 0.75 * document_length / func.nullif(statistics.c.average_length, 0))
         )
-        scores.append(inverse_frequency * normalized_frequency)
+        # The BM25+ floor applies only when the term occurs. Without the guard,
+        # absent terms would contribute to every document's score.
+        scores.append(
+            inverse_frequency
+            * (normalized_frequency + case((frequency > 0, BM25_PLUS_DELTA), else_=0.0))
+        )
     return or_(*predicates), sum(scores, 0), statistics
 
 
