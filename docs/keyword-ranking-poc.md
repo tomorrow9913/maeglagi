@@ -2,30 +2,39 @@
 
 Branch: `bm25-fallback-search`.
 
-## Decision
+## Problem and choice
 
-Keep the existing literal substring and Korean character-pair matching, then rank a bounded
-candidate set with the existing BM25 variant. Each chunk and parsed-source query takes at most
-2,000 recent matching rows into the scoring CTE. Candidate selection includes owner, workspace,
-source eligibility, and optional graph source IDs before the limit. Output remains at most eight
-rows with at most 1,200 characters each. Null embeddings remain searchable.
+The previous candidate cap was unrelated to BM25 ranking quality and could silently discard an
+older, highly relevant passage. It has been removed. This PoC uses BM25+ for the existing keyword
+path. Standard BM25's length normalization can drive the contribution of a matched term toward
+zero in a long document. BM25+ adds a positive floor for each **present** query term. The floor
+is conditional: absent terms contribute zero. This favors coverage of distinct query terms in
+long parsed documents while preserving term-frequency saturation. The chosen delta is 1.0;
+relevance judgments are needed to tune it.
 
-| Design | Benefit | Cost for this PoC |
+| Variant | Problem addressed | Fit here |
 | --- | --- | --- |
-| PostgreSQL `tsvector` / `ts_rank` | Native GIN index and ranking | The built-in configurations do not stem Korean questions; inflected terms would regress without a separate tokenizer. |
-| PostgreSQL BM25 extension | Index-assisted BM25 | Adds an extension and deployment compatibility requirement to Supabase/Render. |
-| Pluggable ranker interface | Allows later engines | Adds abstraction before a second ranker or benchmark exists. |
-| Bounded substring candidates + BM25 | Preserves Korean matching and current evidence behavior without a new extension | Substring filtering can still scan text; a relevant older row can fall outside the 2,000 most recent matches. IDF is estimated on candidates, not the complete workspace. |
+| BM25+ | Long documents receive vanishing credit for a matched term | Small SQL change; chosen for the PoC |
+| BM25L | Shifts normalized term frequency for long documents | Plausible alternative; needs comparative judgments |
+| BM25F | Weights title and body as separate fields | Useful once title relevance and field lengths can be measured |
+| BM25-adpt / BM25T | Uses term-specific saturation | More collection statistics and query cost than justified here |
+| `bm25x` | Rust search engine implementing several BM25 variants, not itself one ranking formula | Requires a new index and access-control integration |
+| PostgreSQL full-text `ts_rank` | Indexed token retrieval, not BM25 | Built-in tokenization does not handle Korean inflection like the current character pairs |
 
-The vector path and its ordering are unchanged. The retrieval layer still includes parsed text
-that has no vector when semantic search succeeds. Keyword search is also used when query
-embedding fails or no vector hits are available. The same lexical function serves Ask and the
-agent knowledge interface.
+The application still scopes chunks and parsed source text by owner and workspace before scoring,
+and retains review-state and processing-stage rules. Null embeddings remain searchable. Vector
+retrieval and the existing policy of including newly parsed source text alongside vectors are
+unchanged. No extension, migration, or operating configuration is required.
 
-## Next measurement
+## Limits and validation
 
-Run the PostgreSQL integration tests with `ASK_TEST_DATABASE_URL` against an isolated pgvector
-database. Benchmark workspace sizes and Korean/English queries with `EXPLAIN (ANALYZE, BUFFERS)`.
-If substring filtering dominates, test `pg_trgm` indexes for terms of at least three characters
-and measure two-character Korean pair queries separately. Compare recall against the unbounded
-query before choosing an index or a tokenizer extension.
+The current score uses character length and overlapping Korean pairs rather than word-token BM25.
+Its IDF statistics require scanning the eligible corpus, and long source text is scored as one
+item while chunks are scored separately. A labeled Korean and English query set should measure
+recall and nDCG for BM25, BM25+, and BM25L before production tuning. PostgreSQL integration
+checks require `ASK_TEST_DATABASE_URL` against an isolated database; query plans and latency
+should be measured there with `EXPLAIN (ANALYZE, BUFFERS)`.
+
+Research: [BM25L motivation](https://experts.illinois.edu/en/publications/when-documents-are-very-long-bm25-fails/),
+[BM25 variant reproducibility study](https://pmc.ncbi.nlm.nih.gov/articles/PMC7148026/),
+[bm25x project](https://github.com/lightonai/bm25x).

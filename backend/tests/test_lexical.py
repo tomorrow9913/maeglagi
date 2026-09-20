@@ -13,7 +13,7 @@ from app.modules.context_engine.application.model_catalog import has_indexed_chu
 from app.modules.ingestion.application.pipeline import IngestionPipeline
 from app.modules.retrieval.application.hybrid import HybridRetriever
 from app.modules.retrieval.application.lexical import (
-    MAX_CANDIDATES,
+    BM25_PLUS_DELTA,
     MAX_RESULTS,
     MAX_TEXT,
     _bm25,
@@ -48,6 +48,27 @@ async def test_postgres_bm25_prefers_shorter_equally_relevant_passage() -> None:
             rows = (await connection.execute(statement)).all()
             assert [row.id for row in rows] == [1, 2]
             assert rows[0].score > rows[1].score > 0
+    finally:
+        await engine.dispose()
+
+
+async def test_bm25_plus_rewards_a_long_document_for_a_second_distinct_term() -> None:
+    url = os.environ.get("ASK_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("set ASK_TEST_DATABASE_URL to a local PostgreSQL test database")
+    engine = create_async_engine(url)
+    long_text = "redis " + "filler " * 300 + "cache"
+    corpus = union_all(
+        select(literal(1).label("id"), literal("redis").label("text"), literal(5).label("doc_len")),
+        select(literal(2), literal(long_text), literal(len(long_text))),
+        select(literal(3), literal("unrelated"), literal(9)),
+    ).cte("corpus")
+    _, score, statistics = _bm25(corpus, ["redis", "cache"])
+    statement = select(corpus.c.id, score.label("score")).join(statistics, true())
+    try:
+        async with engine.connect() as connection:
+            scores = {row.id: row.score for row in (await connection.execute(statement)).all()}
+            assert scores[2] > scores[1] > scores[3] == 0
     finally:
         await engine.dispose()
 
@@ -164,12 +185,12 @@ async def test_null_embedding_chunk_is_returned_from_bounded_eligible_query() ->
     assert "sources.owner_id" in sql and "chunks.owner_id" in sql
     assert "sources.workspace_id" in sql and "chunks.workspace_id" in sql
     assert "WITH chunk_corpus AS" in sql
-    assert sql.index("chunks.owner_id") < sql.index("LIMIT")
     assert "ln(" in sql and "replace(" in sql and "avg(" in sql
     assert "SELECT count(*)" in sql
     assert 1 in compiled.params.values()  # substring starts at first character
     assert MAX_TEXT in compiled.params.values() and MAX_RESULTS in compiled.params.values()
-    assert MAX_CANDIDATES in compiled.params.values()
+    assert BM25_PLUS_DELTA in compiled.params.values()
+    assert "CASE WHEN" in sql  # BM25+ floor must be conditional on a term match.
 
 
 async def test_postgres_null_vectors_and_confirmed_source_text() -> None:
@@ -365,7 +386,7 @@ async def test_processed_source_text_has_source_only_citation_and_scoped_excerpt
     assert "sources.status" in sql and "sources.review_state" in sql
     assert "sources.processing_stage" in sql and "sources.kind" in sql
     assert "WITH source_corpus AS" in sql and "ln(" in sql
-    assert MAX_CANDIDATES in statement.compile(dialect=postgresql.dialect()).params.values()
+    assert BM25_PLUS_DELTA in statement.compile(dialect=postgresql.dialect()).params.values()
 
 
 async def test_no_terms_or_no_allowed_sources_do_not_query() -> None:
