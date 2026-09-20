@@ -10,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.auth import bearer
 from app.auth.mcp import authenticate_mcp_token
 from app.core.database import get_session
+from app.mcp.workflow_hints import next_step
 from app.modules.ingestion.application.source_upload import (
     SourceUploadService,
     UploadServiceError,
@@ -69,4 +70,5 @@ async def upload_agent_media(
         "kind": source.kind,
         "status": source.status,
         "analysisMode": "agent",
+        "nextAction": next_step(workspace_id, source.id, kind=kind, has_media=True),
     }

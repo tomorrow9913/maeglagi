@@ -51,6 +51,11 @@ async def test_agent_upload_reuses_validation_without_scheduling_ai(monkeypatch)
         assert response.status_code == 201
         assert response.json()["status"] == "awaiting_agent"
         assert response.json()["analysisMode"] == "agent"
+        assert response.json()["nextAction"]["tool"] == "media_download_url"
+        assert response.json()["nextAction"]["arguments"] == {
+            "workspace_id": str(workspace.id),
+            "source_id": response.json()["sourceId"],
+        }
         stored = sources[-1]
         assert stored.analysis_mode == "agent" and stored.review_state == "awaiting_review"
         assert stored.object_path.startswith(f"{owner}/{workspace.id}/{stored.id}/")

@@ -37,9 +37,9 @@ def register(server: MCPServer, settings: Settings) -> None:
         result: dict[str, Any],
         ctx: Context,
     ) -> dict[str, Any]:
-        """Submit grounded external analysis after matching the confirmed source revision."""
+        """Store agent-produced chunks, contexts and graph; phase=done is completion."""
         owner_id = current_user(ctx).id
-        return await workflow_call(
+        submission = await workflow_call(
             settings,
             lambda svc: svc.submit_analysis(
                 owner_id=owner_id,
@@ -50,3 +50,11 @@ def register(server: MCPServer, settings: Settings) -> None:
                 result=result,
             ),
         )
+        return {
+            **submission,
+            "completionMessage": (
+                "분석 결과 저장을 완료했습니다. 경고 내용을 확인해 주세요."
+                if submission["warnings"]
+                else "분석 결과 저장을 완료했습니다."
+            ),
+        }
