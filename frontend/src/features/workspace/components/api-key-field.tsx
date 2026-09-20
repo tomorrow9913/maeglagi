@@ -9,6 +9,7 @@ import { useApi } from "@/lib/api/context";
 import type { ApiKeyValidation, LlmProvider } from "@/lib/api";
 import { providerKeyPlaceholder } from "@/lib/api/providers";
 import { cn } from "@/lib/utils";
+import { toUserMessage } from "@/lib/api/error-message";
 
 export type ApiKeyFieldProps = {
   id: string;
@@ -73,7 +74,7 @@ export function ApiKeyField({
         if (controller.signal.aborted) return;
         publish({
           valid: false,
-          message: error instanceof Error ? error.message : "키를 확인하지 못했습니다.",
+          message: toUserMessage(error, "키를 확인하지 못했습니다."),
         });
       } finally {
         if (!controller.signal.aborted) setIsChecking(false);

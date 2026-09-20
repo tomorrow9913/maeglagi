@@ -27,7 +27,9 @@ export async function updateSession(request: NextRequest) {
   if (!data.user && requiresWorkspaceAuth(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("next", request.nextUrl.pathname);
+    // 근거 링크처럼 쿼리가 붙은 주소도 로그인 뒤 그대로 돌아오게 합니다.
+    url.search = "";
+    url.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(url);
   }
   return response;

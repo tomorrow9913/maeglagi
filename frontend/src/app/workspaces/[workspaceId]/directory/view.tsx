@@ -19,6 +19,7 @@ import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { KnowledgeGraph, WorkspacePerson, WorkspaceProject } from "@/lib/api";
 import { buildPersonContext, type PersonActivity } from "@/features/directory/lib/person-context";
 import { listProjectPeople } from "@/features/directory/lib/project-people";
+import { toUserMessage } from "@/lib/api/error-message";
 
 type PersonForm = { name: string; email: string; aliases: string; role: string };
 type ProjectForm = {
@@ -41,7 +42,7 @@ const emptyProject: ProjectForm = {
   endsOn: "",
 };
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : "요청을 완료하지 못했습니다.";
+  return toUserMessage(error, "요청을 완료하지 못했습니다.");
 }
 function ActivityList({
   items,

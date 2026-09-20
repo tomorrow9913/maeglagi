@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { MeetingReview } from "@/lib/api";
 import { useApi } from "@/lib/api/context";
 import { useSavedRecordingTranscript } from "../hooks/use-saved-recording-transcript";
+import { toUserMessage } from "@/lib/api/error-message";
 
 export function SavedRecordingRecovery({ workspaceId, sourceId, review, onSaved }: {
   workspaceId: string;
@@ -32,7 +33,7 @@ export function SavedRecordingRecovery({ workspaceId, sourceId, review, onSaved 
       window.dispatchEvent(new Event("maeglagi:sources-changed"));
       toast.success("브라우저 대본을 저장했습니다. 검토 후 확인해 주세요.");
     } catch (error) {
-      if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : "브라우저 대본을 저장하지 못했습니다.");
+      if (!controller.signal.aborted) toast.error(toUserMessage(error, "브라우저 대본을 저장하지 못했습니다."));
     } finally {
       if (!controller.signal.aborted) setSaving(false);
     }

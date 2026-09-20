@@ -12,6 +12,7 @@ import type { AiProvider, LlmProvider, WorkspaceSecrets } from "@/lib/api";
 import { ApiKeyField } from "./api-key-field";
 import { OllamaBaseUrlField } from "./ollama-base-url-field";
 import { ProviderSelect } from "./provider-select";
+import { toUserMessage } from "@/lib/api/error-message";
 
 const hasOllamaKey = (credential: WorkspaceSecrets) =>
   credential.keyHint !== "none" && credential.keyHint !== "local";
@@ -100,7 +101,7 @@ export function ApiKeyCard({
       onUpdated();
       toast.success(editingCredential ? "계정 AI 연결을 수정했습니다." : "계정 AI 연결을 등록했습니다.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "AI 연결을 저장하지 못했습니다.");
+      toast.error(toUserMessage(error, "AI 연결을 저장하지 못했습니다."));
     } finally {
       setIsSaving(false);
     }

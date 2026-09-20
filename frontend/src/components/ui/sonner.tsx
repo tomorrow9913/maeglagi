@@ -1,6 +1,5 @@
 "use client";
 
-import { useTheme } from "next-themes";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import {
   CircleCheckIcon,
@@ -11,11 +10,12 @@ import {
 } from "lucide-react";
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
-
+  // 앱이 라이트 전용이라 OS가 다크여도 토스트만 어두워지지 않게 고정합니다.
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme="light"
+      // 모바일에서는 하단 고정 입력창(Ask)을 가리지 않도록 띄웁니다.
+      mobileOffset={{ bottom: 88 }}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

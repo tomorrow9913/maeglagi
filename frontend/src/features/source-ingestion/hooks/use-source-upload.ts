@@ -7,6 +7,7 @@ import { useApi } from "@/lib/api/context";
 import type { MeetingUtterance, ProcessingJob, TranscriptSourceInput } from "@/lib/api";
 
 import { validateDocuments } from "../lib/validate-file";
+import { toUserMessage } from "@/lib/api/error-message";
 
 export type UploadItemStatus = "uploading" | "uploaded" | "failed";
 
@@ -89,7 +90,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
           const reason = result.reason;
           patch(item.id, {
             status: "failed",
-            errorMessage: reason instanceof Error ? reason.message : "업로드에 실패했습니다.",
+            errorMessage: toUserMessage(reason, "업로드에 실패했습니다."),
           });
           toast.error(`${item.fileName} 업로드에 실패했습니다.`);
         }
@@ -126,7 +127,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
       } catch (error) {
         patch(item.id, {
           status: "failed",
-          errorMessage: error instanceof Error ? error.message : "업로드에 실패했습니다.",
+          errorMessage: toUserMessage(error, "업로드에 실패했습니다."),
         });
         toast.error("녹음 업로드에 실패했습니다.");
         throw error;
@@ -153,7 +154,7 @@ export function useSourceUpload(workspaceId: string, onUploaded?: () => void) {
       } catch (error) {
         patch(item.id, {
           status: "failed",
-          errorMessage: error instanceof Error ? error.message : "업로드 실패",
+          errorMessage: toUserMessage(error, "업로드 실패"),
         });
         toast.error("대본을 올리지 못했습니다. 편집 내용은 유지됩니다.");
         return false;

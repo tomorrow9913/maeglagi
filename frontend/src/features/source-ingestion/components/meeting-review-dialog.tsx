@@ -11,6 +11,7 @@ import { reviewUtterances, unresolvedReviewPeople, type TranscriptTurn } from ".
 import { reviewConfirmationCopy, reviewDisplayState } from "../lib/source-presentation";
 import { TranscriptEditor, type SpeakerOption } from "./transcript-editor";
 import { SavedRecordingRecovery } from "./saved-recording-recovery";
+import { toUserMessage } from "@/lib/api/error-message";
 
 const isReadOnlyReview = (review: MeetingReview) => reviewDisplayState(review).readOnly;
 
@@ -64,7 +65,7 @@ export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirme
       setRows(data.utterances.map((item, index) => { idMap.current.set(index + 1, item.id); return { id: index + 1, speaker: item.personId || assigned.get(item.speakerName) || options[0].id, personId: item.personId, text: item.text, isFinal: true, startSeconds: item.startSeconds, endSeconds: item.endSeconds }; }));
       const selectedProjects = data.projectIds ?? (data.projectId ? [data.projectId] : []);
       setProjectIds(selectedProjects); setProjectId(selectedProjects[0] ?? ""); setDirty(false); setConflict(false);
-    } catch (error) { if (openId.current === id) setLoadError(error instanceof Error ? error.message : "대본을 불러오지 못했습니다."); }
+    } catch (error) { if (openId.current === id) setLoadError(toUserMessage(error, "대본을 불러오지 못했습니다.")); }
     finally { if (openId.current === id) setLoading(false); }
   }, [api, workspaceId]);
   useEffect(() => { if (sourceId) void load(sourceId); else { setReview(undefined); setRows([]); setJob(undefined); setLoadError(undefined); } }, [sourceId, load]);
@@ -86,7 +87,7 @@ export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirme
       toast.success("저장된 녹음으로 음성 인식을 다시 시작했습니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) await load(sourceId);
-      toast.error(error instanceof Error ? error.message : "음성 인식을 다시 시작하지 못했습니다.");
+      toast.error(toUserMessage(error, "음성 인식을 다시 시작하지 못했습니다."));
     } finally { setBusy(false); }
   };
   const save = async () => {
@@ -97,7 +98,7 @@ export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirme
       setReview(next); setDirty(false); setConflict(false); toast.success("대본 초안을 저장했습니다.");
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) { setConflict(true); toast.error("다른 곳에서 대본이 수정됐습니다. 내용을 확인한 뒤 다시 불러와 주세요."); }
-      else toast.error(error instanceof Error ? error.message : "대본을 저장하지 못했습니다.");
+      else toast.error(toUserMessage(error, "대본을 저장하지 못했습니다."));
     } finally { setBusy(false); }
   };
   const confirm = async (retry = false) => {
@@ -110,7 +111,7 @@ export function MeetingReviewDialog({ workspaceId, sourceId, onClose, onConfirme
         toast.error("대본은 확인됐지만 분석 대기열에 연결하지 못했습니다. 다시 시도할 수 있습니다.");
         await load(sourceId);
         window.dispatchEvent(new Event("maeglagi:sources-changed"));
-      } else toast.error(error instanceof Error ? error.message : "확인하지 못했습니다.");
+      } else toast.error(toUserMessage(error, "확인하지 못했습니다."));
     }
     finally { setBusy(false); }
   };

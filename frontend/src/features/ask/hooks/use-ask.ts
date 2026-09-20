@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useApi } from "@/lib/api/context";
 import type { AnswerSource } from "@/lib/api";
+import { toUserMessage } from "@/lib/api/error-message";
 
 export type AskTurn = {
   id: string;
@@ -81,7 +82,7 @@ export function useAsk(workspaceId: string) {
         }
         patch(id, {
           status: "error",
-          errorMessage: error instanceof Error ? error.message : "답변을 받지 못했습니다.",
+          errorMessage: toUserMessage(error, "답변을 받지 못했습니다."),
         });
       } finally {
         inFlightRef.current = false;

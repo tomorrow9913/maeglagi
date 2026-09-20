@@ -13,6 +13,7 @@ import { mergeTranscript, type TranscriptTurn } from "../lib/transcript-draft";
 import { addRoster, meetingUtterances, nextLocalSpeakerName, projectRoster, removeSpeaker } from "../lib/meeting-roster";
 import { RecordingControls } from "./recording-controls";
 import { TranscriptEditor, type SpeakerOption } from "./transcript-editor";
+import { toUserMessage } from "@/lib/api/error-message";
 
 const speakerColors = ["var(--chart-2-hex)", "var(--chart-4-hex)", "var(--chart-1-hex)", "var(--chart-3-hex)", "var(--chart-5-hex)"];
 function speakerColor(id: string) {
@@ -112,7 +113,7 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     setAudioUploadError(undefined);
     void onAudio(pending.blob, pending.seconds, { utterances: meetingUtterances(draftRef.current ?? [], speakers, people) }, projectId || undefined, projectIds)
       .then(() => { commitDraft(null); setDuration(0); previousSegments.current = []; deletedIds.current.clear(); setAudioStarted(false); setRecordingFailed(false); })
-      .catch((error) => { setAudioUploadError(error instanceof Error ? error.message : "오디오를 올리지 못했습니다."); pendingAudio.current = pending; })
+      .catch((error) => { setAudioUploadError(toUserMessage(error, "오디오를 올리지 못했습니다.")); pendingAudio.current = pending; })
       .finally(() => { savingRef.current = false; setSaving(false); });
   }, [pendingAudioReady, speechFinalized, speech.status, onAudio, speakers, people, projectId, projectIds]);
   useEffect(() => {
@@ -206,7 +207,7 @@ export function MeetingCapture({ workspaceId, onAudio, onTranscript, onBusyChang
     setSaving(true);
     setFileUploadError(undefined);
     try { await onAudio(file, 0, undefined, projectId || undefined, projectIds); setFailedFile(undefined); }
-    catch (error) { setFailedFile(file); setFileUploadError(error instanceof Error ? error.message : "파일을 올리지 못했습니다."); }
+    catch (error) { setFailedFile(file); setFileUploadError(toUserMessage(error, "파일을 올리지 못했습니다.")); }
     finally { savingRef.current = false; setSaving(false); }
   };
   return <div className="space-y-4">

@@ -16,6 +16,7 @@ import { useAsync } from "@/hooks/use-async";
 import { useApi, useWorkspacePath } from "@/lib/api/context";
 import type { ModelOption, RoleModels } from "@/lib/api";
 import { optionKey } from "@/features/workspace/lib/model-roles";
+import { toUserMessage } from "@/lib/api/error-message";
 
 
 export function AnswerModelPicker({
@@ -83,7 +84,7 @@ export function AnswerModelPicker({
       setAnswer(next.roles.find((role) => role.role === "answer"));
     } catch (cause) {
       setFailedOption(option);
-      setSaveError(cause instanceof Error ? cause.message : "모델을 저장하지 못했습니다.");
+      setSaveError(toUserMessage(cause, "모델을 저장하지 못했습니다."));
     } finally {
       savingRef.current = false;
       setIsSaving(false);

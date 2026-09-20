@@ -34,6 +34,7 @@ import { KeyModelSection } from "./key-model-section";
 import { OllamaBaseUrlField } from "./ollama-base-url-field";
 import { ProviderDefaults } from "./provider-defaults";
 import { ProviderSelect } from "./provider-select";
+import { toUserMessage } from "@/lib/api/error-message";
 
 /**
  * 계정의 AI 연결을 선택하고 워크스페이스의 모델 역할을 정합니다.
@@ -133,7 +134,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
         setIsOpen(false);
         reset();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "워크스페이스를 만들지 못했습니다.");
+        toast.error(toUserMessage(error, "워크스페이스를 만들지 못했습니다."));
       } finally {
         setIsSubmitting(false);
       }
@@ -179,7 +180,7 @@ export function CreateWorkspaceDialog({ onCreated }: { onCreated: (created: Work
       setIsOpen(false);
       reset();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "워크스페이스를 만들지 못했습니다.");
+      toast.error(toUserMessage(error, "워크스페이스를 만들지 못했습니다."));
     } finally {
       setIsSubmitting(false);
     }

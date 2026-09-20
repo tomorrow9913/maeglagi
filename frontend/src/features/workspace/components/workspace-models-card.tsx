@@ -20,6 +20,7 @@ import type {
 
 import { sameSelection } from "../lib/model-roles";
 import { ModelPicker } from "./model-picker";
+import { toUserMessage } from "@/lib/api/error-message";
 
 function savedSelections(roles: RoleModels[]): ModelSelections {
   const selections: ModelSelections = {};
@@ -86,7 +87,7 @@ export function WorkspaceModelsCard({
       setEditedRoles([]);
       toast.success("사용할 모델을 저장했습니다.");
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "모델을 저장하지 못했습니다.");
+      toast.error(toUserMessage(cause, "모델을 저장하지 못했습니다."));
     } finally {
       setIsSaving(false);
     }

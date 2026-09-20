@@ -162,3 +162,15 @@
     scrollbar-gutter: stable;
   }
 }
+
+/* 움직임 줄이기를 켠 사용자에게는 스피너·스켈레톤·다이얼로그 전환을 사실상 멈춥니다. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

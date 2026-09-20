@@ -21,6 +21,7 @@ import { useAsync } from "@/hooks/use-async";
 import { useApi } from "@/lib/api/context";
 import { MCP_ENDPOINT_URL } from "@/lib/api/config";
 import type { CreatedMcpToken, McpToken } from "@/lib/api";
+import { toUserMessage } from "@/lib/api/error-message";
 
 const dateLabel = (value: string | null) =>
   value
@@ -75,7 +76,7 @@ export default function AccountMcpPage() {
       reload();
       toast.success("MCP 토큰을 만들었습니다.");
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "토큰을 만들지 못했습니다.");
+      toast.error(toUserMessage(cause, "토큰을 만들지 못했습니다."));
     } finally {
       setBusy(false);
     }
@@ -90,7 +91,7 @@ export default function AccountMcpPage() {
       reload();
       toast.success("MCP 토큰을 해지했습니다.");
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "토큰을 해지하지 못했습니다.");
+      toast.error(toUserMessage(cause, "토큰을 해지하지 못했습니다."));
     } finally {
       setBusy(false);
     }

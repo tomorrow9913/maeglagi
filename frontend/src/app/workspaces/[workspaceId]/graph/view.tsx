@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { ErrorState } from "@/components/common/state-views";
+import { EmptyState, ErrorState } from "@/components/common/state-views";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,7 +16,7 @@ import {
   type GraphPalette,
 } from "@/features/knowledge-graph/lib/graph-style";
 import { useAsync } from "@/hooks/use-async";
-import { useApi, useWorkspacePath } from "@/lib/api/context";
+import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { ContextItemSource, EntityType, KnowledgeGraph } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +54,7 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
   const api = useApi();
   const router = useRouter();
   const workspacePath = useWorkspacePath();
+  const isDemo = useDemoMode();
 
   const [hidden, setHidden] = useState<EntityType[]>([]);
   const [showMaterials, setShowMaterials] = useState(true);
@@ -65,9 +66,10 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
   const [palette, setPalette] = useState<GraphPalette>();
   useEffect(() => setPalette(readGraphPalette()), []);
 
-  const { data, error, isLoading, reload } = useAsync(
+  const { data, error, isLoading, isRefetching, reload } = useAsync(
     (signal) => api.getKnowledgeGraph(workspaceId, { ...(asOf ? { at: asOf } : {}), includeMaterials: showMaterials }, signal),
     [workspaceId, asOf, showMaterials],
+    { resetKey: workspaceId },
   );
 
   const graph = useMemo(
@@ -150,9 +152,24 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
         })}
       </div>
 
-      <div className="mt-4 h-[min(70vh,620px)] overflow-hidden rounded-xl border border-border bg-card">
-        {isLoading ? (
-          <Skeleton className="size-full rounded-none" />
+      {/* 기준일·자료 토글로 다시 받을 때는 캔버스를 유지합니다. 언마운트하면 확대와 배치가 초기화됩니다. */}
+      <div
+        className={cn(
+          "relative mt-4 h-[min(70vh,620px)] overflow-hidden rounded-xl border border-border bg-card transition-opacity",
+          isRefetching && "opacity-60",
+        )}
+        aria-busy={isLoading}
+      >
+        {isRefetching ? (
+          <p role="status" className="sr-only">
+            그래프를 다시 불러오는 중
+          </p>
+        ) : null}
+        {isLoading && !data ? (
+          <div role="status" className="size-full">
+            <span className="sr-only">그래프를 불러오는 중</span>
+            <Skeleton className="size-full rounded-none" aria-hidden />
+          </div>
         ) : error ? (
           <ErrorState
             error={error}
@@ -160,11 +177,54 @@ export function GraphView({ workspaceId }: { workspaceId: string }) {
             className="size-full justify-center border-0"
           />
         ) : graph.nodes.length === 0 ? (
-          <div className="flex size-full items-center justify-center p-10 text-center text-sm text-muted-foreground">
-            {hidden.length > 0
-              ? "선택한 종류의 노드가 없습니다. 필터를 풀어보세요."
-              : "표시할 노드가 없습니다. 회의나 문서를 올리면 관계가 만들어져요."}
-          </div>
+          // 왜 비었는지에 따라 다음 행동이 다릅니다: 종류 필터, 기준일, 아직 소스가 없는 경우.
+          hidden.length > 0 || !showMaterials ? (
+            <EmptyState
+              className="size-full justify-center border-0"
+              title="선택한 종류의 노드가 없습니다"
+              description="필터를 해제하면 다른 종류의 노드를 볼 수 있어요."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setHidden([]);
+                    setShowMaterials(true);
+                  }}
+                >
+                  필터 해제
+                </Button>
+              }
+            />
+          ) : asOf ? (
+            <EmptyState
+              className="size-full justify-center border-0"
+              title={`${asOf}에는 유효한 관계가 없습니다`}
+              description="다른 날짜를 고르거나 지금 시점으로 돌아가 보세요."
+              action={
+                <Button variant="outline" size="sm" onClick={() => setAsOf("")}>
+                  지금으로
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              className="size-full justify-center border-0"
+              title="표시할 노드가 없습니다"
+              description="회의나 문서를 올리면 관계가 만들어져요."
+              action={
+                isDemo ? null : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push(workspacePath(workspaceId, "sources"))}
+                  >
+                    소스 올리러 가기
+                  </Button>
+                )
+              }
+            />
+          )
         ) : (
           <GraphCanvas
             graph={graph}

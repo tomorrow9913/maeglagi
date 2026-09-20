@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
+import { Button } from "@/components/ui/button";
 import { CurrentStateCard } from "@/features/context-timeline/components/current-state-card";
 import { TimelineCard } from "@/features/context-timeline/components/timeline-card";
 import {
@@ -14,7 +15,7 @@ import {
 import { groupByDate } from "@/features/context-timeline/lib/group-by-date";
 import { kindDotClass } from "@/features/context-timeline/lib/kind-style";
 import { useAsync } from "@/hooks/use-async";
-import { useApi, useWorkspacePath } from "@/lib/api/context";
+import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { ContextItemSource } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ export function TimelineView({ workspaceId }: { workspaceId: string }) {
   const api = useApi();
   const router = useRouter();
   const workspacePath = useWorkspacePath();
+  const isDemo = useDemoMode();
 
   const [filters, setFilters] = useState<TimelineFilterState>({ kinds: [], sourceKinds: [] });
 
@@ -34,7 +36,7 @@ export function TimelineView({ workspaceId }: { workspaceId: string }) {
   const kindsKey = filters.kinds.join(",");
   const sourceKindsKey = filters.sourceKinds.join(",");
 
-  const { data, error, isLoading, reload } = useAsync(
+  const { data, error, isLoading, isRefetching, reload } = useAsync(
     (signal) =>
       api.listContextItems(
         workspaceId,
@@ -42,6 +44,7 @@ export function TimelineView({ workspaceId }: { workspaceId: string }) {
         signal,
       ),
     [workspaceId, kindsKey, sourceKindsKey],
+    { resetKey: workspaceId },
   );
 
   // 현재 상황 카드는 곁가지입니다. 못 받아도 타임라인은 그대로 보여주도록 오류는 무시합니다.
@@ -83,9 +86,13 @@ export function TimelineView({ workspaceId }: { workspaceId: string }) {
 
       <TimelineFilters value={filters} onChange={setFilters} />
 
-      <div className="mt-6">
-        {isLoading ? (
-          <ListSkeleton count={3} className="h-32" />
+      {/* 필터를 바꿀 때는 목록을 비우지 않고 흐리게만 둡니다. 스켈레톤은 첫 로드에만 씁니다. */}
+      <div
+        className={cn("mt-6 transition-opacity", isRefetching && "opacity-60")}
+        aria-busy={isLoading}
+      >
+        {isLoading && !data ? (
+          <ListSkeleton count={3} className="h-32" label="Timeline을 불러오는 중" />
         ) : error ? (
           <ErrorState error={error} onRetry={reload} />
         ) : groups.length === 0 ? (
@@ -93,8 +100,27 @@ export function TimelineView({ workspaceId }: { workspaceId: string }) {
             title={hasFilter ? "조건에 맞는 맥락이 없습니다" : "아직 쌓인 맥락이 없습니다"}
             description={
               hasFilter
-                ? "필터를 풀면 더 많은 항목을 볼 수 있어요."
+                ? "필터를 해제하면 더 많은 항목을 볼 수 있어요."
                 : "회의나 문서를 올리면 결정과 이벤트가 여기에 쌓여요."
+            }
+            action={
+              hasFilter ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setFilters({ kinds: [], sourceKinds: [] })}
+                >
+                  필터 해제
+                </Button>
+              ) : isDemo ? null : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push(workspacePath(workspaceId, "sources"))}
+                >
+                  소스 올리러 가기
+                </Button>
+              )
             }
           />
         ) : (

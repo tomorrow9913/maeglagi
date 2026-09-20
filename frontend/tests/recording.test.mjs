@@ -4,6 +4,8 @@ import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
+import * as errorMessage from "../src/lib/api/error-message.ts";
+
 // Minimal hook runner deliberately replays updater functions as React Strict Mode does.
 function loadHook(path, globals = {}, modules = {}) {
   let cursor = 0;
@@ -42,7 +44,9 @@ function loadHook(path, globals = {}, modules = {}) {
   }).outputText;
   vm.runInNewContext(code, {
     exports,
-    require: (name) => (name === "react" ? react : modules[name]),
+    // 사용자용 오류 문구는 실제 구현을 그대로 씁니다.
+    require: (name) =>
+      name === "react" ? react : name === "@/lib/api/error-message" ? errorMessage : modules[name],
     Blob,
     Date,
     DOMException,
@@ -272,7 +276,7 @@ test("transcript upload sends edited text once and preserves the payload on fail
         useApi: () => ({
           async uploadTranscript(workspace, body) {
             sent.push({ workspace, body });
-            if (shouldFail) throw new Error("offline");
+            if (shouldFail) throw new Error("서버에 연결하지 못했습니다.");
             return { id: "job-1", transcriptSource: "browser" };
           },
         }),
@@ -285,7 +289,8 @@ test("transcript upload sends edited text once and preserves the payload on fail
   upload = hook.render("useSourceUpload", "workspace-1");
   assert.equal(upload.items.length, 1);
   assert.equal(upload.items[0].status, "failed");
-  assert.equal(upload.items[0].errorMessage, "offline");
+  // API 계층이 만든 사용자용 문구는 그대로 큐 항목에 남습니다.
+  assert.equal(upload.items[0].errorMessage, "서버에 연결하지 못했습니다.");
   assert.equal(input.text, "김민수: 수정한 문장");
   shouldFail = false;
   assert.equal(await upload.uploadTranscript(input, "project-7"), true);

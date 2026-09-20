@@ -10,6 +10,7 @@ import { workspacePath } from "@/lib/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { watchDemoAuthState, type DemoAuthState } from "@/lib/demo-auth-state";
+import { toUserMessage } from "@/lib/api/error-message";
 
 export function DemoAuthGuidance() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export function DemoAuthGuidance() {
       const workspace = await api.cloneDemoWorkspace();
       router.push(workspacePath(workspace.id, "ask"));
     } catch (error) {
-      setCopyError(error instanceof Error ? error.message : "데모를 복사하지 못했습니다.");
+      setCopyError(toUserMessage(error, "데모를 복사하지 못했습니다."));
       setCopying(false);
       copyPending.current = false;
     }

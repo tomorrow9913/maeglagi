@@ -4,6 +4,8 @@ import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
+import * as errorMessage from "../src/lib/api/error-message.ts";
+
 function viewerHarness(api, { demo = true, content = { kind: "meeting", title: "Meeting", hasRecording: true, chunks: [{ id: "c1", text: "Hello", startSeconds: 12 }] } } = {}) {
   const slots = [];
   const effects = [];
@@ -74,6 +76,7 @@ function viewerHarness(api, { demo = true, content = { kind: "meeting", title: "
       if (name === "@/hooks/use-async") return { useAsync: () => ({ data: content, isLoading: false }) };
       if (name === "@/lib/utils") return { cn: (...parts) => parts.filter(Boolean).join(" ") };
       if (name === "sonner") return { toast: { error() {}, success() {} } };
+      if (name === "@/lib/api/error-message") return errorMessage;
       if (name === "lucide-react") return { FileText: "FileText", Loader2: "Loader2", Mic: "Mic" };
       if (name === "@/components/ui/button") return { Button: "Button" };
       if (name === "@/components/ui/sheet") return { Sheet: "Sheet", SheetContent: "SheetContent", SheetDescription: "SheetDescription", SheetHeader: "SheetHeader", SheetTitle: "SheetTitle" };

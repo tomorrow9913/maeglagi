@@ -16,6 +16,7 @@ import { useAsync } from "@/hooks/use-async";
 import { useApi, useDemoMode } from "@/lib/api/context";
 import type { Source, SourceAssociation, WorkspacePerson, WorkspaceProject } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { toUserMessage } from "@/lib/api/error-message";
 
 /**
  * 소스 원문 뷰어입니다.
@@ -123,7 +124,7 @@ export function SourceViewer({
         setPersonRoles(rolesByPerson(nextSource?.associations ?? []));
         setAssociationError(undefined);
       })
-      .catch((cause) => { if (active) setAssociationError(cause instanceof Error ? cause.message : "연결 정보를 불러오지 못했습니다."); });
+      .catch((cause) => { if (active) setAssociationError(toUserMessage(cause, "연결 정보를 불러오지 못했습니다.")); });
     return () => { active = false; };
   }, [api, sourceId, workspaceId]);
 
@@ -143,7 +144,7 @@ export function SourceViewer({
       setSource((current) => current?.id === sourceId ? { ...current, associationRevision: saved.revision, projectIds: saved.projectIds, projectId: saved.projectIds[0] ?? null, associations: saved.people } : current);
       toast.success("소스 연결을 저장했습니다.");
     } catch (cause) {
-      if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(cause instanceof Error ? cause.message : "연결을 저장하지 못했습니다.");
+      if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(toUserMessage(cause, "연결을 저장하지 못했습니다."));
     } finally { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationBusy(false); }
   };
 
@@ -223,7 +224,7 @@ export function SourceViewer({
       .catch((error) => {
         if (generation === requestGenerationRef.current && sourceIdRef.current === sourceId) {
           queuedSeekRef.current = undefined;
-          toast.error(error instanceof Error ? error.message : "녹음 파일을 열지 못했습니다.");
+          toast.error(toUserMessage(error, "녹음 파일을 열지 못했습니다."));
         }
       })
       .finally(() => {
@@ -253,7 +254,7 @@ export function SourceViewer({
       link.href = href; link.download = `${(data?.title ?? "meeting").replace(/[\\/:*?"<>|]/g, "-")}.md`;
       document.body.appendChild(link); link.click(); link.remove();
       window.setTimeout(() => URL.revokeObjectURL(href), 0);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Markdown을 내려받지 못했습니다."); }
+    } catch (error) { toast.error(toUserMessage(error, "Markdown을 내려받지 못했습니다.")); }
     finally { setExportBusy(false); }
   };
 
@@ -279,7 +280,7 @@ export function SourceViewer({
             <h3 className="font-medium">프로젝트·사람 연결</h3>
             <div className="flex flex-wrap gap-2">{projects.filter((project) => !project.archivedAt || projectIds.includes(project.id)).map((project) => <label key={project.id} className="flex items-center gap-1"><input type="checkbox" disabled={isDemo || associationBusy || (Boolean(project.archivedAt) && !projectIds.includes(project.id))} checked={projectIds.includes(project.id)} onChange={(event) => setProjectIds((current) => event.target.checked ? [...current, project.id] : current.filter((id) => id !== project.id))} />{project.name}{project.archivedAt ? " (보관됨)" : ""}</label>)}</div>
             <div className="space-y-1">{people.filter((person) => !person.archivedAt || personRoles[person.id]?.length).map((person) => <div key={person.id} className="flex flex-wrap items-center gap-2"><span>{person.name}{person.archivedAt ? " (보관됨)" : ""}</span>{(["participant", "author"] as const).map((role) => <label key={role} className="flex items-center gap-1"><input type="checkbox" aria-label={`${person.name} ${role === "participant" ? "참여자" : "작성자"}`} disabled={isDemo || associationBusy || (Boolean(person.archivedAt) && !personRoles[person.id]?.includes(role))} checked={personRoles[person.id]?.includes(role) ?? false} onChange={(event) => setPersonRoles((current) => { const selected = current[person.id] ?? []; const next = event.target.checked ? [...selected, role] : selected.filter((item) => item !== role); if (!next.length) { const remaining = { ...current }; delete remaining[person.id]; return remaining; } return { ...current, [person.id]: next }; })} />{role === "participant" ? "참여자" : "작성자"}</label>)}</div>)}</div>
-            {associationError && <div role="alert" className="flex items-center gap-2 text-xs text-destructive"><span>{associationError}</span><Button size="sm" variant="ghost" onClick={() => { const generation = associationGenerationRef.current; void api.listSources(workspaceId).then((sources) => { if (generation !== associationGenerationRef.current || sourceIdRef.current !== sourceId) return; const latest = sources.find((item) => item.id === sourceId); setSource(latest); setProjectIds(latest?.projectIds ?? (latest?.projectId ? [latest.projectId] : [])); setPersonRoles(rolesByPerson(latest?.associations ?? [])); setAssociationError(undefined); }).catch((cause) => { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(cause instanceof Error ? cause.message : "다시 불러오지 못했습니다."); }); }}>최신 정보 불러오기</Button></div>}
+            {associationError && <div role="alert" className="flex items-center gap-2 text-xs text-destructive"><span>{associationError}</span><Button size="sm" variant="ghost" onClick={() => { const generation = associationGenerationRef.current; void api.listSources(workspaceId).then((sources) => { if (generation !== associationGenerationRef.current || sourceIdRef.current !== sourceId) return; const latest = sources.find((item) => item.id === sourceId); setSource(latest); setProjectIds(latest?.projectIds ?? (latest?.projectId ? [latest.projectId] : [])); setPersonRoles(rolesByPerson(latest?.associations ?? [])); setAssociationError(undefined); }).catch((cause) => { if (generation === associationGenerationRef.current && sourceIdRef.current === sourceId) setAssociationError(toUserMessage(cause, "다시 불러오지 못했습니다.")); }); }}>최신 정보 불러오기</Button></div>}
             {!isDemo && <Button size="sm" variant="outline" disabled={associationBusy || source?.id !== sourceId} onClick={() => void saveAssociations()}>{associationBusy ? "저장 중…" : "연결 저장"}</Button>}
           </section>}
           {data?.kind === "meeting" && <div className="mb-3 flex flex-wrap items-center gap-2">{data.hasRecording && <Button size="sm" variant="outline" disabled={audioBusy} onClick={() => void loadAudio()}>{audioBusy ? "녹음 여는 중…" : audioError ? "녹음 다시 시도" : "녹음 듣기"}</Button>}<Button size="sm" variant="outline" disabled={exportBusy} onClick={() => void exportMarkdown()}>{exportBusy ? "내려받는 중…" : "Markdown 내보내기"}</Button>{playback && <audio ref={audioRef} controls preload="metadata" src={playback.url} className="w-full" onTimeUpdate={(event) => { retrySeekRef.current = event.currentTarget.currentTime; }} onError={(event) => {
