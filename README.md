@@ -106,6 +106,8 @@ DB 스키마의 단일 기준은 SQLModel `SQLModel.metadata`와 `backend/migrat
 Alembic revision입니다. 배포 전 `make migrate`를 실행하고, 모델 변경 후에는
 `make migration name=변경_설명`으로 revision을 생성합니다. Supabase SQL Editor에서
 별도 migration 파일을 실행하지 않습니다.
+Render 무료 웹 서비스는 `render.yaml`의 시작 명령에서 `alembic upgrade head`를 먼저
+실행합니다. Docker Compose는 `migrate` 서비스를 실행한 뒤 API를 시작합니다.
 
 ## BYOK provider credential
 

@@ -125,6 +125,47 @@ def test_legacy_request_defaults_to_90_days():
     assert TokenCreate.model_validate({"label": "agent"}).expires_in_days == 90
 
 
+def test_explicit_non_expiring_lifetime_is_allowed() -> None:
+    assert (
+        TokenCreate.model_validate({"label": "agent", "expiresInDays": None}).expires_in_days
+        is None
+    )
+    assert TokenExtension.model_validate({"expiresInDays": None}).expires_in_days is None
+    assert mcp.McpToken.__table__.c.expires_at.nullable
+
+
+async def test_non_expiring_token_authentication_and_revocation(token_sessions):
+    owner = uuid4()
+    application = FastAPI()
+    application.include_router(router, prefix="/api/v1")
+
+    async def session_dependency():
+        async with token_sessions() as session:
+            yield session
+
+    application.dependency_overrides[get_session] = session_dependency
+    application.dependency_overrides[get_current_user] = lambda: AuthUser(id=owner)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(application), base_url="http://test"
+    ) as client:
+        issued = await client.post(
+            "/api/v1/mcp-tokens", json={"label": "permanent", "expiresInDays": None}
+        )
+        assert issued.status_code == 201
+        token_id = issued.json()["item"]["id"]
+        assert issued.json()["item"]["expiresAt"] is None
+        assert (
+            await mcp.authenticate_mcp_token(issued.json()["token"], Settings(_env_file=None))
+        ).id == owner
+        assert (
+            await client.patch(f"/api/v1/mcp-tokens/{token_id}", json={"expiresInDays": 365})
+        ).status_code == 409
+        assert (await client.delete(f"/api/v1/mcp-tokens/{token_id}")).status_code == 204
+        with pytest.raises(HTTPException) as exc:
+            await mcp.authenticate_mcp_token(issued.json()["token"], Settings(_env_file=None))
+        assert exc.value.status_code == 401
+
+
 @pytest.mark.parametrize("days", [0, 366, -1, 1.5, "forever", True])
 def test_extension_requires_valid_lifetime(days):
     from pydantic import ValidationError

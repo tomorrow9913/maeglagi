@@ -304,7 +304,7 @@ export const mockApi: MaeglagiApi = {
     await delay(MOCK_LATENCY_MS, signal);
     const label = input.label.trim();
     if (!label) throw new ApiError(422, "토큰 이름을 입력해 주세요.");
-    if (!Number.isInteger(input.expiresInDays) || input.expiresInDays < 1 || input.expiresInDays > 365) {
+    if (input.expiresInDays !== null && (!Number.isInteger(input.expiresInDays) || input.expiresInDays < 1 || input.expiresInDays > 365)) {
       throw new ApiError(422, "토큰 유효 기간은 1~365일로 설정해 주세요.");
     }
     const token = `mcp_mock_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -315,7 +315,7 @@ export const mockApi: MaeglagiApi = {
       tokenHint: token.slice(-6),
       createdAt: now.toISOString(),
       lastUsedAt: null,
-      expiresAt: new Date(now.getTime() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt: input.expiresInDays === null ? null : new Date(now.getTime() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
     };
     state.mcpTokens.unshift(item);
     return { item: { ...item }, token };
@@ -324,17 +324,20 @@ export const mockApi: MaeglagiApi = {
   async extendMcpToken(tokenId, expiresInDays, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     const item = state.mcpTokens.find((token) => token.id === tokenId);
-    if (!item || new Date(item.expiresAt).getTime() <= Date.now()) {
+    if (!item || (item.expiresAt !== null && new Date(item.expiresAt).getTime() <= Date.now())) {
       throw new ApiError(404, "활성 MCP 토큰을 찾을 수 없습니다. 만료된 토큰은 새로 발급해 주세요.");
     }
-    if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365) {
+    if (expiresInDays !== null && (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365)) {
       throw new ApiError(422, "토큰 유효 기간은 1~365일로 설정해 주세요.");
     }
-    const expiry = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
-    if (expiry.getTime() <= new Date(item.expiresAt).getTime()) {
+    if (item.expiresAt === null) {
+      throw new ApiError(409, "이미 만료 없이 사용할 수 있는 토큰입니다.");
+    }
+    const expiry = expiresInDays === null ? null : new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
+    if (expiry !== null && expiry.getTime() <= new Date(item.expiresAt).getTime()) {
       throw new ApiError(409, "선택한 기간으로는 현재 만료일이 늘어나지 않습니다.");
     }
-    item.expiresAt = expiry.toISOString();
+    item.expiresAt = expiry?.toISOString() ?? null;
     return { ...item };
   },
 

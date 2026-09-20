@@ -31,7 +31,7 @@ export type McpToken = {
   tokenHint: string;
   createdAt: string;
   lastUsedAt: string | null;
-  expiresAt: string;
+  expiresAt: string | null;
 };
 
 export type McpTokenList = { items: McpToken[] };
