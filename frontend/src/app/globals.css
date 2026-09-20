@@ -1,4 +1,11 @@
 @import "tailwindcss";
+
+/*
+ * 라이트 한 세트만 운영합니다(docs/brand.md 4절). 기본값대로 두면 `dark:` 유틸리티가 OS의
+ * 다크 모드를 따라가, 토큰은 라이트인데 입력칸·버튼만 어두운 색으로 채워집니다.
+ * `.dark` 클래스가 있을 때만 적용되게 묶어 둡니다. 이 앱은 그 클래스를 붙이지 않습니다.
+ */
+@custom-variant dark (&:is(.dark *));
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -160,5 +167,17 @@
     @apply font-sans;
     /* 화면마다 스크롤바 유무가 달라 본문이 좌우로 흔들리지 않도록 자리를 고정합니다. */
     scrollbar-gutter: stable;
+  }
+}
+
+/* 움직임 줄이기를 켠 사용자에게는 스피너·스켈레톤·다이얼로그 전환을 사실상 멈춥니다. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

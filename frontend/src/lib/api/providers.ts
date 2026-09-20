@@ -72,7 +72,7 @@ export function withOllamaProvider(providers: readonly AiProvider[]): AiProvider
 }
 
 export function providerKeyPlaceholder(provider: LlmProvider): string {
-  if (provider === "ollama") return "선택 사항: 서버에서 요구하는 키";
+  if (provider === "ollama") return "선택 사항: 서버에서 요구하는 API key";
   if (provider === "anthropic") return "sk-ant-...";
   if (provider === "nvidia") return "nvapi-...";
   return "sk-...";

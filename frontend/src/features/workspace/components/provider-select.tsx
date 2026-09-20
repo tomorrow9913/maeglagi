@@ -31,7 +31,7 @@ export function ProviderSelect({
         {providers.map((provider) => (
           <SelectItem key={provider.id} value={provider.id}>
             {provider.displayName}
-            {provider.configured ? " (설정됨)" : ""}
+            {provider.configured ? " (연결 있음)" : ""}
           </SelectItem>
         ))}
       </SelectContent>

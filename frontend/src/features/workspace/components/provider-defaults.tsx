@@ -24,8 +24,8 @@ export function ProviderDefaults({
   return (
     <div className={cn("space-y-1", className)}>
       <p className="text-xs text-muted-foreground">
-        {provider.displayName}의 기본 모델입니다. 키를 확인하면 이 키로 쓸 수 있는 모델 중에서 바꿀
-        수 있어요.
+        {provider.displayName}의 기본 모델입니다. 연결을 확인하면 이 연결로 쓸 수 있는 모델 중에서
+        바꿀 수 있어요.
       </p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
         {roles.map((role) => (

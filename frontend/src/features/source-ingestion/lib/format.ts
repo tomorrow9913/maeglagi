@@ -1,7 +1,8 @@
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  // "20.0 MB"처럼 의미 없는 소수점은 떼어냅니다.
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 /** 녹음 길이를 사람이 읽는 형태로. 1분 미만은 초 단위로 보여줍니다. */

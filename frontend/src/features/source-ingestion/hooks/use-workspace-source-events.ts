@@ -1,10 +1,21 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/api/context";
 import type { MaeglagiApi, ProcessingJob } from "@/lib/api";
 
-type Subscriber = { ids: Set<string>; onJob: (job: ProcessingJob) => void; onInvalid?: (sourceId: string, status: number) => void };
+/** 처리 상태 스트림의 연결 상태. 연속으로 실패하면 "reconnecting"이 되고, 다시 이벤트를 받으면 "connected"로 돌아옵니다. */
+export type SourceEventsConnection = "connected" | "reconnecting";
+
+/** 일시적인 끊김(서버가 55초마다 닫는 정상 종료 포함)에는 알리지 않고, 이 횟수만큼 연속 실패하면 알립니다. */
+export const RECONNECTING_AFTER_FAILURES = 3;
+
+type Subscriber = {
+  ids: Set<string>;
+  onJob: (job: ProcessingJob) => void;
+  onInvalid?: (sourceId: string, status: number) => void;
+  onConnection?: (state: SourceEventsConnection) => void;
+};
 
 function permanentStatus(error: unknown): 401 | 403 | 404 | 422 | undefined {
   if (!error || typeof error !== "object" || !("status" in error)) return undefined;
@@ -19,6 +30,9 @@ export class SourceEventChannel {
   private idsKey = "";
   private generation = 0;
   private invalidIds = new Map<string, number>();
+  /** 연속 실패 중인 스트림(100개 단위 배치)들. 하나라도 있으면 "reconnecting"입니다. */
+  private failing = new Set<object>();
+  private connectionState: SourceEventsConnection = "connected";
 
   constructor(private api: MaeglagiApi, private workspaceId: string) {}
 
@@ -29,10 +43,22 @@ export class SourceEventChannel {
       const status = this.invalidIds.get(id);
       if (status) subscriber.onInvalid?.(id, status);
     }
+    if (this.connectionState !== "connected") subscriber.onConnection?.(this.connectionState);
     return () => { this.subscribers.delete(subscriber); this.sync(); };
   }
 
   get empty() { return this.subscribers.size === 0; }
+
+  get connection() { return this.connectionState; }
+
+  private markRun(run: object, failing: boolean) {
+    if (failing) this.failing.add(run);
+    else this.failing.delete(run);
+    const next: SourceEventsConnection = this.failing.size > 0 ? "reconnecting" : "connected";
+    if (next === this.connectionState) return;
+    this.connectionState = next;
+    for (const subscriber of this.subscribers) subscriber.onConnection?.(next);
+  }
 
   private sync() {
     const requested = new Set([...this.subscribers].flatMap((subscriber) => [...subscriber.ids]));
@@ -44,6 +70,8 @@ export class SourceEventChannel {
     this.generation++;
     this.controller?.abort();
     this.controller = undefined;
+    // 이전 스트림은 모두 끝났으므로 새 스트림의 결과로 다시 판단합니다.
+    for (const run of [...this.failing]) this.markRun(run, false);
     if (!ids.length) return;
     const controller = new AbortController();
     this.controller = controller;
@@ -55,6 +83,7 @@ export class SourceEventChannel {
 
   private async run(ids: string[], signal: AbortSignal, generation: number) {
     let retry = 0;
+    const run = {};
     while (!signal.aborted && generation === this.generation) {
       try {
         for await (const job of this.api.sourceEvents(this.workspaceId, ids, signal)) {
@@ -62,11 +91,13 @@ export class SourceEventChannel {
           if (!job || typeof job.sourceId !== "string" || typeof job.id !== "string") continue;
           for (const subscriber of this.subscribers) if (subscriber.ids.has(job.sourceId)) subscriber.onJob(job);
           retry = 0;
+          this.markRun(run, false);
         }
       } catch (error) {
         if (signal.aborted) break;
         const status = permanentStatus(error);
         if (status && generation === this.generation) {
+          this.markRun(run, false);
           if (status !== 401 && status !== 403 && ids.length > 1) {
             const middle = Math.floor(ids.length / 2);
             void this.run(ids.slice(0, middle), signal, generation);
@@ -83,6 +114,7 @@ export class SourceEventChannel {
         }
         // A failed connection keeps the last rendered status; the next attempt gets fresh auth.
         retry++;
+        if (generation === this.generation && retry >= RECONNECTING_AFTER_FAILURES) this.markRun(run, true);
         if (process.env.NODE_ENV !== "test") console.warn("Source event stream disconnected", error);
       }
       if (signal.aborted || generation !== this.generation) break;
@@ -94,13 +126,16 @@ export class SourceEventChannel {
         signal.addEventListener("abort", abort, { once: true });
       });
     }
+    if (generation === this.generation) this.markRun(run, false);
   }
 }
 
 const channels = new WeakMap<MaeglagiApi, Map<string, SourceEventChannel>>();
 
-export function useWorkspaceSourceEvents(workspaceId: string, sourceIds: string[], onJob: (job: ProcessingJob) => void, enabled = true, onInvalid?: (sourceId: string, status: number) => void) {
+/** 구독한 소스의 처리 이벤트를 전달하고, 스트림 연결 상태를 돌려줍니다. */
+export function useWorkspaceSourceEvents(workspaceId: string, sourceIds: string[], onJob: (job: ProcessingJob) => void, enabled = true, onInvalid?: (sourceId: string, status: number) => void): SourceEventsConnection {
   const api = useApi();
+  const [connection, setConnection] = useState<SourceEventsConnection>("connected");
   const callback = useRef(onJob);
   callback.current = onJob;
   const invalidCallback = useRef(onInvalid);
@@ -114,10 +149,14 @@ export function useWorkspaceSourceEvents(workspaceId: string, sourceIds: string[
     let channel = byWorkspace.get(workspaceId);
     if (!channel) { channel = new SourceEventChannel(api, workspaceId); byWorkspace.set(workspaceId, channel); }
     const activeChannel = channel;
-    const unsubscribe = channel.subscribe({ ids: new Set(idsKey.split(",")), onJob: (job) => callback.current(job), onInvalid: (id, status) => invalidCallback.current?.(id, status) });
+    const unsubscribe = channel.subscribe({ ids: new Set(idsKey.split(",")), onJob: (job) => callback.current(job), onInvalid: (id, status) => invalidCallback.current?.(id, status), onConnection: setConnection });
     return () => {
       unsubscribe();
+      // 구독이 끝나면 더 지켜볼 스트림이 없으므로 안내를 거둡니다.
+      setConnection("connected");
       if (activeChannel.empty) byWorkspace?.delete(workspaceId);
     };
   }, [api, workspaceId, idsKey, enabled]);
+
+  return connection;
 }

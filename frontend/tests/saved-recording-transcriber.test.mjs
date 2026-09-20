@@ -118,3 +118,19 @@ test("audio-track recovery is gated to supported desktop Chromium", () => {
   assert.equal(supportsSavedRecordingTranscript("Mozilla/5.0 Chrome/135.0.0.0", false, true), false);
   assert.equal(supportsSavedRecordingTranscript("Mozilla/5.0 Chrome/135.0.0.0", true, false), false);
 });
+
+test("recognition errors and browser exceptions never surface raw codes or English messages", async () => {
+  const first = fixture();
+  await first.transcriber.start("https://example.test/signed-recording");
+  first.Recognition.instance.onerror({ error: "network" });
+  const stopped = first.updates.at(-1);
+  assert.equal(stopped.phase, "partial");
+  assert.match(stopped.message, /네트워크/);
+  assert.doesNotMatch(stopped.message, /network|[()]/);
+
+  const second = fixture();
+  second.audio.play = async () => { throw new Error("play() failed because the user didn't interact with the document first."); };
+  await second.transcriber.start("https://example.test/signed-recording");
+  assert.equal(second.updates.at(-1).phase, "partial");
+  assert.doesNotMatch(second.updates.at(-1).message, /[a-zA-Z]{3,}/);
+});

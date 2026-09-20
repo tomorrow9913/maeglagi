@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
+import { EmptyState, ErrorState } from "@/components/common/state-views";
+import { SlowNotice } from "@/components/common/slow-notice";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CreateWorkspaceDialog } from "@/features/workspace/components/create-workspace-dialog";
 import { useAsync } from "@/hooks/use-async";
 import { api } from "@/lib/api";
@@ -39,14 +41,24 @@ export default function WorkspacesPage() {
         }
       />
 
-      {isLoading ? (
-        <ListSkeleton count={3} />
-      ) : error ? (
+      {isLoading && !data ? (
+        // 실제 목록과 같은 격자 모양으로 자리를 잡아 둡니다.
+        <div role="status" className="space-y-3">
+          <span className="sr-only">워크스페이스를 불러오는 중</span>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
+            {Array.from({ length: 3 }, (_, index) => (
+              <Skeleton key={index} className="h-[5.5rem] w-full rounded-xl" />
+            ))}
+          </div>
+          <SlowNotice />
+        </div>
+      ) : error && !data ? (
         <ErrorState error={error} onRetry={reload} />
       ) : data && data.length === 0 ? (
         <EmptyState
           title="아직 워크스페이스가 없습니다"
-          description="새 워크스페이스를 만들고 회의와 문서를 올려보세요."
+          description="새 워크스페이스를 만들고 회의와 문서를 올려보세요. 맥락이의 AI를 쓰려면 OpenAI·Anthropic 등의 API key나 Ollama 서버 주소가 하나 필요해요. 내 에이전트를 MCP로 연결한다면 없어도 됩니다."
+          action={<CreateWorkspaceDialog onCreated={onCreated} />}
         />
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -56,7 +68,9 @@ export default function WorkspacesPage() {
                 href={workspacePath(workspace.id)}
                 className="block rounded-xl border border-border bg-card p-5 transition-colors hover:border-foreground/30"
               >
-                <p className="font-medium">{workspace.name}</p>
+                <p className="line-clamp-2 font-medium break-words" title={workspace.name}>
+                  {workspace.name}
+                </p>
                 <p className="mt-1 text-sm text-muted-foreground">소스 {workspace.sourceCount}개</p>
               </Link>
             </li>

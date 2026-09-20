@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/api/context";
 import { SavedRecordingTranscriber, supportsSavedRecordingTranscript, type RecordingProgress, type RecognitionConstructor } from "../lib/saved-recording-transcriber";
+import { toUserMessage } from "@/lib/api/error-message";
 
 type RecognitionWindow = Window & {
   SpeechRecognition?: RecognitionConstructor;
@@ -57,7 +58,7 @@ export function useSavedRecordingTranscript(sourceId?: string) {
     } catch (error) {
       if (!controller.signal.aborted && generation.current === current) setProgress({
         phase: "partial", seconds: 0, duration: 0, utterances: [], interim: "",
-        message: error instanceof Error ? error.message : "저장된 녹음을 열지 못했습니다.",
+        message: toUserMessage(error, "저장된 녹음을 열지 못했습니다."),
       });
     }
   };

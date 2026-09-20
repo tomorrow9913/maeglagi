@@ -24,11 +24,11 @@ export function classifySourceFile(file: File): SourceFile {
   const expectedMime = audioMimeByExtension[extension];
   const mime = file.type.split(";", 1)[0].trim().toLowerCase();
   if (mime.startsWith("video/") && !((extension === ".mp4" && mime === "video/mp4") || (extension === ".webm" && mime === "video/webm"))) {
-    return { kind: "unsupported", reason: "동영상은 지원하지 않습니다. 오디오 파일을 선택해 주세요." };
+    return { kind: "unsupported", reason: "동영상은 지원하지 않습니다. 녹음 파일을 선택해 주세요." };
   }
-  if (!expectedMime) return { kind: "unsupported", reason: "지원하지 않는 형식입니다. 문서 또는 WebM, MP4, M4A, WAV, MP3, OGG, FLAC 오디오를 선택해 주세요." };
+  if (!expectedMime) return { kind: "unsupported", reason: "지원하지 않는 형식입니다. 문서 또는 WebM, MP4, M4A, WAV, MP3, OGG, FLAC 녹음 파일을 선택해 주세요." };
   if (file.size === 0) return { kind: "unsupported", reason: "빈 파일입니다." };
-  if (file.size > MAX_AUDIO_BYTES) return { kind: "unsupported", reason: "오디오는 50 MB를 넘을 수 없습니다." };
+  if (file.size > MAX_AUDIO_BYTES) return { kind: "unsupported", reason: `녹음 파일은 ${MAX_AUDIO_BYTES / (1024 * 1024)} MB를 넘을 수 없습니다.` };
 
   const allowed = extension === ".m4a" ? ["audio/x-m4a", "audio/m4a", "audio/mp4"]
     : extension === ".wav" ? ["audio/wav", "audio/x-wav"]
@@ -38,7 +38,7 @@ export function classifySourceFile(file: File): SourceFile {
     : extension === ".mp4" ? ["audio/mp4", "video/mp4"]
     : [expectedMime];
   if (mime && mime !== "application/octet-stream" && !allowed.includes(mime)) {
-    return { kind: "unsupported", reason: "오디오 형식과 파일 확장자가 일치하지 않습니다." };
+    return { kind: "unsupported", reason: "녹음 파일 형식과 확장자가 일치하지 않습니다." };
   }
   // Browser pickers sometimes omit MIME. The recording endpoint validates the bytes again.
   const audio = mime && mime !== "application/octet-stream" ? file : new File([file], file.name, { type: expectedMime, lastModified: file.lastModified });

@@ -533,6 +533,39 @@ export const mockApi: MaeglagiApi = {
     return { ...credential };
   },
 
+  async setDefaultAccountCredential(credentialId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const credential = state.accountCredentials.find((item) => item.id === credentialId);
+    if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.", { detail: "Credential not found" });
+    if (credential.status !== "active") {
+      throw new ApiError(409, "활성 상태인 연결만 기본으로 지정할 수 있습니다.", { detail: "Credential is not active" });
+    }
+    for (const item of state.accountCredentials) item.isDefault = item.id === credentialId;
+    credential.updatedAt = new Date().toISOString();
+    return { ...credential };
+  },
+
+  // 거절 규칙과 `detail` 원문은 백엔드 remove_credential과 같게 둡니다. 화면이 이 원문으로 문구를 고릅니다.
+  async deleteAccountCredential(credentialId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const credentials = state.accountCredentials;
+    const credential = credentials.find((item) => item.id === credentialId);
+    if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.", { detail: "Credential not found" });
+    const refuse = (detail: string) => new ApiError(409, "이 연결은 지금 삭제할 수 없습니다.", { detail });
+    if (credential.isDefault && credentials.length > 1) throw refuse("Choose another default before deletion");
+    const selections = [...state.models.values()].flatMap((chosen) => Object.values(chosen));
+    if (selections.some((option) => option.credentialId === credentialId)) {
+      throw refuse("This credential is selected by a workspace model");
+    }
+    const hasSibling = credentials.some(
+      (item) => item.id !== credentialId && item.provider === credential.provider && item.status === "active",
+    );
+    if (!hasSibling && selections.some((option) => option.provider === credential.provider)) {
+      throw refuse("This is the last active credential for a selected model provider");
+    }
+    credentials.splice(credentials.indexOf(credential), 1);
+  },
+
   async updateApiKey(workspaceId, input, signal) {
     await delay(MOCK_LATENCY_MS * 2, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId)) {
@@ -942,7 +975,12 @@ export const mockApi: MaeglagiApi = {
   async *ask(_workspaceId, question, signal): AsyncGenerator<AnswerEvent, void, undefined> {
     await delay(MOCK_LATENCY_MS, signal);
 
-    const matched = answers.find((answer) => answer.match.test(question)) ?? fallbackAnswer;
+    const matched = answers.find((answer) => answer.match.test(question));
+    // 실제 서버와 같은 모양으로 끝냅니다: 근거가 없으면 모델을 부르지 않고 이 이벤트 하나만 보냅니다.
+    if (!matched) {
+      yield { type: "error", code: "no_evidence", message: fallbackAnswer.text };
+      return;
+    }
     yield { type: "sources", sources: matched.sources };
 
     // 실제 스트리밍처럼 보이도록 어절 단위로 흘려보냅니다.

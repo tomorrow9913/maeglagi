@@ -21,7 +21,11 @@ export function useLiveSources(workspaceId: string, watchReviewStates = false) {
   const sources = snapshot?.workspaceId === workspaceId ? snapshot.sources : undefined;
   const progress = progressState?.workspaceId === workspaceId ? progressState.values : {};
   const error = errorState?.workspaceId === workspaceId ? errorState.error : undefined;
-  const reload = useCallback(() => setNonce((value) => value + 1), []);
+  // 다시 불러오기 시작할 때 이전 오류를 지워야 "다시 시도"를 누른 즉시 로딩 상태가 보입니다.
+  const reload = useCallback(() => {
+    setError(undefined);
+    setNonce((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -61,7 +65,7 @@ export function useLiveSources(workspaceId: string, watchReviewStates = false) {
     }
   }, [reload, workspaceId]);
 
-  useWorkspaceSourceEvents(workspaceId, sources?.filter((source) => isPending(source.status) || (watchReviewStates && (source.status === "awaiting_review" || source.status === "awaiting_agent"))).map((source) => source.id) ?? [], onJob, !isDemo, (sourceId) => {
+  const connection = useWorkspaceSourceEvents(workspaceId, sources?.filter((source) => isPending(source.status) || (watchReviewStates && (source.status === "awaiting_review" || source.status === "awaiting_agent"))).map((source) => source.id) ?? [], onJob, !isDemo, (sourceId) => {
     if (invalidated.current.workspaceId !== workspaceId || invalidated.current.ids.has(sourceId)) return;
     invalidated.current.ids.add(sourceId);
     reload();
@@ -72,5 +76,13 @@ export function useLiveSources(workspaceId: string, watchReviewStates = false) {
     return () => window.removeEventListener("maeglagi:sources-changed", reload);
   }, [reload]);
 
-  return { sources, progress, error, isLoading: !sources && !error, reload };
+  return {
+    sources,
+    progress,
+    error,
+    isLoading: !sources && !error,
+    reload,
+    /** 처리 상태 스트림이 연속으로 끊겨 다시 연결하는 중인지 */
+    connection: connection === "reconnecting" ? "reconnecting" as const : "connected" as const,
+  };
 }

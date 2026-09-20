@@ -97,6 +97,11 @@ export type ApiKeyValidation = {
   valid: boolean;
   /** 사용자에게 그대로 보여줄 결과 문구 */
   message: string;
+  /**
+   * 실패 이유 코드. 서버가 내려줄 때만 있습니다(현재 백엔드는 보내지 않습니다).
+   * Ollama: "invalid_url" | "address_not_permitted" | "https_required" | "unreachable"
+   */
+  reason?: string;
 };
 
 /**
@@ -378,10 +383,11 @@ export type AnswerSource = {
  * Ask 스트리밍 이벤트.
  *
  * `sources`가 먼저 오고 `token`이 이어지며 `done`으로 끝납니다.
- * 근거를 찾지 못하면 `token` 없이 `error`로 끝낼 수 있습니다.
+ * 근거를 찾지 못하면 `token` 없이 `error`로 끝낼 수 있습니다. 이때는 실패가 아니라 정상
+ * 결과이므로 `code: "no_evidence"`가 붙습니다. `code`가 없는 `error`는 실패입니다.
  */
 export type AnswerEvent =
   | { type: "sources"; sources: AnswerSource[] }
   | { type: "token"; text: string }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; code?: "no_evidence" };

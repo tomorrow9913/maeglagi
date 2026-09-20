@@ -159,7 +159,7 @@ async def answer_events(
     With no evidence the model is never called: it would only make something up.
     """
     if not retrieval.evidence:
-        yield error_event(NO_EVIDENCE)
+        yield error_event(NO_EVIDENCE, code="no_evidence")
         return
 
     yield sources_event([item.source for item in retrieval.evidence])
