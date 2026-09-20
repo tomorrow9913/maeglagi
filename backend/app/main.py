@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.api.workspaces.source_event_broker import SourceEventBroker
 from app.core.config import Settings, get_settings
 from app.mcp.server import create_mcp_server
 from app.mcp.transport import ExactMCPRoute
@@ -49,7 +50,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         if settings.processing_executor == "postgres" and settings.pg_executor_enabled
         else None
     )
+    source_event_broker = SourceEventBroker(settings) if settings.source_events_enabled else None
     try:
+        if source_event_broker is not None:
+            await source_event_broker.start()
+        application.state.source_event_broker = source_event_broker
         if executor is not None:
             executor.start()
         application.state.mcp_server = mcp_server
@@ -57,6 +62,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async with mcp_server.session_manager.run():
             yield
     finally:
+        application.state.source_event_broker = None
+        if source_event_broker is not None:
+            await source_event_broker.stop()
         application.state.mcp_route.app = None
         application.state.mcp_server = None
         if executor is not None:
@@ -81,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.settings = settings
     application.state.graph_store = None
     application.state.mcp_server = None
+    application.state.source_event_broker = None
     register_middlewares(application, settings)
     application.include_router(api_router, prefix=settings.api_v1_prefix)
     mcp_route = ExactMCPRoute()
