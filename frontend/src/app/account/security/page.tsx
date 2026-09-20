@@ -7,6 +7,7 @@ import { CheckCircle2, Link2, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { kakaoIdentityLinkOptions } from "@/lib/auth-redirect";
+import { apiFetch } from "@/lib/api/client";
 import { createClient } from "@/lib/supabase/client";
 
 type AccountState = {
@@ -18,6 +19,10 @@ export default function AccountSecurityPage() {
   const [account, setAccount] = useState<AccountState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -50,6 +55,21 @@ export default function AccountSecurityPage() {
       setMessage(error.message);
       setPending(false);
     }
+  };
+
+  const deleteAccount = async () => {
+    if (deleteText !== "계정 탈퇴" || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiFetch<void>("/auth/me", { method: "DELETE" });
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "계정을 삭제하지 못했습니다.");
+      setDeleting(false);
+      return;
+    }
+    await createClient().auth.signOut({ scope: "local" });
+    window.location.assign("/");
   };
 
   return (
@@ -130,6 +150,42 @@ export default function AccountSecurityPage() {
       >
         MCP 계정 연결 관리
       </Link>
+
+      <section className="mt-10 rounded-xl border border-destructive/40 bg-card p-6">
+        <h2 className="text-base font-semibold text-destructive">계정 탈퇴</h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          연결된 로그인 방법, 모든 워크스페이스와 프로젝트, 회의록, 업로드 파일, API 키와 MCP 토큰이 영구 삭제됩니다.
+          이 작업은 되돌릴 수 없습니다.
+        </p>
+        {!deleteOpen ? (
+          <Button className="mt-5" variant="destructive" type="button" onClick={() => setDeleteOpen(true)}>
+            계정 탈퇴
+          </Button>
+        ) : (
+          <div className="mt-5 space-y-3">
+            <label htmlFor="delete-account-confirm" className="block text-sm font-medium">
+              확인하려면 ‘계정 탈퇴’를 입력하세요.
+            </label>
+            <input
+              id="delete-account-confirm"
+              autoComplete="off"
+              value={deleteText}
+              onChange={(event) => setDeleteText(event.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+            {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+            <div className="flex gap-2">
+              <Button variant="destructive" type="button" disabled={deleteText !== "계정 탈퇴" || deleting} onClick={deleteAccount}>
+                {deleting ? <Loader2 className="animate-spin" aria-hidden /> : null}
+                영구 삭제
+              </Button>
+              <Button variant="outline" type="button" disabled={deleting} onClick={() => { setDeleteOpen(false); setDeleteText(""); setDeleteError(null); }}>
+                취소
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
     </main>
   );
 }

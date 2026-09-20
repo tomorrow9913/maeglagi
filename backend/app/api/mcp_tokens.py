@@ -11,7 +11,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import CurrentUser
-from app.auth.mcp import McpToken, issue_token
+from app.auth.mcp import DEFAULT_TOKEN_LIFETIME_DAYS, MAX_TOKEN_LIFETIME_DAYS, McpToken, issue_token
 from app.core.database import get_session
 
 router = APIRouter(prefix="/mcp-tokens", tags=["mcp-connections"])
@@ -35,6 +35,13 @@ class TokenList(BaseModel):
 class TokenCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     label: str = Field(min_length=1, max_length=80)
+    expires_in_days: int = Field(
+        default=DEFAULT_TOKEN_LIFETIME_DAYS,
+        ge=1,
+        le=MAX_TOKEN_LIFETIME_DAYS,
+        strict=True,
+        validation_alias="expiresInDays",
+    )
 
 
 class IssuedToken(BaseModel):
@@ -61,7 +68,7 @@ async def create_token(
     body: TokenCreate, user: CurrentUser, session: Session, response: Response
 ) -> IssuedToken:
     response.headers["Cache-Control"] = "no-store"
-    item, secret = await issue_token(session, user.id, body.label)
+    item, secret = await issue_token(session, user.id, body.label, body.expires_in_days)
     return IssuedToken(item=TokenInfo.model_validate(item), token=secret)
 
 
