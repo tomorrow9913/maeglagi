@@ -91,6 +91,14 @@ src/
 
 배포에서는 이 네 변수를 Vercel 프로젝트의 해당 환경(production/preview)에 설정하고 다시 빌드해야 합니다. `NEXT_PUBLIC_` 값은 빌드 시 브라우저 번들에 포함됩니다. 백엔드의 `CORS_ORIGINS`에는 실제 프론트 origin을 JSON 배열로 지정하고, 백엔드의 `SUPABASE_URL` 및 `SUPABASE_PUBLISHABLE_KEY`는 프론트와 같은 프로젝트를 가리켜야 합니다. 이메일 가입 확인에 쓰는 `/auth/callback` URL은 Supabase Auth의 redirect URL 허용 목록에 추가합니다. 백엔드 `SUPABASE_SERVICE_ROLE_KEY`와 provider 비밀 키는 프론트 환경변수에 넣지 않습니다.
 
+## 카카오 로그인 설정
+
+`/login`의 로그인과 계정 만들기 화면에서 같은 카카오 OAuth 버튼을 사용합니다. 프론트는 Supabase `kakao` provider에 `queryParams.scope`로 `profile_nickname profile_image` 범위만 요청하며, 인증 후 기존 `/auth/callback`에서 세션을 교환합니다. Supabase Kakao provider의 기본 범위에는 `account_email`이 포함되므로 `options.scopes`만 지정하면 이메일 권한이 다시 붙습니다. Kakao 앱이 비즈 앱이 아니므로 `queryParams.scope`로 기본값을 덮어써 이메일 권한을 요청하지 않습니다. 카카오 계정은 이메일이 없는 Supabase 사용자로 들어올 수 있으며 백엔드 `/api/v1/auth/me`는 이 경우 `email: null`을 반환합니다.
+
+대시보드 설정 시 Kakao Developers에서 로그인 기능과 닉네임·프로필 이미지 동의를 켜고, Supabase Auth의 Kakao provider에 Kakao REST API 키와 Client Secret을 등록합니다. Kakao Redirect URI에는 Supabase의 `https://<project-ref>.supabase.co/auth/v1/callback`을, Supabase Auth Redirect URLs에는 실제 프론트의 `https://<frontend-origin>/auth/callback`을 등록합니다(로컬 개발 주소도 사용할 경우 별도 등록). Supabase에서 이메일 없는 OAuth 사용자를 허용하는 설정도 필요합니다. 비밀 키는 서버 측 대시보드에만 둡니다.
+
+이미 이메일로 가입한 회원은 `/account/security`에서 카카오 identity를 현재 Supabase 사용자에 연결합니다. 연결 후에는 어느 방법으로 로그인해도 같은 `auth.users.id`와 서비스 자료를 사용합니다. Supabase 대시보드의 Authentication 설정에서 **Enable Manual Linking**을 켜야 합니다. 이미 다른 사용자에 소유된 identity는 안전을 위해 자동 병합하지 않습니다.
+
 ## 배포 (Vercel)
 
 모노레포이므로 Vercel 프로젝트에서 **Root Directory를 `frontend`로 지정**해야 합니다.

@@ -8,6 +8,7 @@ import { ArrowRight, Check, Circle, Eye, EyeOff, FileText, MailCheck } from "luc
 import { MaeglagiMark, MaeglagiWordmark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { authCallbackUrl, kakaoOAuthOptions, safeNextPath } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,7 @@ function noticeFromQuery(params: URLSearchParams): Notice | null {
   if (params.get("error") === "callback")
     return {
       tone: "error",
-      text: "인증 링크가 만료됐거나 이미 사용됐습니다. 다시 로그인하거나 계정을 만들어 주세요.",
+      text: "로그인을 완료하지 못했습니다. 인증 링크가 만료됐다면 다시 로그인해 주세요.",
     };
   if (params.get("reason") === "expired")
     return { tone: "info", text: "로그인이 만료됐습니다. 다시 로그인해 주세요." };
@@ -78,6 +79,36 @@ export default function LoginPage() {
   }, []);
 
   const isSignup = mode === "signup";
+
+  /** 로그인 뒤 돌아갈 곳. 같은 사이트 경로만 받습니다(`lib/auth-redirect`). */
+  function nextPath() {
+    return safeNextPath(new URLSearchParams(window.location.search).get("next"));
+  }
+
+  async function signInWithKakao() {
+    if (pending) return;
+    setPending(true);
+    setNotice(null);
+    try {
+      const { error } = await createClient().auth.signInWithOAuth(
+        kakaoOAuthOptions(window.location.origin, nextPath()),
+      );
+      // 성공하면 카카오로 이동하므로 pending을 풀지 않습니다.
+      if (!error) return;
+      setNotice({
+        tone: "error",
+        text:
+          authErrorMessages[error.code ?? ""] ??
+          "카카오 로그인을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      });
+    } catch {
+      setNotice({
+        tone: "error",
+        text: "서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+      });
+    }
+    setPending(false);
+  }
   const longEnough = password.length >= MIN_PASSWORD_LENGTH;
   const matches = passwordConfirm.length > 0 && password === passwordConfirm;
 
@@ -111,7 +142,7 @@ export default function LoginPage() {
         ? await supabase.auth.signUp({
             email,
             password,
-            options: { emailRedirectTo: `${location.origin}/auth/callback` },
+            options: { emailRedirectTo: authCallbackUrl(window.location.origin, nextPath()) },
           })
         : await supabase.auth.signInWithPassword({ email, password });
       if (result.error) {
@@ -129,8 +160,7 @@ export default function LoginPage() {
         setMailSent(true);
         return;
       }
-      const next = new URLSearchParams(window.location.search).get("next");
-      router.replace(next?.startsWith("/") && !next.startsWith("//") ? next : "/workspaces");
+      router.replace(nextPath());
       router.refresh();
     } catch {
       setNotice({
@@ -150,7 +180,7 @@ export default function LoginPage() {
       const { error } = await createClient().auth.resend({
         type: "signup",
         email,
-        options: { emailRedirectTo: `${location.origin}/auth/callback` },
+        options: { emailRedirectTo: authCallbackUrl(window.location.origin, nextPath()) },
       });
       setNotice(
         error
@@ -359,6 +389,25 @@ export default function LoginPage() {
                   ) : null}
                 </form>
               </div>
+
+              <div className="mt-6 flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" aria-hidden />
+                또는
+                <span className="h-px flex-1 bg-border" aria-hidden />
+              </div>
+              {/* 카카오 버튼 색은 카카오 디자인 가이드가 정한 값이라 토큰 대신 그대로 씁니다. */}
+              <Button
+                type="button"
+                className="mt-4 h-10 w-full bg-[#FEE500] text-[#191919] hover:bg-[#F5DC00]"
+                disabled={pending}
+                onClick={signInWithKakao}
+              >
+                카카오로 계속하기
+              </Button>
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                이미 이메일로 가입했다면 이메일로 먼저 로그인한 뒤, 계정 보안에서 카카오를 연결해
+                주세요. 기존 자료를 같은 계정에서 이용할 수 있습니다.
+              </p>
 
               <div className="mt-8 flex items-center gap-3 text-xs text-muted-foreground">
                 <span className="h-px flex-1 bg-border" aria-hidden />
