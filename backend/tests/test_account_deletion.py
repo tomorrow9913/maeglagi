@@ -117,3 +117,37 @@ async def test_account_deletion_failure_does_not_delete_identity(monkeypatch) ->
         )
     session.rollback.assert_awaited_once()
     session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auth_failure_rolls_back_vault_deletion(monkeypatch) -> None:
+    owner_id, secret_id = uuid4(), uuid4()
+    session = AsyncMock()
+    session.exec.side_effect = [MagicMock(all=lambda: []), MagicMock(all=lambda: [secret_id])]
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    session.execute.return_value.scalar_one_or_none.return_value = None
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(500)), **kwargs
+        ),
+    )
+    vault_delete = AsyncMock()
+    monkeypatch.setattr(
+        "app.modules.workspaces.application.account_deletion.credential_vault.delete", vault_delete
+    )
+    with pytest.raises(AccountDeletionError):
+        await delete_account_data(
+            owner_id,
+            session,
+            Settings(
+                supabase_url="https://example.supabase.co", supabase_service_role_key="private"
+            ),
+            None,
+        )
+    vault_delete.assert_awaited_once_with(session, secret_id=secret_id)
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()
