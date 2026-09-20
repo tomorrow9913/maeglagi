@@ -2,32 +2,43 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Send, Square, Plus, FileUp, Mic } from "lucide-react";
+import { ArrowUpRight, Send, Square, Plus, FileUp, Mic, Upload } from "lucide-react";
+import { toast } from "sonner";
 
 import { DropdownMenu } from "radix-ui";
 import { SourceViewer } from "@/features/source-ingestion/components/source-viewer";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AnswerModelPicker } from "@/features/ask/components/answer-model-picker";
 import { AskTurn } from "@/features/ask/components/ask-turn";
 import { MaeglagiAvatar } from "@/features/ask/components/maeglagi-avatar";
+import { QuestionInput } from "@/features/ask/components/question-input";
+import {
+  QUESTION_COUNTER_THRESHOLD,
+  QUESTION_MAX_LENGTH,
+  isNearBottom,
+} from "@/features/ask/lib/ask-turns";
 import { exampleQuestions } from "@/features/ask/lib/example-questions";
 import { useAsk } from "@/features/ask/hooks/use-ask";
 import { useAsync } from "@/hooks/use-async";
-import { useApi } from "@/lib/api/context";
+import { isMockMode } from "@/lib/api";
+import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { AnswerSource } from "@/lib/api";
+import { localDateKey } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
 
 export default function AskPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
   const api = useApi();
+  const isDemo = useDemoMode();
+  const workspacePath = useWorkspacePath();
   const [sourceViewer, setSourceViewer] = useState<AnswerSource>();
 
   const [draft, setDraft] = useState("");
   const [isModelSaving, setIsModelSaving] = useState(false);
   const modelSavingRef = useRef(false);
-  const { turns, isStreaming, ask, stop, clear } = useAsk(workspaceId);
+  const { turns, isStreaming, isRestored, ask, retry, stop, clear, restore } = useAsk(workspaceId);
 
   const onModelSavingChange = useCallback((saving: boolean) => {
     modelSavingRef.current = saving;
@@ -37,11 +48,11 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
   /*
    * 빈 화면에는 고정 예시 대신 이 워크스페이스에 실제로 쌓인 결정을 보여줍니다.
    * "무엇을 물어볼 수 있는지"를 이 팀의 맥락으로 알려주려는 것입니다.
-   * 불러오지 못하거나 결정이 없으면 예시 질문으로 돌아갑니다.
    */
-  const { data: decisionItems } = useAsync(
+  const { data: decisionItems, isLoading: isDecisionsLoading } = useAsync(
     (signal) => api.listContextItems(workspaceId, { kinds: ["decision"] }, signal),
     [workspaceId],
+    { resetKey: workspaceId },
   );
   const recentDecisions = useMemo(
     () =>
@@ -52,20 +63,73 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
     [decisionItems],
   );
 
-  // 답변이 길어져도 마지막 줄이 보이도록 따라 내려갑니다.
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // 소스가 하나도 없으면 무엇을 물어도 근거가 없습니다. 질문을 권하기 전에 올리기부터 안내합니다.
+  const {
+    data: workspace,
+    isLoading: isWorkspaceLoading,
+    reload: reloadWorkspace,
+  } = useAsync((signal) => api.getWorkspace(workspaceId, signal), [workspaceId], {
+    resetKey: workspaceId,
+  });
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    window.addEventListener("maeglagi:sources-changed", reloadWorkspace);
+    return () => window.removeEventListener("maeglagi:sources-changed", reloadWorkspace);
+  }, [reloadWorkspace]);
+
+  // 예시 질문은 시드 데이터만 답할 수 있으므로 mock·데모에서만 보여줍니다.
+  const showExamples = isMockMode || isDemo;
+  const isIntroLoading =
+    (isDecisionsLoading && !decisionItems) || (isWorkspaceLoading && !workspace);
+  const hasNoSources = !showExamples && workspace?.sourceCount === 0;
+
+  /*
+   * 답변이 길어지면 마지막 줄을 따라 내려가되, 위쪽 근거를 읽으려고 올라간 사용자를
+   * 끌어내리지는 않습니다. 맨 아래 근처에 있을 때만 따라갑니다.
+   */
+  const followRef = useRef(true);
+  useEffect(() => {
+    const onScroll = () => {
+      followRef.current = isNearBottom({
+        scrollTop: window.scrollY,
+        clientHeight: window.innerHeight,
+        scrollHeight: document.documentElement.scrollHeight,
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    if (turns.length === 0 || !followRef.current) return;
+    // 부드러운 스크롤은 토큰마다 겹쳐 쌓이면서 화면을 흔들기 때문에 바로 옮깁니다.
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
   }, [turns]);
 
   const submit = useCallback(
     (question: string) => {
       if (modelSavingRef.current || isStreaming || !question.trim()) return;
       setDraft("");
+      followRef.current = true;
       void ask(question);
     },
     [ask, isStreaming],
   );
+
+  const retryTurn = useCallback(
+    (turnId: string) => {
+      if (modelSavingRef.current || isStreaming) return;
+      followRef.current = true;
+      retry(turnId);
+    },
+    [retry, isStreaming],
+  );
+
+  const clearConversation = () => {
+    const removed = clear();
+    if (removed.length === 0) return;
+    toast("대화를 지웠습니다.", {
+      action: { label: "되돌리기", onClick: () => restore(removed) },
+    });
+  };
 
   const openSource = useCallback((source: AnswerSource) => setSourceViewer(source), []);
   const openUpload = (mode: "document" | "meeting") => {
@@ -74,6 +138,10 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
     );
   };
 
+  const remaining = QUESTION_MAX_LENGTH - draft.length;
+  const showCounter = remaining <= QUESTION_COUNTER_THRESHOLD;
+  const showIntro = isRestored && turns.length === 0;
+
   return (
     <div className="flex min-h-[calc(100dvh-8rem)] flex-col">
       <PageHeader
@@ -81,92 +149,139 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
         description="워크스페이스에 질문하고 근거와 함께 답을 받습니다."
         action={
           turns.length > 0 ? (
-            <Button variant="ghost" size="sm" onClick={clear}>
+            <Button variant="ghost" size="sm" onClick={clearConversation}>
               대화 지우기
             </Button>
           ) : undefined
         }
       />
-      <p className="-mt-3 mb-6 text-xs text-muted-foreground">이 화면의 Ask는 서비스 AI 연결을 사용합니다. 내 에이전트의 답변은 <Link href="/account/mcp" className="text-primary underline-offset-2 hover:underline">계정 MCP 연결</Link>을 통해 에이전트에서 받으세요.</p>
+      <p className="-mt-3 mb-6 text-xs text-muted-foreground">
+        이 화면의 Ask는 서비스 AI 연결을 사용합니다. 내 에이전트에서 답변을 받으려면{" "}
+        <Link href="/account/mcp" className="text-primary underline-offset-2 hover:underline">
+          계정 MCP 연결
+        </Link>
+        을 등록해 보세요.
+      </p>
 
       {/* 대화가 없을 때는 안내를 입력창과 헤더 사이 가운데에 둬 빈 화면이 한쪽으로 쏠리지 않게 합니다. */}
-      <div className={cn("flex-1", turns.length === 0 && "flex flex-col justify-center")}>
-        {turns.length === 0 ? (
+      <div className={cn("flex-1", showIntro && "flex flex-col justify-center")}>
+        {showIntro ? (
           <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-4 pb-16 text-center">
             <MaeglagiAvatar variant="resting" className="size-12" />
-            <div className="space-y-1">
-              <p className="font-medium">최근 결정의 근거부터 물어보세요</p>
+            <div className="w-full space-y-1">
+              {isIntroLoading ? (
+                <Skeleton className="mx-auto h-6 w-56 max-w-full" />
+              ) : (
+                <p className="font-medium">
+                  {hasNoSources
+                    ? "아직 물어볼 소스가 없어요. 회의나 문서를 먼저 올려보세요."
+                    : recentDecisions.length > 0 || showExamples
+                      ? "최근 결정의 근거부터 물어보세요"
+                      : "올려 둔 회의와 문서에 대해 물어보세요"}
+                </p>
+              )}
               <p className="text-sm text-muted-foreground">
                 맥락이가 회의와 문서에서 근거를 찾아 답해요. 근거가 없으면 없다고 말해요.
               </p>
             </div>
-            {recentDecisions.length > 0 ? (
-              <ul className="w-full divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-                {recentDecisions.map((item) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      disabled={isStreaming || isModelSaving}
-                      onClick={() => submit(`'${item.title}' 결정의 근거는 무엇인가요?`)}
-                      className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{item.title}</span>
-                        <span className="block text-xs text-muted-foreground tabular-nums">
-                          {item.occurredAt.slice(0, 10)} 결정
+            {/* 불러오는 동안과 그 뒤의 높이를 같게 잡아, 목록이 들어올 때 화면이 밀리지 않게 합니다. */}
+            <div className="flex min-h-[11.5rem] w-full flex-col items-center">
+              {isIntroLoading ? (
+                <div className="w-full" role="status">
+                  <Skeleton className="h-[11.5rem] w-full rounded-xl" />
+                  <span className="sr-only">물어볼 만한 결정을 불러오는 중</span>
+                </div>
+              ) : hasNoSources ? (
+                isDemo ? null : (
+                  <Button type="button" onClick={() => openUpload("document")}>
+                    <Upload aria-hidden />
+                    소스 올리기
+                  </Button>
+                )
+              ) : recentDecisions.length > 0 ? (
+                <ul className="w-full divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                  {recentDecisions.map((item) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        disabled={isStreaming || isModelSaving}
+                        onClick={() => submit(`'${item.title}' 결정의 근거는 무엇인가요?`)}
+                        className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">{item.title}</span>
+                          <span className="block text-xs text-muted-foreground tabular-nums">
+                            {localDateKey(item.occurredAt)} 결정
+                          </span>
                         </span>
-                      </span>
-                      <ArrowUpRight
-                        className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
-                        aria-hidden
-                      />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <ul className="flex flex-wrap justify-center gap-2">
-                {exampleQuestions.map((question) => (
-                  <li key={question}>
-                    <button
-                      type="button"
-                      disabled={isStreaming || isModelSaving}
-                      onClick={() => submit(question)}
-                      className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-                    >
-                      {question}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                        <ArrowUpRight
+                          className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+                          aria-hidden
+                        />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : showExamples ? (
+                <ul className="flex flex-wrap justify-center gap-2">
+                  {exampleQuestions.map((question) => (
+                    <li key={question}>
+                      <button
+                        type="button"
+                        disabled={isStreaming || isModelSaving}
+                        onClick={() => submit(question)}
+                        className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                      >
+                        {question}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </div>
-        ) : (
-          <ul className="space-y-8 pb-4">
-            {turns.map((turn) => (
-              <AskTurn key={turn.id} turn={turn} onOpenSource={openSource} />
-            ))}
-          </ul>
-        )}
-        <div ref={bottomRef} />
+        ) : null}
+
+        {/*
+         * 새 질문과 답변 도착을 스크린리더에 알리는 영역입니다. 내용이 들어오기 전부터 있어야
+         * 첫 질문도 읽히므로 비어 있어도 그려 둡니다. 쓰는 중인 본문은 AskTurn이 가려 둡니다.
+         */}
+        <div role="log" aria-live="polite" aria-relevant="additions" aria-label="질문과 답변">
+          {turns.length > 0 ? (
+            <ul className="space-y-8 pb-4">
+              {turns.map((turn) => (
+                <AskTurn
+                  key={turn.id}
+                  turn={turn}
+                  onOpenSource={openSource}
+                  onRetry={retryTurn}
+                  retryDisabled={isStreaming || isModelSaving}
+                  onUpload={isDemo ? undefined : () => openUpload("document")}
+                  settingsHref={workspacePath(workspaceId, "settings")}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </div>
 
       <div className="sticky bottom-0 bg-background/85 pt-3 pb-2 backdrop-blur">
         <form
-          className="flex gap-2"
+          className="flex items-end gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             submit(draft);
           }}
         >
           <div className="relative min-w-0 flex-1">
-            <Input
+            <QuestionInput
               className="pr-10"
               value={draft}
               placeholder="이 워크스페이스에 대해 질문해 보세요"
-              disabled={isStreaming || isModelSaving}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={setDraft}
+              onSubmit={() => submit(draft)}
               aria-label="질문"
+              aria-describedby="ask-input-help"
             />
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -218,6 +333,20 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
             </Button>
           )}
         </form>
+        <div className="mt-1 flex items-start justify-between gap-3 text-xs text-muted-foreground">
+          <p id="ask-input-help">
+            질문은 하나씩 따로 답해요. 필요한 맥락은 질문에 함께 적어주세요.
+          </p>
+          {showCounter ? (
+            <p
+              className={cn("shrink-0 tabular-nums", remaining <= 0 && "text-destructive")}
+              aria-live="polite"
+            >
+              <span className="sr-only">질문 글자 수 </span>
+              {draft.length.toLocaleString("ko-KR")} / {QUESTION_MAX_LENGTH.toLocaleString("ko-KR")}
+            </p>
+          ) : null}
+        </div>
         <AnswerModelPicker
           key={workspaceId}
           workspaceId={workspaceId}

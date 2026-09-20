@@ -38,18 +38,18 @@ export function validateDocuments(files: File[]): ValidationResult {
     ) {
       rejected.push({
         file,
-        reason: `지원하지 않는 형식입니다 (${ACCEPTED_DOCUMENT_EXTENSIONS.join(", ")}만 가능)`,
+        reason: "지원하지 않는 형식입니다. PDF, DOCX, TXT, MD 문서를 선택해 주세요.",
       });
       continue;
     }
 
     if (file.size === 0) {
-      rejected.push({ file, reason: "빈 파일입니다" });
+      rejected.push({ file, reason: "빈 파일입니다." });
       continue;
     }
 
     if (file.size > MAX_DOCUMENT_BYTES) {
-      rejected.push({ file, reason: `${formatBytes(MAX_DOCUMENT_BYTES)}를 넘습니다` });
+      rejected.push({ file, reason: `문서는 ${formatBytes(MAX_DOCUMENT_BYTES)}를 넘을 수 없습니다.` });
       continue;
     }
 

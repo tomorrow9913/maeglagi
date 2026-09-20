@@ -374,6 +374,12 @@ components:
           properties:
             type: { type: string, const: error }
             message: { type: string }
+            code:
+              type: string
+              enum: [no_evidence]
+              description: >-
+                Present only when the question had no evidence. This is a normal outcome,
+                not a failure, so clients render it as an answer rather than an error.
     AnswerSource:
       type: object
       required: [index, sourceId, chunkId, kind, title, excerpt]

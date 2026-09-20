@@ -2,19 +2,21 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, FileText, FileUp, Mic, RefreshCw } from "lucide-react";
+import { ChevronDown, FileText, FileUp, Mic } from "lucide-react";
+import { ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { Button } from "@/components/ui/button";
 import { useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import { useLiveSources } from "../hooks/use-live-sources";
 import { SourceViewer } from "./source-viewer";
 import { SourceUploadDialog } from "./source-upload-dialog";
 import { MeetingReviewDialog } from "./meeting-review-dialog";
+import { CONNECTION_DELAYED, RECORDING_BLOCKS_FILE_UPLOAD } from "../lib/copy";
 import { sourcePresentation } from "../lib/source-presentation";
 
 export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
   const isDemo = useDemoMode();
   const workspacePath = useWorkspacePath();
-  const { sources: data, progress, error, isLoading, reload } = useLiveSources(workspaceId, true);
+  const { sources: data, progress, error, isLoading, reload, connection } = useLiveSources(workspaceId, true);
   const [viewer, setViewer] = useState<string>();
   const [reviewSourceId, setReviewSourceId] = useState<string>();
   const [mode, setMode] = useState<"document" | "meeting" | null>(null);
@@ -80,15 +82,20 @@ export function WorkspaceSources({ workspaceId }: { workspaceId: string }) {
             회의 추가
           </Button>
         </div>}
-        {isLoading && <p className="px-2 text-xs text-muted-foreground">불러오는 중…</p>}
-        {error && (
-          <Button size="sm" variant="ghost" onClick={reload}>
-            <RefreshCw />
-            소스 다시 불러오기
-          </Button>
+        {!isDemo && recordingBusy && (
+          <p className="mb-3 px-1 text-xs text-muted-foreground">{RECORDING_BLOCKS_FILE_UPLOAD}</p>
+        )}
+        {isLoading && <ListSkeleton count={3} className="h-9" label="소스를 불러오는 중" />}
+        {error && !data && (
+          <ErrorState compact error={error} onRetry={reload} title="소스를 불러오지 못했습니다" />
         )}
         {!isLoading && !error && !data?.length && (
-          <p className="px-2 text-xs text-muted-foreground">분석에 사용할 소스를 추가하세요.</p>
+          <p className="px-2 text-xs text-muted-foreground">
+            {isDemo ? "공개 데모에 올라온 소스가 없습니다." : "질문의 근거가 될 회의나 문서를 올려보세요."}
+          </p>
+        )}
+        {connection === "reconnecting" && (
+          <p role="status" className="mb-2 px-2 text-xs text-muted-foreground">{CONNECTION_DELAYED}</p>
         )}
         <ul className="max-h-[45dvh] space-y-1 overflow-y-auto">
           {data?.map((source) => (

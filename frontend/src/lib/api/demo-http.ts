@@ -3,7 +3,7 @@ import type { MaeglagiApi } from "./contract";
 import { httpApi } from "./http";
 import type { ContextItem, ContextStore, KnowledgeGraph, Source, SourceContent, Workspace, WorkspacePerson, WorkspaceProject } from "./types";
 
-const loginRequired = () => { throw new ApiError(403, "데모는 읽기 전용입니다. 편집하려면 로그인해 내 워크스페이스를 사용하세요."); };
+const loginRequired = () => { throw new ApiError(403, "데모는 읽기 전용입니다. 편집하려면 로그인해 내 워크스페이스에서 사용해 주세요."); };
 
 /** Public demo data is read from the configured database workspace, never fixtures. */
 export const demoHttpApi: MaeglagiApi = {
@@ -48,6 +48,8 @@ export const demoHttpApi: MaeglagiApi = {
   updateApiKey: loginRequired,
   createAccountCredential: loginRequired,
   rotateAccountCredential: loginRequired,
+  setDefaultAccountCredential: loginRequired,
+  deleteAccountCredential: loginRequired,
   rotateProviderCredential: loginRequired,
   updateWorkspaceModels: loginRequired,
   createPerson: loginRequired,
@@ -64,5 +66,5 @@ export const demoHttpApi: MaeglagiApi = {
   submitBrowserTranscript: loginRequired,
   saveMeetingReview: loginRequired,
   confirmMeetingReview: loginRequired,
-  async *ask() { throw new ApiError(403, "데모에서는 AI 질문을 실행하지 않습니다. 로그인해 내 워크스페이스에서 사용하세요."); },
+  async *ask() { throw new ApiError(403, "데모에서는 AI 질문을 실행하지 않습니다. 로그인해 내 워크스페이스에서 물어봐 주세요."); },
 };

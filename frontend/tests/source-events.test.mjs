@@ -159,6 +159,15 @@ test("source rows and progress stay visible while a settled refresh is in flight
   assert.equal(requests.length, 1);
   requests.shift().reject(new Error("offline"));
   await new Promise(setImmediate);
+  const failedLoad = render();
+  assert.match(failedLoad.error.message, /offline/);
+  // "다시 시도"를 누르면 이전 오류를 지워 로딩 상태가 바로 보입니다.
+  failedLoad.reload();
+  const retrying = render();
+  assert.equal(retrying.error, undefined);
+  assert.equal(retrying.connection, "connected");
+  requests.pop().reject(new Error("offline"));
+  await new Promise(setImmediate);
   assert.match(render().error.message, /offline/);
   const switched = render("workspace-2");
   assert.equal(switched.sources, undefined);
@@ -219,4 +228,43 @@ test("sidebar watches agent statuses over SSE without repeated list requests", a
   requests.shift()([{ id: "agent-1", status: "succeeded", title: "Agent meeting" }]);
   await Promise.resolve();
   assert.equal(render().sources[0].status, "succeeded");
+});
+
+test("channel reports reconnecting after repeated failures and recovers on the next event", async () => {
+  // 재연결 대기는 테스트에서 기다리지 않도록 즉시 끝냅니다.
+  const { SourceEventChannel, RECONNECTING_AFTER_FAILURES } = load(
+    "../src/features/source-ingestion/hooks/use-workspace-source-events.ts",
+    { react: {}, "@/lib/api/context": {} },
+    { setTimeout: (callback) => setTimeout(callback, 0) },
+  );
+  let calls = 0;
+  let release;
+  let offline = false;
+  const states = [];
+  const api = { async *sourceEvents(_workspace, _ids, signal) {
+    calls++;
+    if (offline || calls <= RECONNECTING_AFTER_FAILURES) throw new Error("offline");
+    yield { id: "job-1", sourceId: "source-1", status: "processing", progress: 0.5 };
+    await new Promise((resolve) => { release = resolve; signal.addEventListener("abort", resolve, { once: true }); });
+  } };
+  const channel = new SourceEventChannel(api, "workspace-1");
+  const statesAtCall = [];
+  const unsubscribe = channel.subscribe({ ids: new Set(["source-1"]), onJob() { statesAtCall.push(channel.connection); }, onConnection: (state) => states.push(state) });
+  assert.equal(channel.connection, "connected");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, RECONNECTING_AFTER_FAILURES + 1);
+  assert.deepEqual(states, ["reconnecting", "connected"]);
+  assert.equal(channel.connection, "connected");
+
+  // 이미 다시 연결 중인 채널에 새로 구독하면 현재 상태를 바로 전달받습니다.
+  const late = [];
+  offline = true;
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(channel.connection, "reconnecting");
+  const unsubscribeLate = channel.subscribe({ ids: new Set(["source-1"]), onJob() {}, onConnection: (state) => late.push(state) });
+  assert.deepEqual(late, ["reconnecting"]);
+  unsubscribeLate();
+  unsubscribe();
+  assert.equal(channel.connection, "connected");
 });

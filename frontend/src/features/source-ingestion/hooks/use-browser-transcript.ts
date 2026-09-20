@@ -20,6 +20,25 @@ type RecognitionWindow = Window & {
   webkitSpeechRecognition?: new () => Recognition;
 };
 
+/** Web Speech API 오류 코드를 사용자가 읽을 사유로 바꿉니다. 코드 원문은 화면에 내보내지 않습니다. */
+export function speechErrorMessage(code: string): string {
+  switch (code) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "마이크 또는 받아쓰기 권한이 없습니다. 브라우저에서 마이크를 허용한 뒤 다시 시도해 주세요.";
+    case "audio-capture":
+      return "마이크를 찾지 못했습니다. 마이크 연결을 확인해 주세요.";
+    case "no-speech":
+      return "음성이 감지되지 않았습니다. 마이크를 확인해 주세요.";
+    case "network":
+      return "네트워크 연결이 끊겨 받아쓰기가 중단됐습니다. 받아쓴 내용은 편집할 수 있습니다.";
+    case "language-not-supported":
+      return "이 브라우저는 한국어 받아쓰기를 지원하지 않습니다. 직접 작성해 주세요.";
+    default:
+      return "받아쓰기가 중단됐습니다. 받아쓴 내용은 편집할 수 있습니다.";
+  }
+}
+
 export function useBrowserTranscript(
   onComplete: (lines: string[], duration: number) => void,
   onUpdate?: (segments: TranscriptSegment[]) => void,
@@ -29,6 +48,8 @@ export function useBrowserTranscript(
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<string>();
   const [elapsed, setElapsed] = useState(0);
+  // 서버 렌더 결과와 어긋나지 않도록 마운트한 뒤에 확인합니다.
+  const [supported, setSupported] = useState(true);
   const recognitionRef = useRef<Recognition | null>(null);
   const completeRef = useRef(onComplete);
   completeRef.current = onComplete;
@@ -53,14 +74,18 @@ export function useBrowserTranscript(
     [],
   );
 
+  useEffect(() => {
+    const browser = window as RecognitionWindow;
+    setSupported(Boolean(browser.SpeechRecognition ?? browser.webkitSpeechRecognition));
+  }, []);
+
   const start = () => {
     if (recognitionRef.current) return false;
     const browser = window as RecognitionWindow;
     const Constructor = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
     if (!Constructor) {
-      setError(
-        "이 브라우저는 받아쓰기를 지원하지 않습니다. 지원 브라우저를 사용하거나 오디오 업로드를 선택해 주세요.",
-      );
+      setSupported(false);
+      setError("이 브라우저는 받아쓰기를 지원하지 않습니다. 직접 작성하거나 녹음 파일을 올려 주세요.");
       return false;
     }
     const recognition = new Constructor();
@@ -103,13 +128,9 @@ export function useBrowserTranscript(
       updateRef.current?.(segments);
     };
     recognition.onerror = (event) => {
-      const message =
-        event.error === "not-allowed" || event.error === "service-not-allowed"
-          ? "마이크 또는 음성 인식 권한을 허용해 주세요."
-          : event.error === "no-speech"
-            ? "음성이 감지되지 않았습니다. 마이크를 확인해 주세요."
-            : `받아쓰기가 중단됐습니다 (${event.error}). 수집된 텍스트는 편집할 수 있습니다.`;
-      setError(message);
+      // 종료 버튼 뒤에 직접 abort한 경우의 "aborted"는 오류가 아닙니다.
+      if (event.error === "aborted" && stopTimer.current) return;
+      setError(speechErrorMessage(event.error));
     };
     recognition.onend = () => {
       if (recognitionRef.current !== recognition) return;
@@ -151,5 +172,5 @@ export function useBrowserTranscript(
       }, 3000);
     }
   };
-  return { status, lines, interim, error, elapsed, start, stop };
+  return { status, lines, interim, error, elapsed, supported, start, stop };
 }

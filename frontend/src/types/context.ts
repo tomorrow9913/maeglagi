@@ -23,7 +23,7 @@ export const contextKindLabel: Record<ContextKind, string> = {
 
 export const processingStatusLabel: Record<ProcessingStatus, string> = {
   queued: "대기 중",
-  enqueue_pending: "분석 연결 중",
+  enqueue_pending: "분석 준비 중",
   processing: "처리 중",
   awaiting_review: "대본 검토 필요",
   awaiting_agent: "에이전트 작업 대기",

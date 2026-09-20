@@ -6,7 +6,7 @@ export type RecorderStatus =
   "idle" | "requesting" | "recording" | "stopping" | "denied" | "unsupported" | "error";
 
 export type UseAudioRecorderOptions = {
-  /** 녹음이 끝나 오디오가 만들어지면 호출됩니다. */
+  /** 녹음이 끝나 녹음 파일이 만들어지면 호출됩니다. */
   onComplete: (audio: Blob, durationSeconds: number) => void;
 };
 
@@ -147,7 +147,8 @@ export function useAudioRecorder({ onComplete }: UseAudioRecorderOptions) {
       }
       releaseMic();
       setStatus("error");
-      setErrorMessage("녹음 중 오류가 발생했습니다. 다시 시도해 주세요.");
+      // 다시 녹음할 수 있는 시점은 화면이 정하므로(받아쓴 대본 처리 뒤) 여기서는 사실만 알립니다.
+      setErrorMessage("녹음이 중단됐습니다.");
     });
     try {
       recorder.start();

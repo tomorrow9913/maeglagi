@@ -1,9 +1,9 @@
 "use client";
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
+import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { PageHeader } from "@/components/layout/page-header";
 import { DemoAuthGuidance } from "@/components/layout/demo-auth-guidance";
 import { Button } from "@/components/ui/button";
@@ -15,88 +15,51 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useApi, useDemoMode, useWorkspacePath } from "@/lib/api/context";
+import { useApi, useDemoMode } from "@/lib/api/context";
 import type { KnowledgeGraph, WorkspacePerson, WorkspaceProject } from "@/lib/api";
-import { buildPersonContext, type PersonActivity } from "@/features/directory/lib/person-context";
+import { ActivityList } from "@/features/directory/components/activity-list";
+import { buildPersonContext } from "@/features/directory/lib/person-context";
+import { DiscardConfirmDialog } from "@/features/directory/components/discard-confirm-dialog";
+import { FormField, NativeSelect, Textarea } from "@/features/directory/components/form-field";
+import {
+  emptyPerson,
+  emptyProject,
+  isFormDirty,
+  parseAliases,
+  personFormFrom,
+  projectDateError,
+  projectFormFrom,
+  type PersonForm,
+  type ProjectForm,
+} from "@/features/directory/lib/directory-forms";
+import { directoryToast, mutationErrorMessage } from "@/features/directory/lib/directory-messages";
 import { listProjectPeople } from "@/features/directory/lib/project-people";
+import { workspaceNavItems } from "@/lib/navigation";
 
-type PersonForm = { name: string; email: string; aliases: string; role: string };
-type ProjectForm = {
-  name: string;
-  goal: string;
-  description: string;
-  ownerPersonId: string;
-  participantIds: string[];
-  startsOn: string;
-  endsOn: string;
-};
-const emptyPerson: PersonForm = { name: "", email: "", aliases: "", role: "" };
-const emptyProject: ProjectForm = {
-  name: "",
-  goal: "",
-  description: "",
-  ownerPersonId: "",
-  participantIds: [],
-  startsOn: "",
-  endsOn: "",
-};
-function errorText(error: unknown) {
-  return error instanceof Error ? error.message : "요청을 완료하지 못했습니다.";
+// 화면 제목은 메뉴 이름과 같아야 합니다. 한쪽만 바뀌지 않도록 메뉴에서 읽어 옵니다.
+const pageTitle =
+  workspaceNavItems.find((item) => item.segment === "directory")?.label ?? "참여자·프로젝트";
+
+function toError(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
 }
-function ActivityList({
-  items,
-  empty,
-  workspaceId,
-}: {
-  items: PersonActivity[];
-  empty: string;
-  workspaceId: string;
-}) {
-  const workspacePath = useWorkspacePath();
-  if (!items.length) return <p className="text-muted-foreground">{empty}</p>;
-  return (
-    <ul className="space-y-2">
-      {items.map((item) => (
-        <li key={item.node.id} className="rounded-md border p-2">
-          <p className="font-medium">{item.node.label}</p>
-          {item.node.type === "decision" && item.node.supersededBy && (
-            <p className="text-xs text-muted-foreground">대체된 결정</p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            {item.relation}
-            {item.via ? ` · ${item.via.label} 경유` : ""}
-          </p>
-          {item.node.sources.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-2">
-              {item.node.sources.map((source) => (
-                <Link
-                  key={source.id}
-                  href={`${workspacePath(workspaceId, "sources")}?source=${encodeURIComponent(source.id)}${source.chunkId ? `&chunk=${encodeURIComponent(source.chunkId)}` : ""}`}
-                  className="text-xs underline underline-offset-2"
-                >
-                  {source.title}
-                </Link>
-              ))}
-            </div>
-          )}
-          {item.decisions?.length ? (
-            <div className="mt-2 border-l pl-2">
-              <p className="text-xs font-medium">연결된 결정</p>
-              {item.decisions.map((decision) => (
-                <p key={decision.node.id} className="text-xs">
-                  {decision.node.label}
-                  {decision.node.supersededBy && (
-                    <span className="ml-2 text-muted-foreground">대체된 결정</span>
-                  )}
-                </p>
-              ))}
-            </div>
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
+
+/** 열어 둔 참여자·프로젝트를 주소에 남깁니다. 새로 고치거나 링크를 공유해도 같은 자리가 열립니다. */
+function replaceDirectoryLink(kind?: "person" | "project", id?: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("person");
+  url.searchParams.delete("project");
+  if (kind && id) url.searchParams.set(kind, id);
+  window.history.replaceState(null, "", url);
 }
+
+type ActOptions = {
+  /** 무엇을 했는지 그대로 적은 완료 문구 */
+  success: string;
+  /** 있으면 완료 토스트에 "되돌리기"를 붙입니다. */
+  undo?: () => void;
+  onSuccess?: () => void;
+};
 
 export default function DirectoryPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
@@ -110,7 +73,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string>();
-  const [loadError, setLoadError] = useState<string>();
+  const [loadError, setLoadError] = useState<Error>();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -119,9 +82,14 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   const createdProjectRef = useRef<string | undefined>(undefined);
   const [personId, setPersonId] = useState<string>();
   const [addProjectId, setAddProjectId] = useState<string>();
+  // 프로젝트 없이 참여자만 등록하는 경우. 프로젝트가 하나도 없어도 참여자를 등록할 수 있어야 합니다.
+  const [addStandalone, setAddStandalone] = useState(false);
+  const [discard, setDiscard] = useState<{ run: () => void } | null>(null);
   const [personEditing, setPersonEditing] = useState(false);
   const [personForm, setPersonForm] = useState<PersonForm>(emptyPerson);
   const [projectForm, setProjectForm] = useState<ProjectForm>(emptyProject);
+  // 닫을 때 입력이 바뀌었는지 비교할 기준입니다.
+  const [projectInitial, setProjectInitial] = useState<ProjectForm>(emptyProject);
   const [editingProjectId, setEditingProjectId] = useState<string>();
   const [selectedPersonId, setSelectedPersonId] = useState("");
   const [newPerson, setNewPerson] = useState<PersonForm>(emptyPerson);
@@ -130,7 +98,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   const [createdPersonId, setCreatedPersonId] = useState<string>();
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
   const [graphStatus, setGraphStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [graphError, setGraphError] = useState<string>();
+  const [graphError, setGraphError] = useState<Error>();
   const [graphRetry, setGraphRetry] = useState(0);
   const graphCacheRef = useRef<
     { api: typeof api; workspaceId: string; graph: KnowledgeGraph } | undefined
@@ -138,6 +106,8 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   const graphRequestRef = useRef<AbortController | null>(null);
   const graphRequestId = useRef(0);
   const initialLinkHandled = useRef(false);
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   const invalidateGraph = useCallback(() => {
     graphCacheRef.current = undefined;
@@ -182,7 +152,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       })
       .catch((error) => {
         if (live) {
-          setLoadError(errorText(error));
+          setLoadError(toError(error));
           setLoading(false);
         }
       });
@@ -195,39 +165,38 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
     setPersonId(undefined);
     setProjectDialog(null);
     setAddProjectId(undefined);
+    setAddStandalone(false);
+    setDiscard(null);
   }, [workspaceId]);
   useEffect(() => {
     if (loading || loadError || loadedWorkspaceId !== workspaceId || initialLinkHandled.current)
       return;
     initialLinkHandled.current = true;
     const query = new URLSearchParams(window.location.search);
-    const linkedPerson = people.find((item) => item.id === query.get("person"));
-    const linkedProject = projects.find((item) => item.id === query.get("project"));
+    const personParam = query.get("person");
+    const projectParam = query.get("project");
+    const linkedPerson = people.find((item) => item.id === personParam);
+    const linkedProject = projects.find((item) => item.id === projectParam);
     if (linkedPerson) {
       setPersonId(linkedPerson.id);
-      setPersonForm({
-        name: linkedPerson.name,
-        email: linkedPerson.email ?? "",
-        aliases: linkedPerson.aliases.join(", "),
-        role: linkedPerson.role ?? "",
-      });
-    } else if (linkedProject)
+      setPersonForm(personFormFrom(linkedPerson));
+    } else if (linkedProject) {
       setExpanded((current) =>
         current.includes(linkedProject.id) ? current : [...current, linkedProject.id],
       );
+    } else if (personParam || projectParam) {
+      // 지워졌거나 다른 워크스페이스의 링크입니다. 아무 반응이 없으면 고장으로 보입니다.
+      toast.error(personParam ? directoryToast.personMissing : directoryToast.projectMissing);
+      replaceDirectoryLink();
+    }
   }, [loading, loadError, loadedWorkspaceId, workspaceId, people, projects]);
   useEffect(() => {
     const onPopState = () => {
       const query = new URLSearchParams(window.location.search);
       const linkedPerson = people.find((item) => item.id === query.get("person"));
       setPersonId(linkedPerson?.id);
-      if (linkedPerson)
-        setPersonForm({
-          name: linkedPerson.name,
-          email: linkedPerson.email ?? "",
-          aliases: linkedPerson.aliases.join(", "),
-          role: linkedPerson.role ?? "",
-        });
+      setPersonEditing(false);
+      if (linkedPerson) setPersonForm(personFormFrom(linkedPerson));
       const project = projects.find((item) => item.id === query.get("project"));
       if (project)
         setExpanded((current) =>
@@ -267,7 +236,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       })
       .catch((error) => {
         if (!controller.signal.aborted && requestId === graphRequestId.current) {
-          setGraphError(errorText(error));
+          setGraphError(toError(error));
           setGraphStatus("error");
         }
       })
@@ -276,40 +245,76 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       });
     return () => controller.abort();
   }, [api, workspaceId, loadedWorkspaceId, personId, graphRetry]);
-  const setLink = (kind?: "person" | "project", id?: string) => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("person");
-    url.searchParams.delete("project");
-    if (kind && id) url.searchParams.set(kind, id);
-    window.history.replaceState(null, "", url);
-  };
-  const act = async (action: () => Promise<void>, onSuccess?: () => void) => {
+  const setLink = replaceDirectoryLink;
+  const act = async (action: () => Promise<void>, options: ActOptions) => {
     if (busyRef.current || isDemo) return;
     busyRef.current = true;
     setBusy(true);
+    let failure: { error: unknown } | undefined;
     try {
       await action();
       await reload();
-      onSuccess?.();
-      toast.success("저장했습니다.");
+      options.onSuccess?.();
     } catch (error) {
-      toast.error(errorText(error));
+      failure = { error };
       await reload().catch(() => undefined);
     } finally {
       invalidateGraph();
       busyRef.current = false;
       setBusy(false);
     }
+    // 토스트는 잠금을 푼 뒤에 띄웁니다. "되돌리기"를 바로 눌러도 막히지 않습니다.
+    if (failure) toast.error(mutationErrorMessage(failure.error));
+    else
+      toast.success(
+        options.success,
+        options.undo ? { action: { label: "되돌리기", onClick: options.undo } } : undefined,
+      );
   };
+  const actRef = useRef(act);
+  actRef.current = act;
+
+  /** 보관은 바로 실행하고, 실수였다면 토스트의 "되돌리기"로 복원합니다. */
+  const setProjectArchived = (project: WorkspaceProject, archived: boolean) =>
+    void actRef.current(
+      () => api.updateProject(workspaceId, project.id, { archived }).then(() => undefined),
+      {
+        success: archived
+          ? directoryToast.projectArchived(project.name)
+          : directoryToast.projectRestored(project.name),
+        undo: archived
+          ? () => {
+              if (workspaceIdRef.current === workspaceId) setProjectArchived(project, false);
+            }
+          : undefined,
+      },
+    );
+  const setPersonArchived = (target: WorkspacePerson, archived: boolean) =>
+    void actRef.current(
+      () => api.updatePerson(workspaceId, target.id, { archived }).then(() => undefined),
+      {
+        success: archived
+          ? directoryToast.personArchived(target.name)
+          : directoryToast.personRestored(target.name),
+        undo: archived
+          ? () => {
+              if (workspaceIdRef.current === workspaceId) setPersonArchived(target, false);
+            }
+          : undefined,
+      },
+    );
+
+  /** 입력이 바뀌었으면 닫기 전에 확인합니다. 저장 중에는 닫지 않습니다. */
+  const guardClose = (isDirty: boolean, close: () => void) => {
+    if (busyRef.current) return;
+    if (isDirty) setDiscard({ run: close });
+    else close();
+  };
+
   const openPerson = (person: WorkspacePerson) => {
     setPersonId(person.id);
     setPersonEditing(false);
-    setPersonForm({
-      name: person.name,
-      email: person.email ?? "",
-      aliases: person.aliases.join(", "),
-      role: person.role ?? "",
-    });
+    setPersonForm(personFormFrom(person));
     setLink("person", person.id);
   };
   const closePerson = () => {
@@ -328,19 +333,9 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   const openProjectEditor = (project?: WorkspaceProject) => {
     createdProjectRef.current = undefined;
     setEditingProjectId(project?.id);
-    setProjectForm(
-      project
-        ? {
-            name: project.name,
-            goal: project.goal ?? "",
-            description: project.description ?? "",
-            ownerPersonId: project.ownerPersonId ?? "",
-            participantIds: project.participantIds ?? [],
-            startsOn: project.startsOn ?? "",
-            endsOn: project.endsOn ?? "",
-          }
-        : emptyProject,
-    );
+    const form = project ? projectFormFrom(project) : emptyProject;
+    setProjectForm(form);
+    setProjectInitial(form);
     setProjectDialog(project ? "edit" : "create");
   };
   const closeProjectEditor = () => {
@@ -348,16 +343,19 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
     setEditingProjectId(undefined);
     setProjectDialog(null);
   };
-  const openAdd = (project: WorkspaceProject) => {
-    setAddProjectId(project.id);
+  /** 프로젝트를 넘기면 그 프로젝트에 연결하고, 비우면 참여자만 등록합니다. */
+  const openAdd = (project?: WorkspaceProject) => {
+    setAddProjectId(project?.id);
+    setAddStandalone(!project);
     setSelectedPersonId("");
     setNewPerson(emptyPerson);
     setCreatedPersonId(undefined);
     createdPersonRef.current = undefined;
-    setAddMode("existing");
+    setAddMode(project ? "existing" : "new");
   };
   const closeAdd = () => {
     setAddProjectId(undefined);
+    setAddStandalone(false);
     setCreatedPersonId(undefined);
     createdPersonRef.current = undefined;
   };
@@ -371,25 +369,34 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       startsOn: projectForm.startsOn || null,
       endsOn: projectForm.endsOn || null,
     };
-    void act(async () => {
-      const projectId = editingProjectId ?? createdProjectRef.current;
-      const project = projectId
-        ? await api.updateProject(workspaceId, projectId, input)
-        : await api.createProject(workspaceId, input);
-      if (!projectId) {
-        createdProjectRef.current = project.id;
-        setEditingProjectId(project.id);
-        setProjectDialog("edit");
-      } else {
-        const previous = new Set(project.participantIds ?? []);
-        const next = new Set(projectForm.participantIds);
-        if (previous.size !== next.size || [...next].some((id) => !previous.has(id)))
-          await api.setProjectParticipants(workspaceId, project.id, {
-            revision: project.revision ?? 0,
-            personIds: [...next],
-          });
-      }
-    }, closeProjectEditor);
+    const isCreate = !(editingProjectId ?? createdProjectRef.current);
+    void act(
+      async () => {
+        const projectId = editingProjectId ?? createdProjectRef.current;
+        const project = projectId
+          ? await api.updateProject(workspaceId, projectId, input)
+          : await api.createProject(workspaceId, input);
+        if (!projectId) {
+          createdProjectRef.current = project.id;
+          setEditingProjectId(project.id);
+          setProjectDialog("edit");
+        } else {
+          const previous = new Set(project.participantIds ?? []);
+          const next = new Set(projectForm.participantIds);
+          if (previous.size !== next.size || [...next].some((id) => !previous.has(id)))
+            await api.setProjectParticipants(workspaceId, project.id, {
+              revision: project.revision ?? 0,
+              personIds: [...next],
+            });
+        }
+      },
+      {
+        success: isCreate
+          ? directoryToast.projectCreated(input.name)
+          : directoryToast.projectSaved(input.name),
+        onSuccess: closeProjectEditor,
+      },
+    );
   };
   const submitPerson = (event: FormEvent) => {
     event.preventDefault();
@@ -397,45 +404,51 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
     const input = {
       name: personForm.name.trim(),
       email: personForm.email.trim() || null,
-      aliases: personForm.aliases
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
+      aliases: parseAliases(personForm.aliases),
       role: personForm.role.trim() || null,
     };
-    void act(
-      () => api.updatePerson(workspaceId, personId, input).then(() => undefined),
-      () => setPersonEditing(false),
-    );
+    void act(() => api.updatePerson(workspaceId, personId, input).then(() => undefined), {
+      success: directoryToast.personSaved,
+      onSuccess: () => setPersonEditing(false),
+    });
   };
   const submitAdd = (event: FormEvent) => {
     event.preventDefault();
     const projectId = addProjectId;
-    if (!projectId) return;
-    void act(async () => {
-      let id = selectedPersonId;
-      if (addMode === "new") {
-        if (!createdPersonRef.current) {
-          const person = await api.createPerson(workspaceId, {
-            name: newPerson.name.trim(),
-            email: newPerson.email.trim(),
-            aliases: [],
-            role: null,
-          });
-          createdPersonRef.current = person.id;
-          setCreatedPersonId(person.id);
+    if (!projectId && !addStandalone) return;
+    void act(
+      async () => {
+        let id = selectedPersonId;
+        if (addMode === "new") {
+          if (!createdPersonRef.current) {
+            const person = await api.createPerson(workspaceId, {
+              name: newPerson.name.trim(),
+              // 이메일은 서버에서도 선택 항목입니다. 비우면 null로 보냅니다.
+              email: newPerson.email.trim() || null,
+              aliases: [],
+              role: null,
+            });
+            createdPersonRef.current = person.id;
+            setCreatedPersonId(person.id);
+          }
+          id = createdPersonRef.current;
         }
-        id = createdPersonRef.current;
-      }
-      // Fetch current revision immediately before changing the participant set.
-      const current = (await api.listProjects(workspaceId)).find((item) => item.id === projectId);
-      if (!current) throw new Error("프로젝트를 찾을 수 없습니다.");
-      if (current.participantIds?.includes(id)) return;
-      await api.setProjectParticipants(workspaceId, projectId, {
-        revision: current.revision ?? 0,
-        personIds: [...(current.participantIds ?? []), id],
-      });
-    }, closeAdd);
+        if (!projectId) {
+          // 새로 등록한 참여자는 아직 어느 프로젝트에도 없으므로 그 목록을 펼쳐 결과를 보여줍니다.
+          setUnassignedOpen(true);
+          return;
+        }
+        // Fetch current revision immediately before changing the participant set.
+        const current = (await api.listProjects(workspaceId)).find((item) => item.id === projectId);
+        if (!current) throw new Error("프로젝트를 찾을 수 없습니다.");
+        if (current.participantIds?.includes(id)) return;
+        await api.setProjectParticipants(workspaceId, projectId, {
+          revision: current.revision ?? 0,
+          personIds: [...(current.participantIds ?? []), id],
+        });
+      },
+      { success: directoryToast.personAdded, onSuccess: closeAdd },
+    );
   };
   const person =
     loadedWorkspaceId === workspaceId ? people.find((item) => item.id === personId) : undefined;
@@ -456,6 +469,15 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   const invalidOwner = Boolean(
     projectForm.ownerPersonId && (!selectedOwner || selectedOwner.archivedAt),
   );
+  const dateError = projectDateError(projectForm);
+  const isProjectDirty = isFormDirty(projectForm, projectInitial);
+  const isPersonDirty = Boolean(
+    person && personEditing && isFormDirty(personForm, personFormFrom(person)),
+  );
+  // 참여자를 이미 등록했다면(프로젝트 연결만 실패) 닫아도 잃는 입력이 없습니다.
+  const isAddDirty =
+    !createdPersonId &&
+    Boolean(selectedPersonId || newPerson.name.trim() || newPerson.email.trim());
   const availablePeople = people.filter(
     (item) => !item.archivedAt && !(addProject?.participantIds ?? []).includes(item.id),
   );
@@ -463,7 +485,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="프로젝트와 참여자"
+        title={pageTitle}
         description={
           isDemo
             ? "공개 데모의 실제 워크스페이스 데이터를 읽기 전용으로 살펴봅니다."
@@ -472,41 +494,42 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       />
       {isDemo && <DemoAuthGuidance />}
       {loading || (loadedWorkspaceId !== workspaceId && !loadError) ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          목록을 불러오는 중입니다.
-        </p>
+        <ListSkeleton count={3} className="h-14" label="참여자와 프로젝트를 불러오는 중" />
       ) : loadError ? (
-        <div role="alert" className="space-y-2">
-          <p className="text-sm text-destructive">{loadError}</p>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setLoading(true);
-              void reload()
-                .catch((error) => setLoadError(errorText(error)))
-                .finally(() => setLoading(false));
-            }}
-          >
-            다시 시도
-          </Button>
-        </div>
+        <ErrorState
+          error={loadError}
+          onRetry={() => {
+            setLoading(true);
+            void reload()
+              .catch((error) => setLoadError(toError(error)))
+              .finally(() => setLoading(false));
+          }}
+        />
       ) : (
         <>
           <section aria-labelledby="projects-heading" className="space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <h2 id="projects-heading" className="text-lg font-semibold">
                 프로젝트
               </h2>
-              {!isDemo && (
-                <Button type="button" onClick={() => openProjectEditor()}>
+              {!isDemo && projects.length > 0 && (
+                <Button type="button" disabled={busy} onClick={() => openProjectEditor()}>
                   새 프로젝트
                 </Button>
               )}
             </div>
             {projects.length === 0 ? (
-              <p className="rounded-xl border p-5 text-sm text-muted-foreground">
-                아직 프로젝트가 없습니다.
-              </p>
+              <EmptyState
+                title="아직 프로젝트가 없습니다"
+                description="프로젝트를 만들면 회의와 문서를 프로젝트별로 묶어 볼 수 있어요."
+                action={
+                  isDemo ? null : (
+                    <Button type="button" size="sm" onClick={() => openProjectEditor()}>
+                      새 프로젝트
+                    </Button>
+                  )
+                }
+              />
             ) : (
               <ul className="divide-y rounded-xl border">
                 {projects.map((project) => {
@@ -523,7 +546,8 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                         >
                           <ChevronDown
-                            className={`size-4 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                            aria-hidden
+                            className={`size-4 shrink-0 transition-transform motion-reduce:transition-none ${isOpen ? "rotate-180" : ""}`}
                           />
                           <span className="truncate font-medium">{project.name}</span>
                           {project.archivedAt && (
@@ -536,10 +560,11 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                             variant="ghost"
                             size="icon-sm"
                             aria-label={`${project.name}에 참여자 추가`}
+                            title="참여자 추가"
                             disabled={busy || Boolean(project.archivedAt)}
                             onClick={() => openAdd(project)}
                           >
-                            <UserPlus className="size-4" />
+                            <UserPlus className="size-4" aria-hidden />
                           </Button>
                         )}
                       </div>
@@ -548,21 +573,23 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                           id={`project-${project.id}`}
                           className="space-y-3 border-t px-4 py-3 text-sm"
                         >
-                          {project.goal && <p>{project.goal}</p>}
+                          {project.goal && <p className="whitespace-pre-line">{project.goal}</p>}
                           {project.description && (
-                            <p className="text-muted-foreground">{project.description}</p>
+                            <p className="whitespace-pre-line text-muted-foreground">
+                              {project.description}
+                            </p>
                           )}
                           <p className="text-xs text-muted-foreground">
-                            담당:{" "}
+                            담당자:{" "}
                             {people.find((item) => item.id === project.ownerPersonId)?.name ??
                               "없음"}{" "}
                             · 기간: {project.startsOn ?? "미정"} – {project.endsOn ?? "미정"}
                           </p>
                           <div>
                             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
-                              담당 및 참여자
+                              담당자와 참여자
                             </h3>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               {projectPeople.length ? (
                                 projectPeople.map(({ id, person: projectPerson, isOwner }) => {
                                   return projectPerson ? (
@@ -573,7 +600,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                                       className="rounded-md border px-2 py-1 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
                                     >
                                       {projectPerson.name}
-                                      {isOwner ? " · 담당" : ""}
+                                      {isOwner ? " · 담당자" : ""}
                                       {projectPerson.archivedAt ? " · 보관됨" : ""}
                                     </button>
                                   ) : (
@@ -586,7 +613,22 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                                   );
                                 })
                               ) : (
-                                <span className="text-muted-foreground">아직 없음</span>
+                                <>
+                                  <span className="text-muted-foreground">
+                                    아직 참여자가 없습니다.
+                                  </span>
+                                  {!isDemo && !project.archivedAt && (
+                                    <Button
+                                      type="button"
+                                      size="xs"
+                                      variant="outline"
+                                      disabled={busy}
+                                      onClick={() => openAdd(project)}
+                                    >
+                                      참여자 추가
+                                    </Button>
+                                  )}
+                                </>
                               )}
                             </div>
                           </div>
@@ -606,15 +648,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                                 size="sm"
                                 variant="ghost"
                                 disabled={busy}
-                                onClick={() =>
-                                  void act(() =>
-                                    api
-                                      .updateProject(workspaceId, project.id, {
-                                        archived: !project.archivedAt,
-                                      })
-                                      .then(() => undefined),
-                                  )
-                                }
+                                onClick={() => setProjectArchived(project, !project.archivedAt)}
                               >
                                 {project.archivedAt ? "복원" : "보관"}
                               </Button>
@@ -628,45 +662,80 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
               </ul>
             )}
           </section>
-          <section aria-labelledby="unassigned-heading">
-            <div className="rounded-xl border">
-              <h2 id="unassigned-heading" className="font-medium">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 p-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                  aria-expanded={unassignedOpen}
-                  aria-controls="unassigned-people"
-                  onClick={() => setUnassignedOpen((value) => !value)}
-                >
-                  <ChevronDown
-                    className={`size-4 transition-transform ${unassignedOpen ? "rotate-180" : ""}`}
-                  />
-                  <span>프로젝트에 속하지 않은 참여자</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {unassigned.length}명
-                  </span>
-                </button>
+          <section aria-labelledby="people-heading" className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="people-heading" className="text-lg font-semibold">
+                참여자
               </h2>
-              {unassignedOpen && (
-                <div id="unassigned-people" className="flex flex-wrap gap-2 border-t p-4">
-                  {unassigned.length ? (
-                    unassigned.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className="rounded-md border px-2 py-1 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                        onClick={() => openPerson(item)}
-                      >
-                        {item.name}
-                        {item.archivedAt ? " · 보관됨" : ""}
-                      </button>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">아직 없습니다.</p>
-                  )}
-                </div>
+              {/* 프로젝트가 하나도 없어도 참여자를 등록할 수 있어야 합니다. */}
+              {!isDemo && people.length > 0 && (
+                <Button type="button" variant="outline" disabled={busy} onClick={() => openAdd()}>
+                  <UserPlus aria-hidden />
+                  참여자 추가
+                </Button>
               )}
             </div>
+            {people.length === 0 ? (
+              <EmptyState
+                className="p-6"
+                icon={<UserPlus className="size-5" />}
+                title="아직 등록한 참여자가 없습니다"
+                description={
+                  isDemo
+                    ? undefined
+                    : "참여자를 등록해 두면 프로젝트 담당자와 회의 참석자로 연결할 수 있어요."
+                }
+                action={
+                  isDemo ? null : (
+                    <Button type="button" size="sm" variant="outline" onClick={() => openAdd()}>
+                      참여자 추가
+                    </Button>
+                  )
+                }
+              />
+            ) : (
+              <div className="rounded-xl border">
+                <h3 id="unassigned-heading" className="font-medium">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-xl p-4 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                    aria-expanded={unassignedOpen}
+                    aria-controls="unassigned-people"
+                    onClick={() => setUnassignedOpen((value) => !value)}
+                  >
+                    <ChevronDown
+                      aria-hidden
+                      className={`size-4 transition-transform motion-reduce:transition-none ${unassignedOpen ? "rotate-180" : ""}`}
+                    />
+                    <span>프로젝트에 속하지 않은 참여자</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {unassigned.length}명
+                    </span>
+                  </button>
+                </h3>
+                {unassignedOpen && (
+                  <div id="unassigned-people" className="flex flex-wrap gap-2 border-t p-4">
+                    {unassigned.length ? (
+                      unassigned.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="rounded-md border px-2 py-1 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                          onClick={() => openPerson(item)}
+                        >
+                          {item.name}
+                          {item.archivedAt ? " · 보관됨" : ""}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        모든 참여자가 프로젝트에 속해 있습니다.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         </>
       )}
@@ -674,7 +743,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       <Dialog
         open={Boolean(projectDialog && loadedWorkspaceId === workspaceId)}
         onOpenChange={(open) => {
-          if (!open && !busy) closeProjectEditor();
+          if (!open) guardClose(isProjectDirty, closeProjectEditor);
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -682,59 +751,85 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
             <DialogTitle>{projectDialog === "edit" ? "프로젝트 편집" : "새 프로젝트"}</DialogTitle>
             <DialogDescription>프로젝트 정보를 입력합니다.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitProject} className="grid gap-3 md:grid-cols-2">
-            <Input
-              aria-label="프로젝트 이름"
-              placeholder="프로젝트 이름"
-              value={projectForm.name}
+          <form onSubmit={submitProject} className="grid gap-4 md:grid-cols-2">
+            <FormField
+              htmlFor="project-name"
+              label="프로젝트 이름"
               required
-              maxLength={120}
-              onChange={(event) =>
-                setProjectForm((form) => ({ ...form, name: event.target.value }))
-              }
-            />
-            <Input
-              aria-label="프로젝트 목표"
-              placeholder="목표"
-              value={projectForm.goal}
-              maxLength={4000}
-              onChange={(event) =>
-                setProjectForm((form) => ({ ...form, goal: event.target.value }))
-              }
-            />
-            <Input
-              aria-label="프로젝트 설명"
-              placeholder="설명"
-              value={projectForm.description}
-              maxLength={4000}
-              onChange={(event) =>
-                setProjectForm((form) => ({ ...form, description: event.target.value }))
-              }
-            />
-            <select
-              aria-label="프로젝트 담당자"
-              value={projectForm.ownerPersonId}
-              onChange={(event) =>
-                setProjectForm((form) => ({ ...form, ownerPersonId: event.target.value }))
-              }
-              className="min-h-9 rounded-md border bg-background px-3 text-sm"
+              className="md:col-span-2"
             >
-              <option value="">담당자 없음</option>
-              {projectForm.ownerPersonId && !selectedOwner && (
-                <option value={projectForm.ownerPersonId}>목록에 없음 · 변경 필요</option>
-              )}
-              {people
-                .filter((item) => !item.archivedAt || item.id === projectForm.ownerPersonId)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                    {item.archivedAt ? " (보관됨 · 변경 필요)" : ""}
-                  </option>
-                ))}
-            </select>
+              <Input
+                id="project-name"
+                placeholder="예: 맥락이 출시 준비"
+                value={projectForm.name}
+                required
+                maxLength={120}
+                onChange={(event) =>
+                  setProjectForm((form) => ({ ...form, name: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField htmlFor="project-goal" label="목표" className="md:col-span-2">
+              <Textarea
+                id="project-goal"
+                placeholder="예: 10월 말까지 공개 베타를 연다"
+                value={projectForm.goal}
+                maxLength={4000}
+                rows={3}
+                onChange={(event) =>
+                  setProjectForm((form) => ({ ...form, goal: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField htmlFor="project-description" label="설명" className="md:col-span-2">
+              <Textarea
+                id="project-description"
+                placeholder="배경, 범위, 참고할 내용을 적습니다"
+                value={projectForm.description}
+                maxLength={4000}
+                rows={4}
+                onChange={(event) =>
+                  setProjectForm((form) => ({ ...form, description: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField
+              htmlFor="project-owner"
+              label="담당자"
+              className="md:col-span-2"
+              error={
+                invalidOwner ? "보관되지 않은 참여자를 담당자로 다시 선택해 주세요." : undefined
+              }
+              errorId="project-owner-error"
+            >
+              <NativeSelect
+                id="project-owner"
+                value={projectForm.ownerPersonId}
+                aria-invalid={invalidOwner || undefined}
+                aria-describedby={invalidOwner ? "project-owner-error" : undefined}
+                onChange={(event) =>
+                  setProjectForm((form) => ({ ...form, ownerPersonId: event.target.value }))
+                }
+              >
+                <option value="">담당자 없음</option>
+                {projectForm.ownerPersonId && !selectedOwner && (
+                  <option value={projectForm.ownerPersonId}>목록에 없음 · 변경 필요</option>
+                )}
+                {people
+                  .filter((item) => !item.archivedAt || item.id === projectForm.ownerPersonId)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                      {item.archivedAt ? " (보관됨 · 변경 필요)" : ""}
+                    </option>
+                  ))}
+              </NativeSelect>
+            </FormField>
             {projectDialog === "edit" && (
               <fieldset className="space-y-2 rounded-md border p-3 text-sm md:col-span-2">
-                <legend className="px-1 font-medium">프로젝트 참여자</legend>
+                <legend className="px-1 font-medium">
+                  참여자 <span className="font-normal text-muted-foreground">(선택)</span>
+                </legend>
                 <div className="flex flex-wrap gap-3">
                   {people
                     .filter(
@@ -762,53 +857,56 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                         {item.archivedAt ? " (보관됨)" : ""}
                       </label>
                     ))}
+                  {people.length === 0 && (
+                    <p className="text-muted-foreground">아직 등록한 참여자가 없습니다.</p>
+                  )}
                 </div>
               </fieldset>
             )}
-            {invalidOwner && (
-              <p role="alert" className="text-xs text-destructive md:col-span-2">
-                활성 참여자를 담당자로 다시 선택해 주세요.
-              </p>
-            )}
-            <label className="text-xs text-muted-foreground">
-              시작일
+            <FormField htmlFor="project-starts-on" label="시작일">
               <Input
+                id="project-starts-on"
                 type="date"
                 value={projectForm.startsOn}
                 onChange={(event) =>
                   setProjectForm((form) => ({ ...form, startsOn: event.target.value }))
                 }
               />
-            </label>
-            <label className="text-xs text-muted-foreground">
-              종료일
+            </FormField>
+            <FormField
+              htmlFor="project-ends-on"
+              label="종료일"
+              error={dateError}
+              errorId="project-ends-on-error"
+            >
               <Input
+                id="project-ends-on"
                 type="date"
                 value={projectForm.endsOn}
-                min={projectForm.startsOn}
+                min={projectForm.startsOn || undefined}
+                aria-invalid={dateError ? true : undefined}
+                aria-describedby={dateError ? "project-ends-on-error" : undefined}
                 onChange={(event) =>
                   setProjectForm((form) => ({ ...form, endsOn: event.target.value }))
                 }
               />
-            </label>
+            </FormField>
             <div className="flex justify-end gap-2 md:col-span-2">
-              <Button type="button" variant="outline" disabled={busy} onClick={closeProjectEditor}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => guardClose(isProjectDirty, closeProjectEditor)}
+              >
                 취소
               </Button>
               <Button
                 type="submit"
-                disabled={
-                  busy ||
-                  invalidOwner ||
-                  !projectForm.name.trim() ||
-                  Boolean(
-                    projectForm.startsOn &&
-                    projectForm.endsOn &&
-                    projectForm.endsOn < projectForm.startsOn,
-                  )
-                }
+                pending={busy}
+                pendingLabel="저장하는 중…"
+                disabled={invalidOwner || !projectForm.name.trim() || Boolean(dateError)}
               >
-                {busy ? "저장 중…" : "저장"}
+                저장
               </Button>
             </div>
           </form>
@@ -816,46 +914,52 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       </Dialog>
 
       <Dialog
-        open={Boolean(addProject)}
+        open={Boolean(addProject) || (addStandalone && loadedWorkspaceId === workspaceId)}
         onOpenChange={(open) => {
-          if (!open && !busy) closeAdd();
+          if (!open) guardClose(isAddDirty, closeAdd);
         }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{addProject?.name}에 참여자 추가</DialogTitle>
-            <DialogDescription>기존 참여자를 선택하거나 새 참여자를 등록합니다.</DialogDescription>
+            <DialogTitle>
+              {addProject ? `${addProject.name}에 참여자 추가` : "참여자 추가"}
+            </DialogTitle>
+            <DialogDescription>
+              {addProject
+                ? "기존 참여자를 선택하거나 새 참여자를 등록합니다."
+                : "새 참여자를 등록합니다. 프로젝트에는 나중에 연결할 수 있어요."}
+            </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={submitAdd}>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={addMode === "existing" ? "default" : "outline"}
-                disabled={busy || Boolean(createdPersonId)}
-                onClick={() => setAddMode("existing")}
-              >
-                기존 참여자
-              </Button>
-              <Button
-                type="button"
-                variant={addMode === "new" ? "default" : "outline"}
-                disabled={busy}
-                onClick={() => setAddMode("new")}
-              >
-                새 참여자
-              </Button>
-            </div>
+            {addProject && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={addMode === "existing" ? "default" : "outline"}
+                  aria-pressed={addMode === "existing"}
+                  disabled={busy || Boolean(createdPersonId)}
+                  onClick={() => setAddMode("existing")}
+                >
+                  기존 참여자
+                </Button>
+                <Button
+                  type="button"
+                  variant={addMode === "new" ? "default" : "outline"}
+                  aria-pressed={addMode === "new"}
+                  disabled={busy}
+                  onClick={() => setAddMode("new")}
+                >
+                  새 참여자
+                </Button>
+              </div>
+            )}
             {addMode === "existing" ? (
-              <div className="space-y-1">
-                <label htmlFor="add-existing-person" className="block text-sm font-medium">
-                  기존 참여자 (필수)
-                </label>
-                <select
+              <FormField htmlFor="add-existing-person" label="기존 참여자" required>
+                <NativeSelect
                   id="add-existing-person"
                   required
                   value={selectedPersonId}
                   onChange={(event) => setSelectedPersonId(event.target.value)}
-                  className="min-h-9 w-full rounded-md border bg-background px-3 text-sm"
                 >
                   <option value="">참여자 선택</option>
                   {availablePeople.map((item) => (
@@ -864,14 +968,16 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                       {item.email ? ` · ${item.email}` : ""}
                     </option>
                   ))}
-                </select>
-              </div>
+                </NativeSelect>
+                {availablePeople.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    추가할 수 있는 참여자가 없습니다. 새 참여자로 등록할 수 있어요.
+                  </p>
+                )}
+              </FormField>
             ) : (
               <div className="space-y-3">
-                <div className="space-y-1">
-                  <label htmlFor="add-person-name" className="block text-sm font-medium">
-                    이름 (필수)
-                  </label>
+                <FormField htmlFor="add-person-name" label="이름" required>
                   <Input
                     id="add-person-name"
                     placeholder="예: 김민지"
@@ -883,45 +989,44 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                       setNewPerson((form) => ({ ...form, name: event.target.value }))
                     }
                   />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="add-person-email" className="block text-sm font-medium">
-                    이메일 (필수)
-                  </label>
+                </FormField>
+                {/* 이메일은 서버에서 선택 항목입니다. 추가와 편집 모두 같은 규칙을 씁니다. */}
+                <FormField htmlFor="add-person-email" label="이메일">
                   <Input
                     id="add-person-email"
                     placeholder="예: minji@example.com"
                     type="email"
                     value={newPerson.email}
-                    required
                     maxLength={320}
                     disabled={Boolean(createdPersonId)}
                     onChange={(event) =>
                       setNewPerson((form) => ({ ...form, email: event.target.value }))
                     }
                   />
-                </div>
+                </FormField>
                 {createdPersonId && (
                   <p role="status" className="text-xs text-muted-foreground">
-                    참여자가 등록되었습니다. 프로젝트 연결을 다시 시도할 수 있습니다.
+                    참여자를 등록했습니다. 추가를 누르면 프로젝트 연결을 다시 시도합니다.
                   </p>
                 )}
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" disabled={busy} onClick={closeAdd}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => guardClose(isAddDirty, closeAdd)}
+              >
                 취소
               </Button>
               <Button
                 type="submit"
-                disabled={
-                  busy ||
-                  (addMode === "existing"
-                    ? !selectedPersonId
-                    : !newPerson.name.trim() || !newPerson.email.trim())
-                }
+                pending={busy}
+                pendingLabel="추가하는 중…"
+                disabled={addMode === "existing" ? !selectedPersonId : !newPerson.name.trim()}
               >
-                {busy ? "추가 중…" : "추가"}
+                추가
               </Button>
             </div>
           </form>
@@ -931,7 +1036,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
       <Dialog
         open={Boolean(person)}
         onOpenChange={(open) => {
-          if (!open && !busy) closePerson();
+          if (!open) guardClose(isPersonDirty, closePerson);
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -945,10 +1050,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
             <div className="space-y-5 text-sm">
               {personEditing && !isDemo ? (
                 <form className="grid gap-3 md:grid-cols-2" onSubmit={submitPerson}>
-                  <div className="space-y-1">
-                    <label htmlFor="edit-person-name" className="block font-medium">
-                      이름 (필수)
-                    </label>
+                  <FormField htmlFor="edit-person-name" label="이름" required>
                     <Input
                       id="edit-person-name"
                       placeholder="예: 김민지"
@@ -959,11 +1061,8 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                         setPersonForm((form) => ({ ...form, name: event.target.value }))
                       }
                     />
-                  </div>
-                  <div className="space-y-1">
-                    <label htmlFor="edit-person-email" className="block font-medium">
-                      이메일 (선택)
-                    </label>
+                  </FormField>
+                  <FormField htmlFor="edit-person-email" label="이메일">
                     <Input
                       id="edit-person-email"
                       placeholder="예: minji@example.com"
@@ -974,11 +1073,8 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                         setPersonForm((form) => ({ ...form, email: event.target.value }))
                       }
                     />
-                  </div>
-                  <div className="space-y-1">
-                    <label htmlFor="edit-person-aliases" className="block font-medium">
-                      별칭 (선택)
-                    </label>
+                  </FormField>
+                  <FormField htmlFor="edit-person-aliases" label="별칭">
                     <Input
                       id="edit-person-aliases"
                       placeholder="예: 민지, MJ (쉼표로 구분)"
@@ -987,11 +1083,8 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                         setPersonForm((form) => ({ ...form, aliases: event.target.value }))
                       }
                     />
-                  </div>
-                  <div className="space-y-1">
-                    <label htmlFor="edit-person-role" className="block font-medium">
-                      역할 (선택)
-                    </label>
+                  </FormField>
+                  <FormField htmlFor="edit-person-role" label="역할">
                     <Input
                       id="edit-person-role"
                       placeholder="예: 프로덕트 매니저"
@@ -1001,16 +1094,27 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                         setPersonForm((form) => ({ ...form, role: event.target.value }))
                       }
                     />
-                  </div>
+                  </FormField>
                   <div className="flex gap-2 md:col-span-2">
-                    <Button type="submit" disabled={busy || !personForm.name.trim()}>
+                    <Button
+                      type="submit"
+                      pending={busy}
+                      pendingLabel="저장하는 중…"
+                      disabled={!personForm.name.trim()}
+                    >
                       저장
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       disabled={busy}
-                      onClick={() => setPersonEditing(false)}
+                      onClick={() =>
+                        guardClose(isPersonDirty, () => {
+                          // 버린 입력이 다음 편집에 남지 않도록 원본으로 되돌립니다.
+                          setPersonEditing(false);
+                          setPersonForm(personFormFrom(person));
+                        })
+                      }
                     >
                       취소
                     </Button>
@@ -1034,13 +1138,15 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                     key={item.id}
                     type="button"
                     className="block rounded-md border px-2 py-1 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                    onClick={() => {
-                      closePerson();
-                      setExpanded((current) =>
-                        current.includes(item.id) ? current : [...current, item.id],
-                      );
-                      setLink("project", item.id);
-                    }}
+                    onClick={() =>
+                      guardClose(isPersonDirty, () => {
+                        closePerson();
+                        setExpanded((current) =>
+                          current.includes(item.id) ? current : [...current, item.id],
+                        );
+                        setLink("project", item.id);
+                      })
+                    }
                   >
                     {item.name}
                   </button>
@@ -1050,20 +1156,22 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                 )}
               </section>
               {graphStatus === "loading" ? (
-                <p role="status" className="text-muted-foreground">
-                  업무와 결정, 이벤트를 불러오는 중입니다.
-                </p>
-              ) : graphStatus === "error" ? (
-                <div role="alert" className="space-y-2">
-                  <p className="text-destructive">연결 정보를 불러오지 못했습니다. {graphError}</p>
-                  <Button type="button" variant="outline" size="sm" onClick={invalidateGraph}>
-                    다시 시도
-                  </Button>
-                </div>
+                <ListSkeleton
+                  count={2}
+                  className="h-12"
+                  label="업무와 결정, 이벤트를 불러오는 중"
+                />
+              ) : graphStatus === "error" && graphError ? (
+                <ErrorState
+                  compact
+                  error={graphError}
+                  title="연결 정보를 불러오지 못했습니다"
+                  onRetry={invalidateGraph}
+                />
               ) : (
                 <>
                   <section className="space-y-2">
-                    <h3 className="font-medium">업무와 작업</h3>
+                    <h3 className="font-medium">업무</h3>
                     <ActivityList
                       items={personContext?.tasks ?? []}
                       empty="연결된 업무가 없습니다."
@@ -1094,7 +1202,11 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                     type="button"
                     variant="outline"
                     disabled={busy}
-                    onClick={() => setPersonEditing(true)}
+                    onClick={() => {
+                      // 편집은 항상 저장된 값에서 시작합니다.
+                      setPersonForm(personFormFrom(person));
+                      setPersonEditing(true);
+                    }}
                   >
                     편집
                   </Button>
@@ -1102,13 +1214,7 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
                     type="button"
                     variant="ghost"
                     disabled={busy}
-                    onClick={() =>
-                      void act(() =>
-                        api
-                          .updatePerson(workspaceId, person.id, { archived: !person.archivedAt })
-                          .then(() => undefined),
-                      )
-                    }
+                    onClick={() => setPersonArchived(person, !person.archivedAt)}
                   >
                     {person.archivedAt ? "복원" : "보관"}
                   </Button>
@@ -1118,6 +1224,15 @@ export function DirectoryView({ workspaceId }: { workspaceId: string }) {
           )}
         </DialogContent>
       </Dialog>
+
+      <DiscardConfirmDialog
+        open={Boolean(discard)}
+        onKeepEditing={() => setDiscard(null)}
+        onDiscard={() => {
+          discard?.run();
+          setDiscard(null);
+        }}
+      />
     </div>
   );
 }

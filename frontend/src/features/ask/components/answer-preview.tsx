@@ -33,13 +33,18 @@ export function AnswerPreview() {
     <figure className="grid gap-6 rounded-2xl border border-border bg-card p-6 md:grid-cols-5 md:p-8">
       <div className="space-y-4 md:col-span-3">
         <div className="flex justify-end">
-          <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm text-primary-foreground">
+          <p className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2 text-sm [overflow-wrap:anywhere] break-words text-primary-foreground">
             {QUESTION}
           </p>
         </div>
         <div className="flex gap-3">
           <MaeglagiAvatar />
-          <AnswerBody text={EXAMPLE.text} sources={EXAMPLE.sources} onOpenSource={openSource} />
+          <AnswerBody
+            className="flex-1"
+            text={EXAMPLE.text}
+            sources={EXAMPLE.sources}
+            onOpenSource={openSource}
+          />
         </div>
       </div>
 
@@ -55,6 +60,7 @@ export function AnswerPreview() {
                 kind={source.kind}
                 title={source.title}
                 excerpt={source.excerpt}
+                timestamp={source.timestamp}
                 onOpen={() => openSource(source)}
               />
             </li>

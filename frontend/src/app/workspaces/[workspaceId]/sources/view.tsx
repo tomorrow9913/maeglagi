@@ -19,6 +19,7 @@ import { useLiveSources } from "@/features/source-ingestion/hooks/use-live-sourc
 import { useSourceUpload } from "@/features/source-ingestion/hooks/use-source-upload";
 import { useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import type { ProcessingJob } from "@/lib/api";
+import { CONNECTION_DELAYED, RECORDING_BLOCKS_FILE_UPLOAD, settledToast } from "@/features/source-ingestion/lib/copy";
 import { sourcePresentation } from "@/features/source-ingestion/lib/source-presentation";
 
 export default function SourcesPage({ params }: { params: Promise<{ workspaceId: string }> }) {
@@ -66,39 +67,40 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
     if (searchParams.get("source")) router.replace(workspacePath(workspaceId, "sources"));
   }, [router, searchParams, workspaceId, workspacePath]);
 
-  const { sources, progress, error, isLoading, reload } = useLiveSources(workspaceId);
+  const { sources, progress, error, isLoading, reload, connection: listConnection } = useLiveSources(workspaceId);
 
-  const { items, uploadDocuments, uploadRecording, uploadTranscript, dismiss } = useSourceUpload(
+  const { items, uploadDocuments, uploadRecording, uploadTranscript, cancel, retry, dismiss } = useSourceUpload(
     workspaceId,
   );
 
   const onSettled = useCallback(
     (job: ProcessingJob) => {
-      if (job.status === "awaiting_agent") { toast.info("소스가 저장됐습니다. 에이전트 분석을 기다립니다."); return; }
-      if (job.status === "awaiting_review") { toast.info("회의 대본 검토가 준비됐습니다.", { action: { label: "검토 열기", onClick: () => setReviewSourceId(job.sourceId) } }); return; }
-      if (job.status === "failed") {
-        toast.error("소스 처리에 실패했습니다.");
-        if (job.sourceKind === "meeting") toast.info("저장된 대본을 확인할 수 있습니다.", { action: { label: "대본 열기", onClick: () => setReviewSourceId(job.sourceId) } });
-        return;
-      }
-
-      toast.success("분석이 끝났습니다. Timeline에 반영됐습니다.", {
-        action: {
-          label: "Timeline 보기",
-          onClick: () => router.push(workspacePath(workspaceId, "timeline")),
-        },
-      });
+      // 문구는 Ask의 업로드 창과 같은 모듈에서 가져옵니다. 올린 파일 이름을 함께 알려줍니다.
+      const title = items.find((item) => item.job?.sourceId === job.sourceId)?.fileName;
+      const copy = settledToast(job, title, "sources");
+      if (!copy) return;
+      const onClick = copy.action?.kind === "review"
+        ? () => setReviewSourceId(job.sourceId)
+        : copy.action?.kind === "timeline"
+          ? () => router.push(workspacePath(workspaceId, "timeline"))
+          : undefined;
+      toast[copy.tone](copy.message, copy.action && onClick ? { action: { label: copy.action.label, onClick } } : undefined);
     },
-    [router, workspaceId, workspacePath],
+    [items, router, workspaceId, workspacePath],
   );
 
-  const jobs = useJobEvents(workspaceId, items.flatMap((item) => item.job ? [item.job] : []), onSettled, restartKey);
+  const { jobs, connection: queueConnection } = useJobEvents(workspaceId, items.flatMap((item) => item.job ? [item.job] : []), onSettled, restartKey);
+  // 큐가 이미 같은 안내를 보여주고 있으면 목록 위에는 다시 띄우지 않습니다.
+  const queueShowsDelay = queueConnection === "reconnecting" && items.some((item) => {
+    const job = item.job ? (jobs[item.job.id] ?? item.job) : undefined;
+    return job?.status === "queued" || job?.status === "enqueue_pending" || job?.status === "processing";
+  });
 
   return (
     <>
       <PageHeader title="소스" description={isDemo ? "공개 데모의 회의와 문서를 읽기 전용으로 살펴봅니다." : "회의 녹음과 문서를 올리고 처리 상태를 확인합니다."} />
 
-      {!isDemo && <p className="mb-4 text-xs text-muted-foreground">이 화면의 업로드는 서비스 AI 연결로 자동 처리합니다. 내 에이전트로 처리하려면 <a href="/account/mcp" className="text-primary underline-offset-2 hover:underline">계정 MCP 연결</a>을 사용하세요.</p>}
+      {!isDemo && <p className="mb-4 text-xs text-muted-foreground">이 화면에서 올린 파일은 서비스 AI 연결로 자동 처리합니다. 내 에이전트로 처리하려면 <a href="/account/mcp" className="text-primary underline-offset-2 hover:underline">계정 MCP 연결</a>을 사용해 주세요.</p>}
 
       {!isDemo && <Tabs defaultValue="document">
         <TabsList>
@@ -107,6 +109,7 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
           </TabsTrigger>
           <TabsTrigger value="meeting">회의 녹음</TabsTrigger>
         </TabsList>
+        {meetingBusy && <p className="mt-2 text-xs text-muted-foreground">{RECORDING_BLOCKS_FILE_UPLOAD}</p>}
 
         <TabsContent value="document" className="mt-4">
           <SourceFileUpload workspaceId={workspaceId} onDocuments={uploadDocuments} onAudio={uploadRecording} />
@@ -122,10 +125,13 @@ function SourcesContent({ workspaceId }: { workspaceId: string }) {
         </TabsContent>
       </Tabs>}
 
-      {!isDemo && <UploadQueue items={items} jobs={jobs} onDismiss={dismiss} onReview={setReviewSourceId} className="mt-4" />}
+      {!isDemo && <UploadQueue items={items} jobs={jobs} connection={queueConnection} onDismiss={dismiss} onCancel={cancel} onRetry={retry} onReview={setReviewSourceId} onRefresh={reload} className="mt-4" />}
 
       <section className="mt-10">
         <h2 className="mb-3 text-lg font-semibold">올라온 소스</h2>
+        {listConnection === "reconnecting" && !queueShowsDelay && (
+          <p role="status" className="mb-3 text-xs text-muted-foreground">{CONNECTION_DELAYED}</p>
+        )}
 
         {isLoading ? (
           <ListSkeleton count={2} className="h-20" />

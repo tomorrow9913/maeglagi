@@ -101,6 +101,13 @@ export interface MaeglagiApi {
     input: { apiKey?: string; baseUrl?: string },
     signal?: AbortSignal,
   ): Promise<WorkspaceSecrets>;
+  /** 계정의 기본 AI 연결을 바꿉니다. 활성 상태가 아닌 연결은 409로 실패합니다. */
+  setDefaultAccountCredential(credentialId: string, signal?: AbortSignal): Promise<WorkspaceSecrets>;
+  /**
+   * 계정 AI 연결을 삭제합니다. 워크스페이스 모델이 쓰고 있거나, 다른 연결이 남아 있는데
+   * 기본 연결이면 409로 실패합니다. 이유는 `ApiError.detail`로 구분합니다.
+   */
+  deleteAccountCredential(credentialId: string, signal?: AbortSignal): Promise<void>;
   /** 기존 워크스페이스 경로의 계정 연결 등록 또는 교체입니다. */
   updateApiKey(
     workspaceId: string,

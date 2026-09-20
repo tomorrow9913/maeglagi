@@ -121,6 +121,15 @@ export const httpApi: MaeglagiApi = {
       signal,
     }),
 
+  setDefaultAccountCredential: (credentialId, signal) =>
+    apiFetch<WorkspaceSecrets>(`/provider-credentials/${credentialId}/default`, {
+      method: "PUT",
+      signal,
+    }),
+
+  deleteAccountCredential: (credentialId, signal) =>
+    apiFetch<void>(`/provider-credentials/${credentialId}`, { method: "DELETE", signal }),
+
   updateApiKey: (workspaceId, input, signal) =>
     apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/llm-key`, {
       method: "PUT",

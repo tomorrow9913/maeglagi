@@ -4,14 +4,11 @@ import { ArrowRight, FileText, Mic } from "lucide-react";
 
 import { StatusBadge } from "@/components/common/status-badge";
 import type { ContextItem, ContextItemSource } from "@/lib/api";
+import { localTime } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
 import { contextKindLabel } from "@/types/context";
 
 import { kindTone } from "../lib/kind-style";
-
-function formatTime(iso: string): string {
-  return iso.slice(11, 16);
-}
 
 /**
  * Context Timeline의 한 항목입니다.
@@ -22,6 +19,7 @@ function formatTime(iso: string): string {
 export function TimelineCard({
   item,
   supersededByTitle,
+  isHighlighted = false,
   onOpenSource,
   onOpenSuperseder,
   className,
@@ -29,6 +27,8 @@ export function TimelineCard({
   item: ContextItem;
   /** 대체한 항목의 제목. 있으면 이동 버튼을 보여줍니다. */
   supersededByTitle?: string;
+  /** "이후 결정"으로 방금 이동해 온 카드. 어디로 왔는지 잠깐 표시합니다. */
+  isHighlighted?: boolean;
   onOpenSource: (source: ContextItemSource) => void;
   onOpenSuperseder?: (contextItemId: string) => void;
   className?: string;
@@ -39,10 +39,13 @@ export function TimelineCard({
 
   return (
     <article
+      // "이후 결정" 이동이 초점을 여기로 옮깁니다. Tab 순서에는 넣지 않습니다.
+      tabIndex={-1}
+      data-timeline-card
       className={cn(
-        "rounded-xl border border-border bg-card p-4",
+        "rounded-xl border border-border bg-card p-4 transition-shadow outline-none focus-visible:ring-3 focus-visible:ring-ring/50 motion-reduce:transition-none",
         isActiveDecision && "border-success/35 shadow-xs",
-        isSuperseded && "opacity-75",
+        isHighlighted && "border-primary ring-3 ring-primary/40",
         className,
       )}
     >
@@ -53,7 +56,7 @@ export function TimelineCard({
           dateTime={item.occurredAt}
           className="ml-auto text-xs text-muted-foreground tabular-nums"
         >
-          {formatTime(item.occurredAt)}
+          {localTime(item.occurredAt)}
         </time>
       </div>
 
@@ -61,7 +64,8 @@ export function TimelineCard({
         className={cn(
           "mt-3 font-medium",
           isActiveDecision && "font-semibold",
-          isSuperseded && "line-through",
+          // 카드 전체를 흐리게 하면 "이후 결정" 링크까지 대비가 떨어지므로 제목만 누그러뜨립니다.
+          isSuperseded && "text-muted-foreground line-through",
         )}
       >
         {item.title}
