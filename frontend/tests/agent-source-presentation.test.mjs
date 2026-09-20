@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sourcePresentation, reviewConfirmationCopy, reviewDisplayState } from "../src/features/source-ingestion/lib/source-presentation.ts";
+import { agentAnalysisRequest, sourcePresentation, reviewConfirmationCopy, reviewDisplayState } from "../src/features/source-ingestion/lib/source-presentation.ts";
 import { stageLabel, stagesFor } from "../src/features/source-ingestion/lib/processing-stages.ts";
 
 test("agent work stays visible as a paused, inspectable source rather than ready evidence", () => {
@@ -13,6 +13,16 @@ test("agent work stays visible as a paused, inspectable source rather than ready
   assert.equal(waiting.evidenceReady, false);
   assert.equal(stageLabel.awaiting_agent, "에이전트 작업 대기");
   assert.deepEqual(stagesFor("document", undefined, "agent"), ["uploaded", "awaiting_agent", "analyzing", "graphing", "completed"]);
+});
+
+test("agent handoff identifies the exact source and requires saved completion", () => {
+  const request = agentAnalysisRequest("workspace-1", "source-2");
+  assert.match(request, /workspace-1/);
+  assert.match(request, /source-2/);
+  assert.match(request, /submit_analysis/);
+  assert.match(request, /phase=done/);
+  assert.match(request, /명시적으로 확인/);
+  assert.doesNotMatch(request, /API key|Bearer/);
 });
 
 test("meeting review instructions preserve the server path and defer agent analysis", () => {

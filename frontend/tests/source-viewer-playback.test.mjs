@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 import * as errorMessage from "../src/lib/api/error-message.ts";
+import { agentAnalysisRequest } from "../src/features/source-ingestion/lib/source-presentation.ts";
 
 function viewerHarness(api, { demo = true, content = { kind: "meeting", title: "Meeting", hasRecording: true, chunks: [{ id: "c1", text: "Hello", startSeconds: 12 }] } } = {}) {
   const slots = [];
@@ -77,6 +78,7 @@ function viewerHarness(api, { demo = true, content = { kind: "meeting", title: "
       if (name === "@/lib/utils") return { cn: (...parts) => parts.filter(Boolean).join(" ") };
       if (name === "sonner") return { toast: { error() {}, success() {} } };
       if (name === "@/lib/api/error-message") return errorMessage;
+      if (name === "../lib/source-presentation") return { agentAnalysisRequest };
       if (name === "lucide-react") return { FileText: "FileText", Mic: "Mic" };
       if (name === "@/components/ui/button") return { Button: "Button" };
       if (name === "@/components/ui/spinner") return { Spinner: "Spinner" };
@@ -194,6 +196,16 @@ function sourceApi(sources, onSave) {
     updateSourceAssociations: onSave,
   };
 }
+
+test("agent-owned waiting source exposes a copyable completion request", async () => {
+  const api = sourceApi([{ ...source("s1"), analysisMode: "agent", status: "awaiting_agent" }]);
+  const view = viewerHarness(api, { demo: false });
+  view.render();
+  await flush();
+  view.render();
+  assert.ok(view.find((node) => node.type === "Button" && node.props.children === "에이전트 요청 복사"));
+  assert.match(JSON.stringify(view.find((node) => node.type === "details")), /submit_analysis/);
+});
 
 test("source switch hides old associations immediately and ignores an old save response", async () => {
   const pending = [];
