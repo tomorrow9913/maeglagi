@@ -33,7 +33,8 @@ def test_auth_me_accepts_supabase_user_without_email(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        httpx, "AsyncClient",
+        httpx,
+        "AsyncClient",
         lambda **kwargs: real_client(transport=httpx.MockTransport(supabase_user), **kwargs),
     )
     app.dependency_overrides[get_settings] = lambda: Settings(
