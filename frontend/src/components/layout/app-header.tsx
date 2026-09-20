@@ -22,10 +22,10 @@ export function AppHeader() {
           워크스페이스
         </Link>
         <Link
-          href="/account/mcp"
+          href="/account/security"
           className="text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          계정 MCP 연결
+          계정
         </Link>
         <AuthButton />
       </div>

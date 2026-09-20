@@ -109,6 +109,10 @@ export default function LoginPage() {
         >
           카카오로 계속하기
         </Button>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          이미 이메일로 가입했다면 이메일로 먼저 로그인한 뒤, 계정 보안에서 카카오를 연결해 주세요.
+          기존 자료를 같은 계정에서 이용할 수 있습니다.
+        </p>
         <button
           className="mt-5 text-sm text-muted-foreground underline"
           onClick={() => setMode(mode === "login" ? "signup" : "login")}

@@ -61,3 +61,18 @@ test("callback errors return to login with feedback and preserve safe next", asy
   );
   assert.equal(denied.href, "https://app.example/login?error=callback");
 });
+
+test("identity-link callback errors return to the authenticated account page", async () => {
+  const handler = callback(new Error("identity already exists"));
+  const failed = await handler.GET(
+    new Request(
+      "https://app.example/auth/callback?code=abc&next=%2Faccount%2Fsecurity&intent=link",
+    ),
+  );
+  assert.equal(failed.href, "https://app.example/account/security?error=identity_link");
+
+  const unsafe = await handler.GET(
+    new Request("https://app.example/auth/callback?next=%2F%5Cevil.example&intent=link"),
+  );
+  assert.equal(unsafe.href, "https://app.example/login?error=callback");
+});

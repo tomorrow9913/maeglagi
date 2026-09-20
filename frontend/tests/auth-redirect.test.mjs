@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { authCallbackUrl, kakaoOAuthOptions, safeNextPath } from "../src/lib/auth-redirect.ts";
+import {
+  authCallbackUrl,
+  kakaoIdentityLinkOptions,
+  kakaoOAuthOptions,
+  safeNextPath,
+} from "../src/lib/auth-redirect.ts";
 
 test("auth next accepts local paths and rejects external or ambiguous destinations", () => {
   assert.equal(
@@ -46,4 +51,14 @@ test("Kakao OAuth overrides Supabase's email scope default", () => {
   assert.equal(config.options.redirectTo, "https://app.example/auth/callback");
   assert.equal("scopes" in config.options, false);
   assert.equal(JSON.stringify(config).includes("account_email"), false);
+});
+
+test("Kakao identity linking returns to the authenticated account page", () => {
+  const config = kakaoIdentityLinkOptions("https://app.example");
+  assert.equal(config.provider, "kakao");
+  assert.equal(config.options.queryParams.scope, "profile_nickname profile_image");
+  assert.equal(
+    config.options.redirectTo,
+    "https://app.example/auth/callback?next=%2Faccount%2Fsecurity&intent=link",
+  );
 });

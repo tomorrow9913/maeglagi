@@ -97,6 +97,8 @@ src/
 
 대시보드 설정 시 Kakao Developers에서 로그인 기능과 닉네임·프로필 이미지 동의를 켜고, Supabase Auth의 Kakao provider에 Kakao REST API 키와 Client Secret을 등록합니다. Kakao Redirect URI에는 Supabase의 `https://<project-ref>.supabase.co/auth/v1/callback`을, Supabase Auth Redirect URLs에는 실제 프론트의 `https://<frontend-origin>/auth/callback`을 등록합니다(로컬 개발 주소도 사용할 경우 별도 등록). Supabase에서 이메일 없는 OAuth 사용자를 허용하는 설정도 필요합니다. 비밀 키는 서버 측 대시보드에만 둡니다.
 
+이미 이메일로 가입한 회원은 `/account/security`에서 카카오 identity를 현재 Supabase 사용자에 연결합니다. 연결 후에는 어느 방법으로 로그인해도 같은 `auth.users.id`와 서비스 자료를 사용합니다. Supabase 대시보드의 Authentication 설정에서 **Enable Manual Linking**을 켜야 합니다. 이미 다른 사용자에 소유된 identity는 안전을 위해 자동 병합하지 않습니다.
+
 ## 배포 (Vercel)
 
 모노레포이므로 Vercel 프로젝트에서 **Root Directory를 `frontend`로 지정**해야 합니다.
