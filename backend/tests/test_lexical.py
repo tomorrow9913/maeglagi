@@ -3,7 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import literal, select, text, union_all
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -15,9 +15,35 @@ from app.modules.retrieval.application.hybrid import HybridRetriever
 from app.modules.retrieval.application.lexical import (
     MAX_RESULTS,
     MAX_TEXT,
+    _bm25,
     query_terms,
     search_lexically,
 )
+
+
+async def test_postgres_bm25_prefers_shorter_equally_relevant_passage() -> None:
+    url = os.environ.get("ASK_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("set ASK_TEST_DATABASE_URL to a local PostgreSQL test database")
+    engine = create_async_engine(url)
+    corpus = union_all(
+        select(
+            literal(1).label("id"),
+            literal("redis cache").label("text"),
+            literal(11).label("doc_len"),
+        ),
+        select(literal(2), literal("redis " + "filler " * 100), literal(706)),
+        select(literal(3), literal("unrelated note"), literal(14)),
+    ).cte("corpus")
+    predicate, score = _bm25(corpus, ["redis"])
+    statement = select(corpus.c.id, score.label("score")).where(predicate).order_by(score.desc())
+    try:
+        async with engine.connect() as connection:
+            rows = (await connection.execute(statement)).all()
+            assert [row.id for row in rows] == [1, 2]
+            assert rows[0].score > rows[1].score > 0
+    finally:
+        await engine.dispose()
 
 
 class Rows:
@@ -131,6 +157,9 @@ async def test_null_embedding_chunk_is_returned_from_bounded_eligible_query() ->
     assert "sources.status" in sql and "sources.review_state" in sql
     assert "sources.owner_id" in sql and "chunks.owner_id" in sql
     assert "sources.workspace_id" in sql and "chunks.workspace_id" in sql
+    assert "WITH chunk_corpus AS" in sql
+    assert "ln(" in sql and "replace(" in sql and "avg(" in sql
+    assert "SELECT count(*)" in sql
     assert 1 in compiled.params.values()  # substring starts at first character
     assert MAX_TEXT in compiled.params.values() and MAX_RESULTS in compiled.params.values()
 
@@ -327,6 +356,7 @@ async def test_processed_source_text_has_source_only_citation_and_scoped_excerpt
     assert "sources.id IN" in sql and "greatest" in sql and "strpos" in sql
     assert "sources.status" in sql and "sources.review_state" in sql
     assert "sources.processing_stage" in sql and "sources.kind" in sql
+    assert "WITH source_corpus AS" in sql and "ln(" in sql
 
 
 async def test_no_terms_or_no_allowed_sources_do_not_query() -> None:

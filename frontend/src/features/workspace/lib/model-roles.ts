@@ -21,7 +21,7 @@ export const modelRoleInfo: Record<
   embedding: {
     label: "검색 임베딩",
     description: "문서와 회의 내용을 검색할 수 있게 벡터로 바꾸는 모델입니다.",
-    unavailable: "의미 기반 검색 대신 키워드 검색으로 근거를 찾습니다.",
+    unavailable: "의미 기반 검색 대신 BM25 키워드 검색으로 근거를 찾습니다.",
     // 임베딩만 워크스페이스를 만들 때 정하고 바꿀 수 없습니다. LLM 모델은 언제든 바꿉니다.
     fixedNote:
       "모델마다 벡터가 달라 섞어서 검색할 수 없으므로, 워크스페이스를 만들 때 정한 모델은 이후 바꿀 수 없습니다.",

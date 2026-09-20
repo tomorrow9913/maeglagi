@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import Float, and_, case, cast, func, or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -51,9 +51,29 @@ def query_terms(question: str) -> list[str]:
     return terms
 
 
-def _predicate_and_rank(column: object, terms: list[str]) -> tuple[object, object]:
-    matches = [func.lower(column).contains(term, autoescape=True) for term in terms]
-    return or_(*matches), sum((case((match, 1), else_=0) for match in matches), 0)
+def _bm25(corpus: object, terms: list[str]) -> tuple[object, object]:
+    """Rank character n-gram matches with corpus-wide BM25 (k1=1.2, b=0.75)."""
+    text = corpus.c.text
+    document_length = cast(corpus.c.doc_len, Float)
+    count = select(func.count()).select_from(corpus).scalar_subquery()
+    average_length = select(func.avg(corpus.c.doc_len)).select_from(corpus).scalar_subquery()
+    scores = []
+    predicates = []
+    for term in terms:
+        match = text.contains(term, autoescape=True)
+        predicates.append(match)
+        frequency = cast(
+            (func.length(text) - func.length(func.replace(text, term, ""))) / len(term), Float
+        )
+        document_frequency = select(func.count()).select_from(corpus).where(match).scalar_subquery()
+        inverse_frequency = func.ln(
+            1.0 + (count - document_frequency + 0.5) / (document_frequency + 0.5)
+        )
+        normalized_frequency = (frequency * 2.2) / (
+            frequency + 1.2 * (0.25 + 0.75 * document_length / func.nullif(average_length, 0))
+        )
+        scores.append(inverse_frequency * normalized_frequency)
+    return or_(*predicates), sum(scores, 0)
 
 
 async def search_lexically(
@@ -84,7 +104,21 @@ async def search_lexically(
         eligible_chunks += selected_sources
         scope += selected_sources
 
-    predicate, rank = _predicate_and_rank(Chunk.content, terms)
+    chunk_corpus = (
+        select(
+            Chunk.id.label("id"),
+            func.lower(Chunk.content).label("text"),
+            func.length(Chunk.content).label("doc_len"),
+        )
+        .join(Source, Chunk.source_id == Source.id)
+        .where(
+            *eligible_chunks,
+            Chunk.workspace_id == workspace_id,
+            Chunk.owner_id == owner_id,
+        )
+        .cte("chunk_corpus")
+    )
+    predicate, rank = _bm25(chunk_corpus, terms)
     statement = (
         select(
             Chunk.id,
@@ -95,6 +129,7 @@ async def search_lexically(
             Chunk.start_seconds,
         )
         .join(Source, Chunk.source_id == Source.id)
+        .join(chunk_corpus, chunk_corpus.c.id == Chunk.id)
         .where(
             *eligible_chunks,
             Chunk.workspace_id == workspace_id,
@@ -135,7 +170,22 @@ async def search_lexically(
             ),
         ),
     )
-    predicate, rank = _predicate_and_rank(content, terms)
+    source_corpus = (
+        select(
+            Source.id.label("id"),
+            func.lower(content).label("text"),
+            func.length(content).label("doc_len"),
+        )
+        .where(
+            *scope,
+            source_ready,
+            Source.status != SourceStatus.AWAITING_REVIEW,
+            content.is_not(None),
+            func.length(func.trim(content)) > 0,
+        )
+        .cte("source_corpus")
+    )
+    predicate, rank = _bm25(source_corpus, terms)
     position = case(
         *(
             (
@@ -149,6 +199,7 @@ async def search_lexically(
     excerpt = func.substr(content, func.greatest(1, position - 100), MAX_TEXT)
     statement = (
         select(Source.id, Source.kind, Source.title, excerpt)
+        .join(source_corpus, source_corpus.c.id == Source.id)
         .where(
             *scope,
             source_ready,
