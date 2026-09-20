@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { authCallbackUrl, kakaoOAuthOptions, safeNextPath } from "@/lib/auth-redirect";
-import { isKakaoOAuthAvailable } from "@/lib/kakao-availability";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -97,27 +96,23 @@ export default function LoginPage() {
             {pending ? "처리 중…" : mode === "login" ? "로그인" : "가입하기"}
           </Button>
         </form>
-        {isKakaoOAuthAvailable && (
-          <>
-            <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              또는
-              <span className="h-px flex-1 bg-border" />
-            </div>
-            <Button
-              className="w-full bg-[#FEE500] text-[#191919] hover:bg-[#F5DC00]"
-              disabled={pending}
-              onClick={signInWithKakao}
-              type="button"
-            >
-              카카오로 계속하기
-            </Button>
-            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-              이미 이메일로 가입했다면 이메일로 먼저 로그인한 뒤, 계정 보안에서 카카오를 연결해
-              주세요. 기존 자료를 같은 계정에서 이용할 수 있습니다.
-            </p>
-          </>
-        )}
+        <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          또는
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <Button
+          className="w-full bg-[#FEE500] text-[#191919] hover:bg-[#F5DC00]"
+          disabled={pending}
+          onClick={signInWithKakao}
+          type="button"
+        >
+          카카오로 계속하기
+        </Button>
+        <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+          이미 이메일로 가입했다면 이메일로 먼저 로그인한 뒤, 계정 보안에서 카카오를 연결해 주세요.
+          기존 자료를 같은 계정에서 이용할 수 있습니다.
+        </p>
         <button
           className="mt-5 text-sm text-muted-foreground underline"
           onClick={() => setMode(mode === "login" ? "signup" : "login")}
