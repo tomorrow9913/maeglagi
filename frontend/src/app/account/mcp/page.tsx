@@ -28,6 +28,13 @@ const dateLabel = (value: string | null) =>
     ? new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium" }).format(new Date(value))
     : "아직 없음";
 
+const TOKEN_PERIODS = [
+  { days: 7, label: "7일" },
+  { days: 30, label: "30일" },
+  { days: 90, label: "90일" },
+  { days: 365, label: "1년" },
+] as const;
+
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -56,6 +63,7 @@ export default function AccountMcpPage() {
   const { data, error, isLoading, reload } = useAsync((signal) => api.listMcpTokens(signal));
   const [createOpen, setCreateOpen] = useState(false);
   const [label, setLabel] = useState("");
+  const [expiresInDays, setExpiresInDays] = useState(90);
   const [created, setCreated] = useState<CreatedMcpToken | null>(null);
   const [busy, setBusy] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<McpToken | null>(null);
@@ -64,6 +72,7 @@ export default function AccountMcpPage() {
     setCreateOpen(false);
     setCreated(null);
     setLabel("");
+    setExpiresInDays(90);
   };
 
   const create = async (event: FormEvent) => {
@@ -71,7 +80,7 @@ export default function AccountMcpPage() {
     if (busy || !label.trim()) return;
     setBusy(true);
     try {
-      const result = await api.createMcpToken({ label: label.trim() });
+      const result = await api.createMcpToken({ label: label.trim(), expiresInDays });
       setCreated(result);
       reload();
       toast.success("MCP 토큰을 만들었습니다.");
@@ -187,7 +196,7 @@ export default function AccountMcpPage() {
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             토큰은 계정의 모든 워크스페이스에 접근할 수 있습니다. 사용하지 않는 토큰은 해지하세요.
-            새 토큰의 기본 유효 기간은 90일입니다.
+            발급할 때 유효 기간을 선택할 수 있습니다.
           </p>
           {isLoading && !data ? (
             <ListSkeleton count={2} className="mt-4 h-20" />
@@ -209,7 +218,7 @@ export default function AccountMcpPage() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{item.label}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      끝자리 ····{item.tokenHint} · 만료 {dateLabel(item.expiresAt)}
+                      끝자리 ····{item.tokenHint} · {new Date(item.expiresAt).getTime() <= Date.now() ? "만료됨" : "만료"} {dateLabel(item.expiresAt)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       생성 {dateLabel(item.createdAt)} · 마지막 사용 {dateLabel(item.lastUsedAt)}
@@ -276,6 +285,20 @@ export default function AccountMcpPage() {
                 disabled={busy}
                 onChange={(event) => setLabel(event.target.value)}
               />
+              <label htmlFor="mcp-token-period" className="block pt-2 text-sm font-medium">
+                유효 기간
+              </label>
+              <select
+                id="mcp-token-period"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={expiresInDays}
+                disabled={busy}
+                onChange={(event) => setExpiresInDays(Number(event.target.value))}
+              >
+                {TOKEN_PERIODS.map((period) => (
+                  <option key={period.days} value={period.days}>{period.label}</option>
+                ))}
+              </select>
             </form>
           )}
           <DialogFooter>
