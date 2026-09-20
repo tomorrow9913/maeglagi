@@ -123,6 +123,17 @@ class WorkflowRepository:
         person_ids = {
             UUID(str(item["personId"])) for item in source.review_utterances if item.get("personId")
         }
+        person_ids.update(
+            row.person_id
+            for row in (
+                await self.session.exec(
+                    select(SourcePerson).where(
+                        SourcePerson.source_id == source.id,
+                        SourcePerson.workspace_id == workspace_id,
+                    )
+                )
+            ).all()
+        )
         project_ids = [
             row.project_id
             for row in (
@@ -132,7 +143,7 @@ class WorkflowRepository:
                         SourceProject.source_id == source.id,
                         SourceProject.workspace_id == workspace_id,
                     )
-                    .order_by(SourceProject.position)
+                    .order_by(SourceProject.position, SourceProject.project_id)
                 )
             ).all()
         ]
@@ -237,8 +248,11 @@ class WorkflowRepository:
         return {
             "project": project_rows[0] if project_rows else None,
             "projects": project_rows,
-            "people": [person_row(person) for person in people],
-            "roster": [person_row(person) for person in {row.id: row for row in rows}.values()],
+            "people": [person_row(person) for person in sorted(people, key=lambda row: row.id)],
+            "roster": [
+                person_row(person)
+                for person in sorted({row.id: row for row in rows}.values(), key=lambda row: row.id)
+            ],
         }
 
     async def replace_participants(self, source: Source) -> None:

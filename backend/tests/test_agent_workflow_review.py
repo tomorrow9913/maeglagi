@@ -13,6 +13,7 @@ from app.modules.context_engine.application.entity_resolution import entity_id
 from app.modules.workspaces.infrastructure.models import (
     ProjectMember,
     Source,
+    SourcePerson,
     WorkspacePerson,
     WorkspaceProject,
 )
@@ -163,3 +164,70 @@ async def test_document_directory_is_bound_to_fingerprint_and_graph(database, mo
         project_id = entity_id(workspace.id, "Project", f"id:directory:project:{project.id}")
         assert str(person_id) in graph_ids
         assert str(project_id) in graph_ids
+
+
+async def test_direct_document_person_association_enters_directory(database):
+    owner = uuid4()
+    async with database() as session:
+        workflow = AgentWorkflowService(session, get_settings())
+        workspace = await workflow.create_workspace(owner_id=owner, name="Direct author")
+        person = WorkspacePerson(owner_id=owner, workspace_id=workspace.id, name="Author")
+        session.add(person)
+        await session.commit()
+        source = await workflow.create_text_source(
+            owner_id=owner, workspace_id=workspace.id, title="Notes", text="Author wrote this."
+        )
+        session.add(
+            SourcePerson(
+                workspace_id=workspace.id, source_id=source.id, person_id=person.id, role="author"
+            )
+        )
+        await session.commit()
+        context = await workflow.analysis_context(
+            owner_id=owner, workspace_id=workspace.id, source_id=source.id
+        )
+        assert [row["id"] for row in context.directory["people"]] == [str(person.id)]
+
+
+async def test_directory_order_is_independent_of_database_row_order():
+    from types import SimpleNamespace
+
+    from app.modules.agent_workflows.repositories import WorkflowRepository
+
+    owner, workspace = uuid4(), uuid4()
+    people = [
+        WorkspacePerson(owner_id=owner, workspace_id=workspace, name=name)
+        for name in ("One", "Two")
+    ]
+    project = WorkspaceProject(owner_id=owner, workspace_id=workspace, name="Project")
+    source = Source(
+        owner_id=owner,
+        workspace_id=workspace,
+        kind="document",
+        title="Notes",
+        object_path="inline:test",
+        content_type="text/plain",
+        size_bytes=1,
+    )
+
+    class Session:
+        def __init__(self, reverse):
+            ordered = people[::-1] if reverse else people
+            self.results = iter(
+                [
+                    [SimpleNamespace(person_id=p.id) for p in ordered],
+                    [SimpleNamespace(project_id=project.id)],
+                    ordered,
+                    [project],
+                    ordered,
+                ]
+            )
+
+        async def exec(self, statement):
+            rows = next(self.results)
+            return SimpleNamespace(all=lambda: rows)
+
+    first = await WorkflowRepository(Session(False)).directory_snapshot(owner, workspace, source)
+    second = await WorkflowRepository(Session(True)).directory_snapshot(owner, workspace, source)
+    assert first == second
+    assert len(first["roster"]) == 2

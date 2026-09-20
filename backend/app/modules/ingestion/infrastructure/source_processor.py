@@ -54,6 +54,7 @@ class SafeAttemptError(RuntimeError):
         provider: str | None = None,
         extraction_stage: str | None = None,
         terminal: bool = False,
+        provider_failure: bool = False,
     ) -> None:
         message = (
             _MISSING_TRANSCRIPTION_MESSAGE
@@ -70,6 +71,7 @@ class SafeAttemptError(RuntimeError):
         self.provider = provider
         self.extraction_stage = extraction_stage
         self.terminal = terminal
+        self.provider_failure = provider_failure
 
 
 def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
@@ -109,6 +111,7 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
             provider = value
             break
     missing_credential = any(isinstance(item, MissingCapabilityCredentialError) for item in chain)
+    provider_failure = any(isinstance(item, ProviderError) for item in chain)
     status = next(
         (
             item.response.status_code
@@ -151,7 +154,9 @@ def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
         capability=capability if code == "missing_capability_credential" else None,
         provider=provider,
         extraction_stage=extraction_stage,
-        terminal=code == "missing_capability_credential" or status in {401, 403, 404},
+        terminal=code == "missing_capability_credential"
+        or (provider_failure and status in {401, 403, 404}),
+        provider_failure=provider_failure,
     )
     # Preserve source locations for Sentry without retaining the original
     # exception, arguments, response body, or frame locals in the error object.
@@ -398,11 +403,11 @@ async def process_source_attempt(source_id: UUID, *, final_attempt: bool) -> Exc
             )
             safe_error = _safe_attempt_error(exc, "processing")
             message = _GENERIC_FAILURE_MESSAGE
-            if safe_error.http_status == 404:
+            if safe_error.provider_failure and safe_error.http_status == 404:
                 message = (
                     "설정된 모델을 사용할 수 없습니다. 워크스페이스의 추출 모델을 선택해 주세요."
                 )
-            elif safe_error.http_status in {401, 403}:
+            elif safe_error.provider_failure and safe_error.http_status in {401, 403}:
                 message = "AI 연결 인증에 실패했습니다. 계정의 API 키와 접근 권한을 확인해 주세요."
             stage = await _update_source(
                 source_id,

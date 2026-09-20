@@ -160,3 +160,31 @@ async def test_missing_model_fails_once_with_actionable_message(monkeypatch):
     assert result.terminal and result.http_status == 404
     assert updates[0]["status"] == "failed"
     assert "추출 모델" in updates[0]["error_message"]
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+async def test_storage_http_error_does_not_blame_model_or_skip_retries(monkeypatch, status):
+    updates = []
+
+    @asynccontextmanager
+    async def held_lock(_identifier):
+        yield
+
+    async def fail(_identifier):
+        httpx.Response(
+            status, request=httpx.Request("GET", "https://storage.example/private")
+        ).raise_for_status()
+
+    async def update(_identifier, **kwargs):
+        updates.append(kwargs)
+        return "transcribing"
+
+    monkeypatch.setattr(source_processor, "_source_execution_lock", held_lock)
+    monkeypatch.setattr(source_processor, "_process_source", fail)
+    monkeypatch.setattr(source_processor, "_update_source", update)
+    result = await source_processor.process_source_attempt(uuid4(), final_attempt=False)
+    assert not result.terminal and not result.provider_failure
+    assert result.http_status == status
+    assert updates[0]["status"] == "queued"
+    assert "모델" not in updates[0]["error_message"]
+    assert "API 키" not in updates[0]["error_message"]

@@ -11,17 +11,23 @@ const capabilities = workspaceNavItems.filter((item) =>
 export default function HomePage() {
   return (
     <main className="mx-auto w-full max-w-6xl px-5 py-10">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
         <MaeglagiWordmark className="text-lg" />
         <nav
-          aria-label="프로젝트 링크"
-          className="flex items-center gap-4 text-sm text-muted-foreground"
+          aria-label="바로가기"
+          className="flex w-full flex-wrap items-center gap-2 sm:w-auto"
         >
+          <Link
+            href="/account/mcp"
+            className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            MCP 설정
+          </Link>
           <a
             href="https://github.com/tomorrow9913/maeglagi"
             target="_blank"
             rel="noopener noreferrer"
-            className="transition-colors hover:text-foreground"
+            className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium transition-colors hover:bg-muted"
           >
             GitHub
           </a>
@@ -29,7 +35,7 @@ export default function HomePage() {
             href="https://github.com/tomorrow9913/maeglagi/blob/main/CONTRIBUTING.md"
             target="_blank"
             rel="noopener noreferrer"
-            className="transition-colors hover:text-foreground"
+            className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium transition-colors hover:bg-muted"
           >
             기여하기
           </a>
@@ -49,12 +55,6 @@ export default function HomePage() {
             className="inline-flex h-10 items-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             워크스페이스 열기
-          </Link>
-          <Link
-            href="/account/mcp"
-            className="inline-flex h-10 items-center rounded-md border border-border px-5 text-sm font-medium transition-colors hover:bg-muted"
-          >
-            MCP 설정
           </Link>
           <Link
             href="/demo"
