@@ -298,7 +298,39 @@ async def test_pg_executor_fails_typed_configuration_error_on_first_attempt(monk
     assert len(updates) == 1
     assert "status = 'failed'" in updates[0][0]
     assert updates[0][1] == {"error": "missing_capability_credential"}
-    assert reports == [(source_id, 1, safe)]
+    assert reports == []
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+async def test_pg_executor_does_not_report_expected_provider_configuration_errors(
+    monkeypatch, status
+) -> None:
+    source_id = uuid4()
+    safe = source_processor.SafeAttemptError(
+        code="http_status",
+        stage="analyzing",
+        error_type="ProviderError",
+        http_status=status,
+        terminal=True,
+        provider_failure=True,
+    )
+
+    async def heartbeat(*_args):
+        await asyncio.Event().wait()
+
+    async def attempt(*_args, **_kwargs):
+        return safe
+
+    async def update(*_args, **_kwargs):
+        return True
+
+    reports = []
+    monkeypatch.setattr(pg_executor, "_heartbeat", heartbeat)
+    monkeypatch.setattr(pg_executor, "process_source_attempt", attempt)
+    monkeypatch.setattr(pg_executor, "_fenced_update", update)
+    monkeypatch.setattr(pg_executor, "_report_terminal_failure", lambda *args: reports.append(args))
+    await pg_executor._execute_claim(source_id, uuid4(), 1, 0, 60)
+    assert reports == []
 
 
 def test_http_status_is_kept_as_structured_diagnostic_without_response_body() -> None:

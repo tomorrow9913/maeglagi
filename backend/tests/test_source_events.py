@@ -333,7 +333,7 @@ def test_http_auth_subscription_bounds_and_preheader_ownership(monkeypatch) -> N
         finally:
             active -= 1
 
-    monkeypatch.setattr(events, "session_factory", factory)
+    monkeypatch.setattr(events, "session_scope", factory)
     with TestClient(app) as client:
         assert client.get(route, params={"source_ids": str(SOURCE_A)}).status_code == 503
         app.state.source_event_broker = broker
@@ -382,7 +382,7 @@ async def test_initial_response_uses_job_schema_and_closes_session(monkeypatch) 
         finally:
             active -= 1
 
-    monkeypatch.setattr(events, "session_factory", factory)
+    monkeypatch.setattr(events, "session_scope", factory)
     response = await events.source_events(
         WORKSPACE, str(SOURCE_A), Request(broker), AuthUser(id=OWNER)
     )

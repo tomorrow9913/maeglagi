@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -29,6 +31,31 @@ engine: AsyncEngine = create_async_engine(
 session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+async def _close_session(session: AsyncSession) -> None:
+    """Return a checked-out connection even when its request is cancelled."""
+    cleanup = asyncio.create_task(session.close())
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            # Shield keeps close alive. Repeated cancellation (for example a
+            # disconnect followed by server shutdown) still must not orphan it.
+            cancelled = True
+    cleanup.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+@asynccontextmanager
+async def session_scope() -> AsyncIterator[AsyncSession]:
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        await _close_session(session)
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
-    async with session_factory() as session:
+    async with session_scope() as session:
         yield session

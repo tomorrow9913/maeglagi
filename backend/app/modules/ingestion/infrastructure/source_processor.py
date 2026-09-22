@@ -73,6 +73,13 @@ class SafeAttemptError(RuntimeError):
         self.terminal = terminal
         self.provider_failure = provider_failure
 
+    @property
+    def expected(self) -> bool:
+        """Whether retrying cannot fix this user/workspace configuration."""
+        return self.code == "missing_capability_credential" or (
+            self.provider_failure and self.http_status in {401, 403, 404}
+        )
+
 
 def _safe_attempt_error(exc: Exception, stage: str) -> SafeAttemptError:
     chain: list[Exception] = []

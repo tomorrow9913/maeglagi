@@ -253,7 +253,16 @@ async def _execute_claim(
                 {"error": safe_error.code},
             )
             if updated:
-                _report_terminal_failure(source_id, generation, safe_error)
+                if safe_error.expected:
+                    logger.info(
+                        "PostgreSQL ingestion stopped for expected configuration failure "
+                        "(source_id=%s, generation=%s, code=%s)",
+                        source_id,
+                        generation,
+                        safe_error.code,
+                    )
+                else:
+                    _report_terminal_failure(source_id, generation, safe_error)
         else:
             # 10, 20, 40 seconds; the fourth failure is terminal.
             await _fenced_update(

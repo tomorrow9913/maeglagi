@@ -211,10 +211,7 @@ async def clone_demo(
         if existing.owner_id != owner_id:
             raise CloneUnavailable("Clone workspace owner mismatch")
         return existing, len(await _rows(db, Source, target))
-    if graph is None:
-        raise CloneUnavailable("Demo graph database is not configured")
     try:
-        await graph.verify_connectivity()
         people = await _rows(db, WorkspacePerson, public.id)
         projects = await _rows(db, WorkspaceProject, public.id)
         members = await _rows(db, ProjectMember, public.id)
@@ -224,9 +221,14 @@ async def clone_demo(
         chunks = await _rows(db, Chunk, public.id)
         contexts = await _rows(db, ContextRecord, public.id)
         stores = await _rows(db, ContextStoreRecord, public.id)
-        nodes, edges = await _graph_rows(graph, public.id)
+        if graph is not None:
+            await graph.verify_connectivity()
+            nodes, edges = await _graph_rows(graph, public.id)
+        else:
+            nodes, edges = [], []
     except Exception as exc:
         raise CloneUnavailable("Public demo data is unavailable") from exc
+    copy_graph = bool(nodes or edges)
     if (
         len(sources) != 3
         or len(chunks) != 7
@@ -234,8 +236,7 @@ async def clone_demo(
         or len(stores) != 1
         or len(people) != 2
         or len(projects) != 1
-        or len(nodes) != 7
-        or len(edges) != 8
+        or (copy_graph and (len(nodes) != 7 or len(edges) != 8))
         or not any(source.kind == "meeting" for source in sources)
         or not (public.model_settings or {}).get("demo_seed")
     ):
@@ -449,8 +450,9 @@ async def clone_demo(
                 )
             )
         await db.flush()
-        await _write_graph(graph, target, graph_nodes, graph_edges)
-        graph_written = True
+        if copy_graph:
+            await _write_graph(graph, target, graph_nodes, graph_edges)
+            graph_written = True
         await db.commit()
     except Exception:
         await db.rollback()

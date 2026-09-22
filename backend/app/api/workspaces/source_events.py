@@ -14,7 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.jobs.schemas import JobResponse
 from app.api.workspaces.source_event_broker import SourceEventBroker, SourceSubscription
 from app.auth import CurrentUser
-from app.core.database import session_factory
+from app.core.database import session_scope
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 
 router = APIRouter(prefix="/{workspace_id}/source-events")
@@ -85,7 +85,7 @@ async def _load_jobs(
 
 async def _read_jobs(workspace_id: UUID, owner_id: UUID, source_ids: list[UUID]) -> dict[UUID, str]:
     # A notification owns one short session; no database session is held by an idle stream.
-    async with session_factory() as session:
+    async with session_scope() as session:
         return await _load_jobs(session, workspace_id, owner_id, source_ids)
 
 
@@ -153,7 +153,7 @@ async def source_events(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Source event listener unavailable"
         )
     subscription = broker.subscribe(user.id, workspace_id, ids)
-    async with session_factory() as session:
+    async with session_scope() as session:
         try:
             workspace = await session.get(Workspace, workspace_id)
             if workspace is None or workspace.owner_id != user.id:
