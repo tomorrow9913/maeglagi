@@ -33,6 +33,7 @@ from app.modules.workspaces.infrastructure.models import (
     SourcePerson,
     SourceProject,
     Workspace,
+    WorkspaceAuditEvent,
     WorkspaceMember,
     WorkspacePerson,
     WorkspaceProject,
@@ -67,6 +68,7 @@ async def database() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
                 tables=[
                     Workspace.__table__,
                     WorkspaceMember.__table__,
+                    WorkspaceAuditEvent.__table__,
                     WorkspacePerson.__table__,
                     WorkspaceProject.__table__,
                     ProjectMember.__table__,
