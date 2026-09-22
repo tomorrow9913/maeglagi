@@ -103,7 +103,7 @@ class IngestionPipeline:
         owner_id: UUID,
         role: ModelRole,
     ) -> ResolvedProvider:
-        """The account connection and model selected by this workspace's owner."""
+        """Resolve the workspace model through the requesting account's own connection."""
         capability = ROLE_CAPABILITY[role]
         workspace = await session.get(Workspace, workspace_id)
         chosen = selection_of(workspace.model_settings if workspace else None, role)
@@ -125,7 +125,11 @@ class IngestionPipeline:
                 c
                 for c in credentials
                 if c.provider == chosen.provider
-                and (chosen.credential_id is None or c.id == chosen.credential_id)
+                and (
+                    chosen.credential_id is None
+                    or c.id == chosen.credential_id
+                    or all(item.id != chosen.credential_id for item in credentials)
+                )
             ]
         needs_key_match = (
             chosen is not None and chosen.credential_id is None and len(credentials) > 1

@@ -16,6 +16,8 @@ from app.modules.workspaces.infrastructure.models import (
     SourcePerson,
     SourceProject,
     Workspace,
+    WorkspaceAuditEvent,
+    WorkspaceMember,
     WorkspacePerson,
     WorkspaceProject,
 )
@@ -33,6 +35,8 @@ __all__ = [
     "SourcePerson",
     "SourceProject",
     "Workspace",
+    "WorkspaceAuditEvent",
+    "WorkspaceMember",
     "WorkspacePerson",
     "WorkspaceProject",
 ]

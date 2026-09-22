@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -20,13 +20,13 @@ from app.modules.context_engine.application.entity_resolution import entity_id
 from app.modules.context_engine.application.temporal import as_utc
 from app.modules.retrieval.infrastructure.graph_reader import GraphReader
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
+from app.modules.workspaces.application.access import workspace_access
 from app.modules.workspaces.domain.source_state import ReviewState, SourceStatus
 from app.modules.workspaces.infrastructure.models import (
     ProjectMember,
     Source,
     SourcePerson,
     SourceProject,
-    Workspace,
     WorkspacePerson,
     WorkspaceProject,
 )
@@ -93,9 +93,7 @@ async def get_knowledge_graph(
     ] = None,
     include_materials: Annotated[bool, Query(alias="includeMaterials")] = True,
 ) -> KnowledgeGraphResponse:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    workspace = (await workspace_access(session, workspace_id, user)).workspace
     instant = as_utc(at) or datetime.now(UTC)
 
     reader = GraphReader(store) if store is not None else None
@@ -129,7 +127,7 @@ async def get_knowledge_graph(
     if include_materials or wanted:
         source_query = select(Source).where(
             Source.workspace_id == workspace.id,
-            Source.owner_id == user.id,
+            Source.owner_id == workspace.owner_id,
         )
         if not include_materials:
             source_query = source_query.where(Source.id.in_(wanted))  # type: ignore[attr-defined]
@@ -167,14 +165,16 @@ async def get_knowledge_graph(
     people = (
         await session.exec(
             select(WorkspacePerson).where(
-                WorkspacePerson.workspace_id == workspace_id, WorkspacePerson.owner_id == user.id
+                WorkspacePerson.workspace_id == workspace_id,
+                WorkspacePerson.owner_id == workspace.owner_id,
             )
         )
     ).all()
     projects = (
         await session.exec(
             select(WorkspaceProject).where(
-                WorkspaceProject.workspace_id == workspace_id, WorkspaceProject.owner_id == user.id
+                WorkspaceProject.workspace_id == workspace_id,
+                WorkspaceProject.owner_id == workspace.owner_id,
             )
         )
     ).all()

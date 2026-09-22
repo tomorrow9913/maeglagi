@@ -24,6 +24,7 @@ from app.core.ollama_endpoint import normalize_ollama_url
 from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
+from app.modules.workspaces.application.access import workspace_access
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter()
@@ -103,13 +104,13 @@ async def _owned_workspace(
     # All credential writers lock the parent row before reading credentials. This
     # serializes label checks, default transitions, rotation, and deletion even
     # when no credential row exists yet to lock.
-    workspace = (
-        await session.get(Workspace, workspace_id, with_for_update=True, populate_existing=True)
-        if for_update
-        else await session.get(Workspace, workspace_id)
+    access = await workspace_access(session, workspace_id, user)
+    if not for_update:
+        return access.workspace
+    workspace = await session.get(
+        Workspace, workspace_id, with_for_update=True, populate_existing=True
     )
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    assert workspace is not None
     return workspace
 
 

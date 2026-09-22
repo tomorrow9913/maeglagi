@@ -27,6 +27,7 @@ from app.modules.context_engine.infrastructure.credential_validation import (
 )
 from app.modules.context_engine.infrastructure.provider_registry import provider_registry
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
+from app.modules.workspaces.application.access import workspace_access
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter()
@@ -91,17 +92,22 @@ async def _locked_roles(session: AsyncSession, workspace: Workspace) -> set[Mode
 
 
 async def _owned_workspace(
-    workspace_id: UUID, user: CurrentUser, session: AsyncSession, *, for_update: bool = False
+    workspace_id: UUID,
+    user: CurrentUser,
+    session: AsyncSession,
+    *,
+    for_update: bool = False,
+    minimum_role: str = "viewer",
 ) -> Workspace:
     # The model writer shares this lock with credential mutations. Refresh the
     # identity map so selections and key options are read after earlier writers.
-    workspace = (
-        await session.get(Workspace, workspace_id, with_for_update=True, populate_existing=True)
-        if for_update
-        else await session.get(Workspace, workspace_id)
+    access = await workspace_access(session, workspace_id, user, minimum_role=minimum_role)
+    if not for_update:
+        return access.workspace
+    workspace = await session.get(
+        Workspace, workspace_id, with_for_update=True, populate_existing=True
     )
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    assert workspace is not None
     return workspace
 
 
@@ -169,7 +175,9 @@ async def update_workspace_models(
     settings: AppSettings,
 ) -> WorkspaceModelsResponse:
     await _lock_account(session, user.id)
-    workspace = await _owned_workspace(workspace_id, user, session, for_update=True)
+    workspace = await _owned_workspace(
+        workspace_id, user, session, for_update=True, minimum_role="admin"
+    )
     options = await options_for_workspace(session, workspace.id, user.id)
     problems = invalid_selections(body.selections, options)
     if problems:

@@ -11,6 +11,7 @@ from app.auth import CurrentUser
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.modules.agent_workflows.repositories import WorkflowRepository
+from app.modules.workspaces.application.access import workspace_access
 from app.modules.workspaces.application.media_access import MediaAccessError, signed_media_url
 from app.modules.workspaces.domain.source_state import ReviewState, SourceStatus
 from app.modules.workspaces.infrastructure.models import Source
@@ -58,7 +59,12 @@ class PlaybackUrlResponse(BaseModel):
 
 async def _owned_source(source_id: UUID, user: CurrentUser, session: AsyncSession) -> Source:
     source = await session.get(Source, source_id)
-    if source is None or source.owner_id != user.id:
+    if source is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
+    if source.owner_id == user.id:
+        return source
+    access = await workspace_access(session, source.workspace_id, user)
+    if source.owner_id != access.data_owner_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
     return source
 

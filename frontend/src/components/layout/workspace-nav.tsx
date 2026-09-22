@@ -4,13 +4,14 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSelectedLayoutSegment } from "next/navigation";
 
-import { useWorkspacePath } from "@/lib/api/context";
+import { useDemoMode, useWorkspacePath } from "@/lib/api/context";
 import { cn } from "@/lib/utils";
 import { workspaceNavItems } from "@/lib/navigation";
 
 export function WorkspaceNav({ workspaceId }: { workspaceId: string }) {
   const segment = useSelectedLayoutSegment();
   const workspacePath = useWorkspacePath();
+  const isDemo = useDemoMode();
   const navRef = useRef<HTMLElement>(null);
 
   /*
@@ -41,7 +42,7 @@ export function WorkspaceNav({ workspaceId }: { workspaceId: string }) {
         "md:mx-0 md:flex-col md:overflow-visible md:p-0",
       )}
     >
-      {workspaceNavItems.map((item) => {
+      {workspaceNavItems.filter((item) => !isDemo || item.segment !== "audit").map((item) => {
         const Icon = item.icon;
         const isActive = segment === item.segment;
 

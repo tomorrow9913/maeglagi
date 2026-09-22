@@ -9,6 +9,7 @@ from sqlalchemy import delete
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth.models import AuthUser
 from app.core.config import Settings, get_settings
 from app.modules.agent_workflows.context_updater import KeylessContextUpdater
 from app.modules.agent_workflows.errors import WorkflowError
@@ -51,13 +52,19 @@ from app.modules.ingestion.application.normalization import NormalizationService
 from app.modules.ingestion.application.source_analysis import analyze_source
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.application.media_access import (
     MediaAccessError,
     SignedMediaUrl,
     signed_media_url,
 )
 from app.modules.workspaces.domain.source_state import ProcessingStage, ReviewState, SourceStatus
-from app.modules.workspaces.infrastructure.models import Source, SourceProject, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    Source,
+    SourceProject,
+    Workspace,
+    WorkspaceMember,
+)
 
 
 def _source_text(source: Source) -> str:
@@ -78,11 +85,38 @@ class AgentWorkflowService:
         self.settings = settings or get_settings()
         self.repository = WorkflowRepository(session)
 
+    def _audit(
+        self,
+        *,
+        actor_id: UUID,
+        workspace_id: UUID,
+        action: str,
+        target_type: str,
+        target_id: UUID,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        add_audit_event(
+            self.session,
+            workspace_id=workspace_id,
+            actor=AuthUser(id=actor_id),
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            origin="mcp",
+            details=details,
+        )
+
     async def list_workspaces(self, *, owner_id: UUID) -> list[WorkspaceInfo]:
         rows = (
             await self.session.exec(
                 select(Workspace)
-                .where(Workspace.owner_id == owner_id)
+                .outerjoin(
+                    WorkspaceMember,
+                    (WorkspaceMember.workspace_id == Workspace.id)
+                    & (WorkspaceMember.user_id == owner_id),
+                )
+                .where((Workspace.owner_id == owner_id) | (WorkspaceMember.user_id == owner_id))
+                .distinct()
                 .order_by(Workspace.created_at.desc(), Workspace.id)
             )
         ).all()
@@ -94,15 +128,30 @@ class AgentWorkflowService:
             raise WorkflowError("invalid_name", "Workspace name is required", 422)
         workspace = Workspace(owner_id=owner_id, name=name, model_settings={})
         self.session.add(workspace)
+        await self.session.flush()
+        self.session.add(
+            WorkspaceMember(
+                workspace_id=workspace.id,
+                user_id=owner_id,
+                email="",
+                email_normalized="",
+                role="owner",
+                invited_by=owner_id,
+                joined_at=datetime.now(UTC),
+            )
+        )
         await self.session.commit()
         return workspace_info(workspace)
 
     async def list_sources(self, *, owner_id: UUID, workspace_id: UUID) -> list[SourceInfo]:
-        await self.repository.workspace(owner_id, workspace_id)
+        workspace = await self.repository.workspace(owner_id, workspace_id)
         rows = (
             await self.session.exec(
                 select(Source)
-                .where(Source.workspace_id == workspace_id, Source.owner_id == owner_id)
+                .where(
+                    Source.workspace_id == workspace_id,
+                    Source.owner_id == workspace.owner_id,
+                )
                 .order_by(Source.created_at.desc(), Source.id)
             )
         ).all()
@@ -136,7 +185,10 @@ class AgentWorkflowService:
         text: str | None,
         project_ids: list[UUID] | None,
     ) -> SourceInfo:
-        await self.repository.workspace(owner_id, workspace_id, lock=True)
+        workspace = await self.repository.workspace(
+            owner_id, workspace_id, lock=True, minimum_role="editor"
+        )
+        data_owner_id = workspace.owner_id
         if kind not in {"document", "meeting"}:
             raise WorkflowError("invalid_kind", "Source kind is invalid", 422)
         title = title.strip()
@@ -151,7 +203,7 @@ class AgentWorkflowService:
                     select(WorkspaceProject).where(
                         WorkspaceProject.id.in_(ids),  # type: ignore[attr-defined]
                         WorkspaceProject.workspace_id == workspace_id,
-                        WorkspaceProject.owner_id == owner_id,
+                        WorkspaceProject.owner_id == data_owner_id,
                         WorkspaceProject.archived_at.is_(None),  # type: ignore[union-attr]
                     )
                 )
@@ -162,7 +214,7 @@ class AgentWorkflowService:
         source = Source(
             id=source_id,
             workspace_id=workspace_id,
-            owner_id=owner_id,
+            owner_id=data_owner_id,
             kind=kind,
             title=title,
             object_path=object_path,
@@ -197,6 +249,14 @@ class AgentWorkflowService:
                     position=position,
                 )
             )
+        self._audit(
+            actor_id=owner_id,
+            workspace_id=workspace_id,
+            action="source.created",
+            target_type="source",
+            target_id=source.id,
+            details={"kind": kind},
+        )
         await self.session.commit()
         return source_info(source)
 
@@ -236,7 +296,13 @@ class AgentWorkflowService:
         expected_revision: int,
         text: str,
     ) -> SourceInfo:
-        source = await self.repository.source(owner_id, workspace_id, source_id, lock=True)
+        source = await self.repository.source(
+            owner_id,
+            workspace_id,
+            source_id,
+            lock=True,
+            minimum_role="editor",
+        )
         if source.analysis_mode != "agent" or source.kind != "document":
             raise WorkflowError("invalid_source", "Agent document required", 409)
         if source.analysis_checkpoint is not None:
@@ -249,6 +315,13 @@ class AgentWorkflowService:
         source.review_revision += 1
         source.status = SourceStatus.AWAITING_AGENT
         source.processing_stage = ProcessingStage.AWAITING_AGENT
+        self._audit(
+            actor_id=owner_id,
+            workspace_id=workspace_id,
+            action="source.edited",
+            target_type="source",
+            target_id=source.id,
+        )
         self.session.add(source)
         await self.session.commit()
         return source_info(source)
@@ -262,7 +335,13 @@ class AgentWorkflowService:
         expected_revision: int,
         utterances: list[dict[str, Any] | AgentUtterance],
     ) -> SourceInfo:
-        source = await self.repository.source(owner_id, workspace_id, source_id, lock=True)
+        source = await self.repository.source(
+            owner_id,
+            workspace_id,
+            source_id,
+            lock=True,
+            minimum_role="editor",
+        )
         if (
             source.analysis_mode != "agent"
             or source.kind != "meeting"
@@ -284,6 +363,13 @@ class AgentWorkflowService:
             source.raw_transcript_text = "\n\n".join(item.text for item in checked if item.text)
             source.raw_utterances = list(source.review_utterances)
         source.review_revision += 1
+        self._audit(
+            actor_id=owner_id,
+            workspace_id=workspace_id,
+            action="transcript.edited",
+            target_type="source",
+            target_id=source.id,
+        )
         self.session.add(source)
         await self.session.commit()
         return source_info(source)
@@ -296,7 +382,13 @@ class AgentWorkflowService:
         source_id: UUID,
         expected_revision: int,
     ) -> SourceInfo:
-        source = await self.repository.source(owner_id, workspace_id, source_id, lock=True)
+        source = await self.repository.source(
+            owner_id,
+            workspace_id,
+            source_id,
+            lock=True,
+            minimum_role="editor",
+        )
         if (
             source.analysis_mode != "agent"
             or source.kind != "meeting"
@@ -326,6 +418,13 @@ class AgentWorkflowService:
         source.status = SourceStatus.AWAITING_AGENT
         source.processing_stage = ProcessingStage.AWAITING_AGENT
         await self.repository.replace_participants(source)
+        self._audit(
+            actor_id=owner_id,
+            workspace_id=workspace_id,
+            action="source.confirmed",
+            target_type="source",
+            target_id=source.id,
+        )
         self.session.add(source)
         await self.session.commit()
         return source_info(source)
@@ -419,7 +518,7 @@ class AgentWorkflowService:
             raise RuntimeError("Agent workflow session must be bound to PostgreSQL")
         # Reject foreign or missing sources before acquiring shared advisory locks.
         # Roll back the read transaction so a pool-size-one writer can progress.
-        await self.repository.source(owner_id, workspace_id, source_id)
+        await self.repository.source(owner_id, workspace_id, source_id, minimum_role="editor")
         await self.session.rollback()
         async with analysis_lock(self.session.bind, source_id, workspace_id):  # type: ignore[arg-type]
             return await self._submit_analysis_locked(
@@ -441,7 +540,13 @@ class AgentWorkflowService:
         expected_fingerprint: str,
         result: dict[str, Any] | ExtractionResult,
     ) -> AnalysisSubmission:
-        source = await self.repository.source(owner_id, workspace_id, source_id, lock=True)
+        source = await self.repository.source(
+            owner_id,
+            workspace_id,
+            source_id,
+            lock=True,
+            minimum_role="editor",
+        )
         if source.analysis_mode != "agent":
             raise WorkflowError("invalid_source", "Agent source required", 409)
         if source.review_revision != expected_revision:
@@ -497,7 +602,9 @@ class AgentWorkflowService:
             SqlContextStoreRepository(self.session),
             KeylessContextUpdater(),  # type: ignore[arg-type]
         )
-        workspace = await self.repository.workspace(owner_id, workspace_id, lock=True)
+        workspace = await self.repository.workspace(
+            owner_id, workspace_id, lock=True, minimum_role="editor"
+        )
         if checkpoint is not None:
             input_hash = checkpoint["result_hash"]
         graph_store = (
@@ -539,7 +646,7 @@ class AgentWorkflowService:
                 context_store=context_store,
                 graph_store=graph_store,
                 workspace_id=workspace_id,
-                owner_id=owner_id,
+                owner_id=source.owner_id,
                 source_id=source.id,
                 title=source.title,
                 subject=workspace.name,
@@ -562,6 +669,13 @@ class AgentWorkflowService:
             source.status = SourceStatus.SUCCEEDED
             source.processing_stage = ProcessingStage.COMPLETED
             source.progress = 1
+            self._audit(
+                actor_id=owner_id,
+                workspace_id=workspace_id,
+                action="analysis.completed",
+                target_type="source",
+                target_id=source.id,
+            )
             self.session.add(source)
             await self.session.commit()
         finally:

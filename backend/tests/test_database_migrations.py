@@ -18,6 +18,8 @@ def test_all_sqlmodel_tables_are_registered_for_alembic() -> None:
         "source_people",
         "processing_jobs",
         "mcp_tokens",
+        "workspace_members",
+        "workspace_audit_events",
     }
 
 

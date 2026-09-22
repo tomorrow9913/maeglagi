@@ -5,14 +5,19 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import delete, text, update
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings
 from app.core.credentials import credential_vault
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    ProviderCredential,
+    Workspace,
+    WorkspaceAuditEvent,
+    WorkspaceMember,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,16 @@ async def delete_account_data(
             for secret_id in credentials:
                 if secret_id is not None:
                     await credential_vault.delete(session, secret_id=secret_id)
+            # Membership is account-scoped even when another person owns the workspace.
+            # Keep the audit event itself as evidence, but remove the deleted account's email.
+            await session.execute(
+                delete(WorkspaceMember).where(WorkspaceMember.user_id == owner_id)
+            )
+            await session.execute(
+                update(WorkspaceAuditEvent)
+                .where(WorkspaceAuditEvent.actor_id == owner_id)
+                .values(actor_email=None)
+            )
             # PGMQ event rows outlive source rows and contain account IDs.
             for queue_table in ("pgmq.q_source_events", "pgmq.a_source_events"):
                 exists = (

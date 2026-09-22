@@ -15,7 +15,8 @@ from app.api.jobs.schemas import JobResponse
 from app.api.workspaces.source_event_broker import SourceEventBroker, SourceSubscription
 from app.auth import CurrentUser
 from app.core.database import session_scope
-from app.modules.workspaces.infrastructure.models import Source, Workspace
+from app.modules.workspaces.application.access import workspace_access
+from app.modules.workspaces.infrastructure.models import Source
 
 router = APIRouter(prefix="/{workspace_id}/source-events")
 
@@ -152,20 +153,22 @@ async def source_events(
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Source event listener unavailable"
         )
-    subscription = broker.subscribe(user.id, workspace_id, ids)
+    subscription = None
     async with session_scope() as session:
         try:
-            workspace = await session.get(Workspace, workspace_id)
-            if workspace is None or workspace.owner_id != user.id:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-            initial = await _load_jobs(session, workspace_id, user.id, ids)
+            access = await workspace_access(session, workspace_id, user)
+            data_owner_id = access.data_owner_id
+            subscription = broker.subscribe(data_owner_id, workspace_id, ids)
+            initial = await _load_jobs(session, workspace_id, data_owner_id, ids)
             if len(initial) != len(ids):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
         except BaseException:
-            broker.unsubscribe(subscription)
+            if subscription is not None:
+                broker.unsubscribe(subscription)
             raise
+    assert subscription is not None
     return StreamingResponse(
-        _stream_events(request, workspace_id, user.id, ids, initial, subscription, broker),
+        _stream_events(request, workspace_id, data_owner_id, ids, initial, subscription, broker),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )

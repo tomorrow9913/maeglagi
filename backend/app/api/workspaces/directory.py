@@ -14,6 +14,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth import CurrentUser
 from app.core.database import get_session
+from app.modules.workspaces.application.access import workspace_access
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.infrastructure.models import (
     ProjectMember,
     Workspace,
@@ -25,11 +27,12 @@ router = APIRouter(prefix="/{workspace_id}")
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def owned_workspace(session: AsyncSession, workspace_id: UUID, owner_id: UUID) -> Workspace:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != owner_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-    return workspace
+async def owned_workspace(
+    session: AsyncSession, workspace_id: UUID, user: CurrentUser, *, minimum_role: str = "viewer"
+) -> Workspace:
+    return (
+        await workspace_access(session, workspace_id, user, minimum_role=minimum_role)
+    ).workspace
 
 
 def _clean_aliases(values: list[str]) -> list[str]:
@@ -244,14 +247,14 @@ async def active_project(
 async def list_people(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> list[WorkspacePerson]:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user)
     return list(
         (
             await session.exec(
                 select(WorkspacePerson)
                 .where(
                     WorkspacePerson.workspace_id == workspace_id,
-                    WorkspacePerson.owner_id == user.id,
+                    WorkspacePerson.owner_id == workspace.owner_id,
                 )
                 .order_by(WorkspacePerson.name)
             )
@@ -267,7 +270,7 @@ async def create_person(
     session: Session,
     response: Response = None,
 ) -> WorkspacePerson:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role="editor")
     email, normalized = normalize_email(body.email)
     if normalized:
         existing = (
@@ -291,12 +294,20 @@ async def create_person(
             return existing
     person = WorkspacePerson(
         workspace_id=workspace_id,
-        owner_id=user.id,
+        owner_id=workspace.owner_id,
         name=body.name,
         email=email,
         email_normalized=normalized,
         role=body.role,
         aliases=body.aliases,
+    )
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="person.created",
+        target_type="person",
+        target_id=person.id,
     )
     session.add(person)
     try:
@@ -329,9 +340,13 @@ async def create_person(
 async def update_person(
     workspace_id: UUID, person_id: UUID, body: PersonPatch, user: CurrentUser, session: Session
 ) -> WorkspacePerson:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role="editor")
     person = await session.get(WorkspacePerson, person_id)
-    if person is None or person.workspace_id != workspace_id or person.owner_id != user.id:
+    if (
+        person is None
+        or person.workspace_id != workspace_id
+        or person.owner_id != workspace.owner_id
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Person not found")
     for field in ("name", "aliases", "role", "email"):
         if field in body.model_fields_set:
@@ -344,6 +359,15 @@ async def update_person(
     if body.archived is not None:
         person.archived_at = datetime.now(UTC) if body.archived else None
     person.updated_at = datetime.now(UTC)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="person.updated",
+        target_type="person",
+        target_id=person.id,
+        details={"fields": sorted(body.model_fields_set)},
+    )
     session.add(person)
     try:
         await session.commit()
@@ -357,14 +381,14 @@ async def update_person(
 async def list_projects(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> list[ProjectResponse]:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user)
     projects = list(
         (
             await session.exec(
                 select(WorkspaceProject)
                 .where(
                     WorkspaceProject.workspace_id == workspace_id,
-                    WorkspaceProject.owner_id == user.id,
+                    WorkspaceProject.owner_id == workspace.owner_id,
                 )
                 .order_by(WorkspaceProject.name)
             )
@@ -377,12 +401,20 @@ async def list_projects(
 async def create_project(
     workspace_id: UUID, body: ProjectInput, user: CurrentUser, session: Session
 ) -> ProjectResponse:
-    await owned_workspace(session, workspace_id, user.id)
-    await active_person(session, body.owner_person_id, workspace_id, user.id, lock=True)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role="editor")
+    await active_person(session, body.owner_person_id, workspace_id, workspace.owner_id, lock=True)
     project = WorkspaceProject(
         workspace_id=workspace_id,
-        owner_id=user.id,
+        owner_id=workspace.owner_id,
         **body.model_dump(),
+    )
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="project.created",
+        target_type="project",
+        target_id=project.id,
     )
     session.add(project)
     await session.commit()
@@ -393,11 +425,15 @@ async def create_project(
 async def update_project(
     workspace_id: UUID, project_id: UUID, body: ProjectPatch, user: CurrentUser, session: Session
 ) -> ProjectResponse:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role="editor")
     project = await session.get(
         WorkspaceProject, project_id, with_for_update=True, populate_existing=True
     )
-    if project is None or project.workspace_id != workspace_id or project.owner_id != user.id:
+    if (
+        project is None
+        or project.workspace_id != workspace_id
+        or project.owner_id != workspace.owner_id
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     changes = body.model_dump(exclude_unset=True, exclude={"archived"})
     if "name" in changes:
@@ -405,7 +441,9 @@ async def update_project(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Name is required")
         changes["name"] = changes["name"].strip()
     if "owner_person_id" in changes:
-        await active_person(session, changes["owner_person_id"], workspace_id, user.id, lock=True)
+        await active_person(
+            session, changes["owner_person_id"], workspace_id, workspace.owner_id, lock=True
+        )
     for field, value in changes.items():
         setattr(project, field, value)
     if project.starts_on and project.ends_on and project.ends_on < project.starts_on:
@@ -413,6 +451,15 @@ async def update_project(
     if body.archived is not None:
         project.archived_at = datetime.now(UTC) if body.archived else None
     project.updated_at = datetime.now(UTC)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="project.updated",
+        target_type="project",
+        target_id=project.id,
+        details={"fields": sorted(body.model_fields_set)},
+    )
     session.add(project)
     await session.commit()
     return await _project_response(session, project)
@@ -422,9 +469,13 @@ async def update_project(
 async def list_project_participants(
     workspace_id: UUID, project_id: UUID, user: CurrentUser, session: Session
 ) -> list[WorkspacePerson]:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user)
     project = await session.get(WorkspaceProject, project_id)
-    if project is None or project.workspace_id != workspace_id or project.owner_id != user.id:
+    if (
+        project is None
+        or project.workspace_id != workspace_id
+        or project.owner_id != workspace.owner_id
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     rows = (
         await session.exec(
@@ -447,11 +498,15 @@ async def replace_project_participants(
     user: CurrentUser,
     session: Session,
 ) -> ProjectResponse:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role="editor")
     project = await session.get(
         WorkspaceProject, project_id, with_for_update=True, populate_existing=True
     )
-    if project is None or project.workspace_id != workspace_id or project.owner_id != user.id:
+    if (
+        project is None
+        or project.workspace_id != workspace_id
+        or project.owner_id != workspace.owner_id
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     if project.archived_at is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Project is archived")
@@ -460,7 +515,7 @@ async def replace_project_participants(
     if len(body.person_ids) != len(set(body.person_ids)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Duplicate participant")
     for person_id in body.person_ids:
-        await active_person(session, person_id, workspace_id, user.id, lock=True)
+        await active_person(session, person_id, workspace_id, workspace.owner_id, lock=True)
     await session.exec(delete(ProjectMember).where(ProjectMember.project_id == project_id))
     for person_id in body.person_ids:
         session.add(
@@ -468,6 +523,15 @@ async def replace_project_participants(
         )
     project.revision += 1
     project.updated_at = datetime.now(UTC)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="project.participants_updated",
+        target_type="project",
+        target_id=project.id,
+        details={"participantCount": len(body.person_ids)},
+    )
     session.add(project)
     await session.commit()
     return await _project_response(session, project)
