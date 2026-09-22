@@ -9,7 +9,9 @@ from app.core.config import get_settings
 from app.modules.agent_workflows.errors import WorkflowError
 from app.modules.agent_workflows.service import AgentWorkflowService
 from app.modules.agent_workflows.validation import validate_extraction
+from app.modules.context_engine.application.context_store import merge_extraction
 from app.modules.context_engine.application.entity_resolution import entity_id
+from app.modules.context_engine.domain.context_store import ContextStoreState
 from app.modules.workspaces.infrastructure.models import (
     ProjectMember,
     Source,
@@ -45,6 +47,67 @@ def test_person_honorific_relation_endpoint_is_valid() -> None:
     validated = validate_extraction(proposal, source=source, text=text, known_decisions=[])
 
     assert validated.relations[0].source == "민수님"
+
+
+def test_decision_context_is_promoted_to_decision_event() -> None:
+    text = "감사 이벤트에는 비밀값을 저장하지 않는다."
+    proposal = extraction(text)
+    proposal["events"] = []
+    proposal["relations"] = []
+    proposal["contexts"] = [
+        {
+            "kind": "decision",
+            "title": "감사 이벤트에서 비밀값 제외",
+            "body": text,
+            "occurred_at": "2026-09-22",
+            "source_refs": [text],
+        }
+    ]
+    source = Source(
+        owner_id=uuid4(),
+        workspace_id=uuid4(),
+        kind="document",
+        title="Audit policy",
+        object_path="inline:test",
+        content_type="text/plain",
+        size_bytes=len(text.encode()),
+    )
+
+    validated = validate_extraction(proposal, source=source, text=text, known_decisions=[])
+
+    assert len(validated.events) == 1
+    assert validated.events[0].kind.value == "Decision"
+    assert validated.events[0].name == "감사 이벤트에서 비밀값 제외"
+    assert validated.events[0].source_refs == [text]
+    state = merge_extraction(ContextStoreState(subject="Audit policy"), validated, source.id)
+    assert [decision.title for decision in state.decisions] == ["감사 이벤트에서 비밀값 제외"]
+
+
+def test_existing_decision_event_is_not_duplicated_by_context() -> None:
+    text = "캐시를 도입한다."
+    proposal = extraction(text, decision="캐시 도입")
+    proposal["contexts"] = [
+        {
+            "kind": "decision",
+            "title": "캐시 도입",
+            "body": text,
+            "occurred_at": None,
+            "source_refs": [text],
+        }
+    ]
+    source = Source(
+        owner_id=uuid4(),
+        workspace_id=uuid4(),
+        kind="document",
+        title="Cache decision",
+        object_path="inline:test",
+        content_type="text/plain",
+        size_bytes=len(text.encode()),
+    )
+
+    validated = validate_extraction(proposal, source=source, text=text, known_decisions=[])
+
+    assert [event.name for event in validated.events] == ["캐시 도입"]
 
 
 def test_ambiguous_honorific_relation_endpoint_is_rejected() -> None:

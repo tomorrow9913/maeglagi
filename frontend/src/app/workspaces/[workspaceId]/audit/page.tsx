@@ -9,7 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAsync } from "@/hooks/use-async";
 import { useApi } from "@/lib/api/context";
 
@@ -52,8 +58,14 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
   const [role, setRole] = useState<"admin" | "editor" | "viewer">("editor");
   const [busy, setBusy] = useState(false);
   const workspace = useAsync((signal) => api.getWorkspace(workspaceId, signal), [workspaceId]);
-  const members = useAsync((signal) => api.listWorkspaceMembers(workspaceId, signal), [workspaceId]);
-  const audit = useAsync((signal) => api.listWorkspaceAuditEvents(workspaceId, signal), [workspaceId]);
+  const members = useAsync(
+    (signal) => api.listWorkspaceMembers(workspaceId, signal),
+    [workspaceId],
+  );
+  const audit = useAsync(
+    (signal) => api.listWorkspaceAuditEvents(workspaceId, signal),
+    [workspaceId],
+  );
 
   const invite = async () => {
     if (!email.trim()) return;
@@ -99,43 +111,85 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">감사 기록</h1>
-        <p className="mt-1 text-sm text-muted-foreground">팀원과 MCP 에이전트가 수행한 작업의 증적을 확인합니다.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          팀원과 MCP 에이전트가 수행한 작업의 증적을 확인합니다.
+        </p>
       </header>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">워크스페이스 공유</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">워크스페이스 공유</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-4">
-          {canManage ? <div className="flex flex-col gap-2 sm:flex-row">
-            <Input aria-label="초대 이메일" placeholder="team@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-            <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
-              <SelectTrigger className="sm:w-36"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="admin">관리자</SelectItem>
-                <SelectItem value="editor">편집자</SelectItem>
-                <SelectItem value="viewer">조회자</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button disabled={busy || !email.trim()} onClick={() => void invite()}>초대</Button>
-          </div> : <p className="text-sm text-muted-foreground">멤버 초대와 권한 변경은 소유자와 관리자만 할 수 있습니다.</p>}
-          {members.error ? <ErrorState error={members.error} onRetry={members.reload} /> : members.isLoading && !members.data ? <ListSkeleton count={2} label="멤버를 불러오는 중" /> : (
+          {canManage ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                aria-label="초대 이메일"
+                placeholder="team@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+              <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
+                <SelectTrigger className="sm:w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">관리자</SelectItem>
+                  <SelectItem value="editor">편집자</SelectItem>
+                  <SelectItem value="viewer">조회자</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button disabled={busy || !email.trim()} onClick={() => void invite()}>
+                초대
+              </Button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              멤버 초대와 권한 변경은 소유자와 관리자만 할 수 있습니다.
+            </p>
+          )}
+          {members.error ? (
+            <ErrorState error={members.error} onRetry={members.reload} />
+          ) : members.isLoading && !members.data ? (
+            <ListSkeleton count={2} label="멤버를 불러오는 중" />
+          ) : (
             <ul className="divide-y rounded-md border">
               {(members.data ?? []).map((member) => (
-                <li key={member.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <li
+                  key={member.id}
+                  className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                >
                   <span className="min-w-0 truncate">{member.email || "워크스페이스 소유자"}</span>
                   <div className="flex items-center gap-2">
                     {canManage && member.role !== "owner" ? (
-                      <Select value={member.role} onValueChange={(value) => void changeRole(member.id, value as "admin" | "editor" | "viewer")}>
-                        <SelectTrigger className="h-8 w-28" aria-label={`${member.email} 권한`}><SelectValue /></SelectTrigger>
+                      <Select
+                        value={member.role}
+                        onValueChange={(value) =>
+                          void changeRole(member.id, value as "admin" | "editor" | "viewer")
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-28" aria-label={`${member.email} 권한`}>
+                          <SelectValue />
+                        </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="admin">관리자</SelectItem>
                           <SelectItem value="editor">편집자</SelectItem>
                           <SelectItem value="viewer">조회자</SelectItem>
                         </SelectContent>
                       </Select>
-                    ) : <Badge variant="secondary">{member.role}</Badge>}
-                    <span className="text-xs text-muted-foreground">{member.joinedAt ? "참여 중" : "초대 대기"}</span>
+                    ) : (
+                      <Badge variant="secondary">{member.role}</Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {member.joinedAt ? "참여 중" : "초대 대기"}
+                    </span>
                     {canManage && member.role !== "owner" ? (
-                      <Button variant="ghost" size="icon" aria-label={`${member.email} 제거`} onClick={() => void remove(member.id)}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`${member.email} 제거`}
+                        onClick={() => void remove(member.id)}
+                      >
                         <Trash2 className="size-4" aria-hidden />
                       </Button>
                     ) : null}
@@ -149,20 +203,82 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">활동</h2>
-        {audit.error ? <ErrorState error={audit.error} onRetry={audit.reload} /> : audit.isLoading && !audit.data ? <ListSkeleton count={4} label="감사 기록을 불러오는 중" /> : !(audit.data?.length) ? <EmptyState title="아직 감사 기록이 없습니다" description="멤버 초대, 자료 등록, 질문과 분석 기록이 이곳에 쌓입니다." /> : (
-          <ol className="space-y-2">
-            {audit.data.map((event) => {
-              const summary = detailSummary(event.details);
-              return <li key={event.id} className="rounded-lg border px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">{event.actorEmail ?? "시스템 사용자"} · {actionLabel[event.action] ?? event.action}</p>
-                  <time className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString("ko-KR")}</time>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">{event.origin.toUpperCase()} · {event.targetType}{event.targetId ? ` · ${event.targetId}` : ""}</p>
-                {summary ? <p className="mt-1 text-xs text-muted-foreground">{summary}</p> : null}
-              </li>;
-            })}
-          </ol>
+        {audit.error ? (
+          <ErrorState error={audit.error} onRetry={audit.reload} />
+        ) : audit.isLoading && !audit.data ? (
+          <ListSkeleton count={4} label="감사 기록을 불러오는 중" />
+        ) : !audit.data?.length ? (
+          <EmptyState
+            title="아직 감사 기록이 없습니다"
+            description="멤버 초대, 자료 등록, 질문과 분석 기록이 이곳에 쌓입니다."
+          />
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
+                    시간
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
+                    사용자
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
+                    경로
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
+                    작업
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
+                    대상
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
+                    세부 내용
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {audit.data.map((event) => {
+                  const summary = detailSummary(event.details);
+                  return (
+                    <tr key={event.id} className="align-top hover:bg-muted/20">
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground">
+                        <time dateTime={event.createdAt}>
+                          {new Date(event.createdAt).toLocaleString("ko-KR")}
+                        </time>
+                      </td>
+                      <td
+                        className="max-w-52 truncate px-3 py-2.5"
+                        title={event.actorEmail ?? "시스템 사용자"}
+                      >
+                        {event.actorEmail ?? "시스템 사용자"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="secondary">{event.origin.toUpperCase()}</Badge>
+                      </td>
+                      <td className="px-3 py-2.5 font-medium whitespace-nowrap">
+                        {actionLabel[event.action] ?? event.action}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                        <span>{event.targetType}</span>
+                        {event.targetId ? (
+                          <span
+                            className="block max-w-44 truncate font-mono"
+                            title={event.targetId}
+                          >
+                            {event.targetId}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="max-w-64 px-3 py-2.5 text-xs text-muted-foreground">
+                        {summary ?? "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

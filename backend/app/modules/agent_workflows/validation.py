@@ -9,14 +9,56 @@ from pydantic import ValidationError
 from app.modules.agent_workflows.errors import WorkflowError
 from app.modules.context_engine.application.analysis import squash
 from app.modules.context_engine.application.entity_resolution import normalize_name
-from app.modules.context_engine.domain.extraction import ExtractionResult
-from app.modules.context_engine.domain.ontology import EntityKind, SourceType
+from app.modules.context_engine.domain.extraction import ExtractedEvent, ExtractionResult
+from app.modules.context_engine.domain.ontology import ContextKind, EntityKind, SourceType
 from app.modules.workspaces.infrastructure.models import Source
 
 MAX_EXTRACTION_BYTES = 256_000
 MAX_ITEMS_PER_GROUP = 100
 MAX_QUOTE_CHARS = 1_200
 MAX_FIELD_CHARS = 10_000
+
+_CONTEXT_EVENT_KIND = {
+    ContextKind.DECISION: EntityKind.DECISION,
+    ContextKind.ISSUE: EntityKind.ISSUE,
+    ContextKind.TASK: EntityKind.TASK,
+    ContextKind.EVENT: EntityKind.EVENT,
+}
+
+
+def _promote_structured_contexts(result: ExtractionResult) -> ExtractionResult:
+    """Keep useful graph facts when an agent puts them only in `contexts`.
+
+    External agents commonly describe a decision as a decision context but omit the matching
+    event. The graph, timeline and current-decision store are event-backed, so promote those
+    structured contexts deterministically while preserving their grounded source references.
+    """
+    existing = {
+        (event.kind, normalize_name(event.name, event.kind.value)) for event in result.events
+    }
+    promoted: list[ExtractedEvent] = []
+    for context in result.contexts:
+        kind = _CONTEXT_EVENT_KIND.get(context.kind)
+        if kind is None:
+            continue
+        key = (kind, normalize_name(context.title, kind.value))
+        if not key[1] or key in existing:
+            continue
+        promoted.append(
+            ExtractedEvent(
+                name=context.title,
+                kind=kind,
+                description=context.body,
+                occurred_at=context.occurred_at,
+                due_at=None,
+                supersedes=None,
+                source_refs=context.source_refs,
+            )
+        )
+        existing.add(key)
+    if promoted:
+        result.events.extend(promoted)
+    return result
 
 
 def _hash(value: Any) -> str:
@@ -59,7 +101,7 @@ def validate_extraction(
         )
         if len(json.dumps(raw, ensure_ascii=False).encode()) > MAX_EXTRACTION_BYTES:
             raise WorkflowError("analysis_too_large", "Analysis is too large", 422)
-        result = ExtractionResult.model_validate(raw)
+        result = _promote_structured_contexts(ExtractionResult.model_validate(raw))
     except (TypeError, ValueError, ValidationError) as exc:
         if isinstance(exc, WorkflowError):
             raise
