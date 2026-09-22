@@ -26,6 +26,8 @@ import type {
   Workspace,
   WorkspaceModels,
   WorkspaceSecrets,
+  WorkspaceMember,
+  WorkspaceAuditEvent,
 } from "../types";
 
 function timelineQuery(query?: ContextTimelineQuery): string {
@@ -69,6 +71,20 @@ export const httpApi: MaeglagiApi = {
       body: JSON.stringify(input),
       signal,
     }),
+  listWorkspaceMembers: (workspaceId, signal) =>
+    apiFetch<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`, { signal }),
+  inviteWorkspaceMember: (workspaceId, input, signal) =>
+    apiFetch<WorkspaceMember>(`/workspaces/${workspaceId}/members`, {
+      method: "POST", body: JSON.stringify(input), signal,
+    }),
+  updateWorkspaceMember: (workspaceId, memberId, role, signal) =>
+    apiFetch<WorkspaceMember>(`/workspaces/${workspaceId}/members/${memberId}`, {
+      method: "PATCH", body: JSON.stringify({ role }), signal,
+    }),
+  removeWorkspaceMember: (workspaceId, memberId, signal) =>
+    apiFetch<void>(`/workspaces/${workspaceId}/members/${memberId}`, { method: "DELETE", signal }),
+  listWorkspaceAuditEvents: (workspaceId, signal) =>
+    apiFetch<WorkspaceAuditEvent[]>(`/workspaces/${workspaceId}/audit-events`, { signal }),
 
   cloneDemoWorkspace: (signal) =>
     apiFetch<Workspace>("/demo/clone", { method: "POST", signal }),

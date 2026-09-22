@@ -20,6 +20,7 @@ from app.core.database import get_session
 from app.modules.ingestion.infrastructure.pg_executor import enqueue_source as enqueue_pg_source
 from app.modules.ingestion.infrastructure.pg_executor import wake_executors
 from app.modules.ingestion.infrastructure.tasks import process_source
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.domain.source_state import (
     ProcessingStage,
     ReviewState,
@@ -172,11 +173,13 @@ async def owned_meeting(
     session: AsyncSession,
     workspace_id: UUID,
     source_id: UUID,
-    owner_id: UUID,
+    user: CurrentUser,
     *,
     lock: bool = False,
+    minimum_role: str = "viewer",
 ) -> Source:
-    await owned_workspace(session, workspace_id, owner_id)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role=minimum_role)
+    owner_id = workspace.owner_id
     if lock:
         result = await session.exec(select(Source).where(Source.id == source_id).with_for_update())
         source = result.first()
@@ -306,7 +309,7 @@ async def get_review(
     workspace_id: UUID, source_id: UUID, user: CurrentUser, session: Session
 ) -> ReviewResponse:
     return await review_payload_with_directory(
-        session, await owned_meeting(session, workspace_id, source_id, user.id)
+        session, await owned_meeting(session, workspace_id, source_id, user)
     )
 
 
@@ -314,7 +317,9 @@ async def get_review(
 async def save_review(
     workspace_id: UUID, source_id: UUID, body: ReviewPatch, user: CurrentUser, session: Session
 ) -> ReviewResponse:
-    source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
+    source = await owned_meeting(
+        session, workspace_id, source_id, user, lock=True, minimum_role="editor"
+    )
     if source.review_state != ReviewState.AWAITING_REVIEW:
         raise HTTPException(status.HTTP_409_CONFLICT, "Meeting is not awaiting review")
     if source.review_revision != body.revision:
@@ -331,7 +336,7 @@ async def save_review(
         and (not ids or ids[0] != body.project_id)
     ):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "projectId must be primary")
-    await validate_refs(session, workspace_id, user.id, None, body.utterances, lock=True)
+    await validate_refs(session, workspace_id, source.owner_id, None, body.utterances, lock=True)
     previous_ids = await project_ids(session, source)
     await replace_projects(session, source, ids, lock=True)
     if previous_ids != ids:
@@ -340,6 +345,15 @@ async def save_review(
         item.model_dump(by_alias=True, mode="json") for item in body.utterances
     ]
     source.review_revision += 1
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="transcript.edited",
+        target_type="source",
+        target_id=source.id,
+        details={"revision": source.review_revision},
+    )
     session.add(source)
     await session.commit()
     return await review_payload_with_directory(session, source)
@@ -354,7 +368,9 @@ async def confirm_review(
     session: Session,
     request: Request = None,
 ) -> JobResponse:
-    source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
+    source = await owned_meeting(
+        session, workspace_id, source_id, user, lock=True, minimum_role="editor"
+    )
     if source.review_revision != body.revision:
         raise HTTPException(status.HTTP_409_CONFLICT, "Stale review revision")
     if source.review_state == ReviewState.CONFIRMED:
@@ -366,11 +382,15 @@ async def confirm_review(
         usable = [item for item in utterances if item.text]
         if not usable:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Transcript text is required")
-        _, people = await validate_refs(session, workspace_id, user.id, None, usable, lock=True)
+        _, people = await validate_refs(
+            session, workspace_id, source.owner_id, None, usable, lock=True
+        )
         projects = []
         project_owners = {}
         for identifier in await project_ids(session, source):
-            project = await active_project(session, identifier, workspace_id, user.id, lock=True)
+            project = await active_project(
+                session, identifier, workspace_id, source.owner_id, lock=True
+            )
             assert project is not None
             projects.append(project)
             if project.owner_person_id is None:
@@ -384,7 +404,7 @@ async def confirm_review(
             if (
                 project_owner is None
                 or project_owner.workspace_id != workspace_id
-                or project_owner.owner_id != user.id
+                or project_owner.owner_id != source.owner_id
             ):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid project owner")
             project_owners[project.owner_person_id] = project_owner
@@ -412,7 +432,7 @@ async def confirm_review(
                 if (
                     candidate is not None
                     and candidate.workspace_id == workspace_id
-                    and candidate.owner_id == user.id
+                    and candidate.owner_id == source.owner_id
                     and candidate.archived_at is None
                 ):
                     roster[candidate.id] = candidate
@@ -447,6 +467,15 @@ async def confirm_review(
     source.processing_stage = ProcessingStage.CONFIRMED
     source.error_message = None
     session.add(source)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="source.confirmed",
+        target_type="source",
+        target_id=source.id,
+        details={"analysisMode": source.analysis_mode},
+    )
     settings = request.app.state.settings if request is not None else get_settings()
     if settings.processing_executor == "postgres":
         source.status = SourceStatus.QUEUED
@@ -483,7 +512,9 @@ async def retry_transcription(
     session: Session,
     request: Request = None,
 ) -> JobResponse:
-    source = await owned_meeting(session, workspace_id, source_id, user.id, lock=True)
+    source = await owned_meeting(
+        session, workspace_id, source_id, user, lock=True, minimum_role="editor"
+    )
     if source.transcript_source != "server" or source.review_state != ReviewState.TRANSCRIBING:
         raise HTTPException(status.HTTP_409_CONFLICT, "Meeting cannot be retranscribed")
     if source.status in {

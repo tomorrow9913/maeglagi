@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -17,19 +17,11 @@ from app.core.database import get_session
 from app.modules.context_engine.application.context_store import state_from_record
 from app.modules.context_engine.application.temporal import as_utc
 from app.modules.context_engine.infrastructure.models import ContextRecord, ContextStoreRecord
-from app.modules.workspaces.infrastructure.models import Source, Workspace
+from app.modules.workspaces.application.access import workspace_access
+from app.modules.workspaces.infrastructure.models import Source
 
 router = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
-
-
-async def _owned_workspace(
-    workspace_id: UUID, user: CurrentUser, session: AsyncSession
-) -> Workspace:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-    return workspace
 
 
 def _occurred(record: ContextRecord) -> datetime:
@@ -65,11 +57,13 @@ async def list_context_items(
     to: Annotated[datetime | None, Query()] = None,
 ) -> list[ContextItemResponse]:
     """The workspace timeline: decisions, issues, tasks and events, newest first."""
-    workspace = await _owned_workspace(workspace_id, user, session)
+    workspace = (await workspace_access(session, workspace_id, user)).workspace
     found = await session.exec(
         select(ContextRecord, Source)
         .join(Source, Source.id == ContextRecord.source_id)  # type: ignore[arg-type]
-        .where(ContextRecord.workspace_id == workspace.id, ContextRecord.owner_id == user.id)
+        .where(
+            ContextRecord.workspace_id == workspace.id, ContextRecord.owner_id == workspace.owner_id
+        )
     )
     rows = list(found.all())
     replaced_by = _superseded_by([record for record, _ in rows])
@@ -107,11 +101,11 @@ async def get_context_store(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> ContextStoreResponse | None:
     """The project's current situation, or null until the first source has been analyzed."""
-    workspace = await _owned_workspace(workspace_id, user, session)
+    workspace = (await workspace_access(session, workspace_id, user)).workspace
     found = await session.exec(
         select(ContextStoreRecord).where(
             ContextStoreRecord.workspace_id == workspace.id,
-            ContextStoreRecord.owner_id == user.id,
+            ContextStoreRecord.owner_id == workspace.owner_id,
         )
     )
     record = found.first()

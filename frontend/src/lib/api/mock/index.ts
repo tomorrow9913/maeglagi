@@ -360,6 +360,30 @@ export const mockApi: MaeglagiApi = {
     return { ...workspace };
   },
 
+  async listWorkspaceMembers(_workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return [];
+  },
+
+  async inviteWorkspaceMember(_workspaceId, input, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return { id: nextId("member"), userId: null, email: input.email, role: input.role, joinedAt: null, createdAt: new Date().toISOString() };
+  },
+
+  async updateWorkspaceMember(_workspaceId, memberId, role, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return { id: memberId, userId: null, email: "member@example.com", role, joinedAt: null, createdAt: new Date().toISOString() };
+  },
+
+  async removeWorkspaceMember(_workspaceId, _memberId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+  },
+
+  async listWorkspaceAuditEvents(_workspaceId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    return [];
+  },
+
   async createWorkspace(input, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!input.name.trim()) throw new ApiError(422, "워크스페이스 이름을 입력해 주세요.");

@@ -22,6 +22,29 @@ export type Workspace = {
   name: string;
   createdAt: string;
   sourceCount: number;
+  role?: "owner" | "admin" | "editor" | "viewer";
+};
+
+export type WorkspaceMember = {
+  id: string;
+  userId: string | null;
+  email: string;
+  role: "owner" | "admin" | "editor" | "viewer";
+  joinedAt: string | null;
+  createdAt: string;
+};
+
+export type WorkspaceAuditEvent = {
+  id: string;
+  actorId: string;
+  actorEmail: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  origin: "web" | "mcp" | "api" | "system";
+  details: Record<string, unknown>;
+  requestId: string | null;
+  createdAt: string;
 };
 
 /** Account-wide MCP access token metadata. The secret appears only in create's response. */

@@ -33,6 +33,8 @@ from app.modules.workspaces.infrastructure.models import (
     SourcePerson,
     SourceProject,
     Workspace,
+    WorkspaceAuditEvent,
+    WorkspaceMember,
     WorkspacePerson,
     WorkspaceProject,
 )
@@ -65,6 +67,8 @@ async def database() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
                 checkfirst=False,
                 tables=[
                     Workspace.__table__,
+                    WorkspaceMember.__table__,
+                    WorkspaceAuditEvent.__table__,
                     WorkspacePerson.__table__,
                     WorkspaceProject.__table__,
                     ProjectMember.__table__,
@@ -134,6 +138,70 @@ def extraction(quote: str, *, kind: str = "report", decision: str = "캐시 도�
 
 def service(session: AsyncSession) -> AgentWorkflowService:
     return AgentWorkflowService(session, get_settings().model_copy(update={"neo4j_uri": ""}))
+
+
+@pytest.mark.asyncio
+async def test_shared_workspace_roles_keep_records_under_workspace_owner(database):
+    owner, editor, viewer = uuid4(), uuid4(), uuid4()
+    async with database() as session:
+        workflow = service(session)
+        workspace = await workflow.create_workspace(owner_id=owner, name="Shared")
+        owner_membership = (
+            await session.exec(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == workspace.id,
+                    WorkspaceMember.user_id == owner,
+                )
+            )
+        ).one()
+        assert owner_membership.role == "owner"
+        session.add(
+            WorkspaceMember(
+                workspace_id=workspace.id,
+                user_id=editor,
+                email="editor@example.com",
+                email_normalized="editor@example.com",
+                role="editor",
+                invited_by=owner,
+            )
+        )
+        session.add(
+            WorkspaceMember(
+                workspace_id=workspace.id,
+                user_id=viewer,
+                email="viewer@example.com",
+                email_normalized="viewer@example.com",
+                role="viewer",
+                invited_by=owner,
+            )
+        )
+        await session.commit()
+
+        assert [row.id for row in await workflow.list_workspaces(owner_id=editor)] == [workspace.id]
+        source = await workflow.create_text_source(
+            owner_id=editor,
+            workspace_id=workspace.id,
+            title="Shared note",
+            text="The editor added this.",
+        )
+        stored = await session.get(Source, source.id)
+        assert stored is not None and stored.owner_id == owner
+        assert [
+            row.id
+            for row in await workflow.list_sources(owner_id=viewer, workspace_id=workspace.id)
+        ] == [source.id]
+        assert (
+            await workflow.source_content(
+                owner_id=viewer, workspace_id=workspace.id, source_id=source.id
+            )
+        ).text == "The editor added this."
+        with pytest.raises(WorkflowError, match="Workspace not found"):
+            await workflow.create_text_source(
+                owner_id=viewer,
+                workspace_id=workspace.id,
+                title="Forbidden",
+                text="Viewers cannot mutate.",
+            )
 
 
 @pytest.mark.asyncio

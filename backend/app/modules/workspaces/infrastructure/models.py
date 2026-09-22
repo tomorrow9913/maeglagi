@@ -38,6 +38,61 @@ class Workspace(SQLModel, table=True):
     )
 
 
+class WorkspaceMember(SQLModel, table=True):
+    __tablename__ = "workspace_members"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_members_user"),
+        UniqueConstraint("workspace_id", "email_normalized", name="uq_workspace_members_email"),
+        CheckConstraint(
+            "role in ('owner', 'admin', 'editor', 'viewer')", name="ck_workspace_members_role"
+        ),
+        Index("workspace_members_user_id_idx", "user_id"),
+        Index("workspace_members_email_idx", "email_normalized"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    user_id: UUID | None = Field(default=None)
+    email: str = Field(max_length=320)
+    email_normalized: str = Field(max_length=320)
+    role: str = Field(max_length=16)
+    invited_by: UUID
+    joined_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class WorkspaceAuditEvent(SQLModel, table=True):
+    __tablename__ = "workspace_audit_events"
+    __table_args__ = (
+        Index("workspace_audit_events_workspace_created_idx", "workspace_id", "created_at"),
+        Index("workspace_audit_events_actor_idx", "actor_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    workspace_id: UUID = Field(
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    )
+    actor_id: UUID
+    actor_email: str | None = Field(default=None, max_length=320)
+    action: str = Field(max_length=80)
+    target_type: str = Field(max_length=40)
+    target_id: str | None = Field(default=None, max_length=255)
+    origin: str = Field(default="web", max_length=20)
+    details: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSONB, nullable=False, default=dict)
+    )
+    request_id: str | None = Field(default=None, max_length=64)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
 class WorkspacePerson(SQLModel, table=True):
     __tablename__ = "workspace_people"
     __table_args__ = (Index("workspace_people_workspace_id_idx", "workspace_id"),)

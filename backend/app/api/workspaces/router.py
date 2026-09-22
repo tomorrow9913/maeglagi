@@ -16,6 +16,7 @@ from app.api.workspaces.associations import PersonAssociation, replace_projects
 from app.api.workspaces.associations import (
     router as associations_router,
 )
+from app.api.workspaces.collaboration import router as collaboration_router
 from app.api.workspaces.context import router as context_router
 from app.api.workspaces.credentials import _credential_key
 from app.api.workspaces.credentials import router as credentials_router
@@ -59,6 +60,8 @@ from app.modules.ingestion.application.pipeline import IngestionError, Ingestion
 from app.modules.ingestion.infrastructure.pg_executor import enqueue_source as enqueue_pg_source
 from app.modules.ingestion.infrastructure.pg_executor import wake_executors
 from app.modules.ingestion.infrastructure.tasks import process_source
+from app.modules.workspaces.application.access import claim_pending_memberships, workspace_access
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.domain.source_state import (
     ProcessingStage,
     ReviewState,
@@ -70,6 +73,7 @@ from app.modules.workspaces.infrastructure.models import (
     SourcePerson,
     SourceProject,
     Workspace,
+    WorkspaceMember,
 )
 
 router = APIRouter()
@@ -77,6 +81,7 @@ router.include_router(credentials_router)
 router.include_router(context_router)
 router.include_router(graph_router)
 router.include_router(source_content_router)
+router.include_router(collaboration_router)
 workspaces = APIRouter(prefix="/workspaces")
 Session = Annotated[AsyncSession, Depends(get_session)]
 
@@ -102,12 +107,15 @@ def _job_response(source: Source) -> JobResponse:
     )
 
 
-def _response(workspace: Workspace, source_count: int = 0) -> WorkspaceResponse:
+def _response(
+    workspace: Workspace, source_count: int = 0, role: str = "owner"
+) -> WorkspaceResponse:
     return WorkspaceResponse(
         id=workspace.id,
         name=workspace.name,
         created_at=workspace.created_at,
         source_count=source_count,
+        role=role,
     )
 
 
@@ -139,15 +147,17 @@ async def _persist_and_enqueue_source(
 
 @workspaces.get("", response_model=list[WorkspaceResponse])
 async def list_workspaces(user: CurrentUser, session: Session) -> list[WorkspaceResponse]:
+    await claim_pending_memberships(session, user)
     query = (
-        select(Workspace, func.count(Source.id))
+        select(Workspace, WorkspaceMember.role, func.count(Source.id))
+        .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
         .outerjoin(Source, Source.workspace_id == Workspace.id)
-        .where(Workspace.owner_id == user.id)
-        .group_by(Workspace.id)
+        .where(WorkspaceMember.user_id == user.id)
+        .group_by(Workspace.id, WorkspaceMember.role)
         .order_by(Workspace.created_at.desc())
     )
     rows = (await session.exec(query)).all()
-    return [_response(workspace, count) for workspace, count in rows]
+    return [_response(workspace, count, role) for workspace, role, count in rows]
 
 
 @workspaces.post("", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
@@ -167,6 +177,26 @@ async def create_workspace(
         created = await AgentWorkflowService(session).create_workspace(
             owner_id=user.id, name=body.name
         )
+        member = (
+            await session.exec(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == created.id,
+                    WorkspaceMember.user_id == user.id,
+                )
+            )
+        ).one()
+        member.email = user.email or ""
+        member.email_normalized = (user.email or "").strip().casefold()
+        session.add(member)
+        add_audit_event(
+            session,
+            workspace_id=created.id,
+            actor=user,
+            action="workspace.created",
+            target_type="workspace",
+            target_id=created.id,
+        )
+        await session.commit()
         return WorkspaceResponse(
             id=created.id, name=created.name, created_at=created.created_at, source_count=0
         )
@@ -231,6 +261,17 @@ async def create_workspace(
     workspace = Workspace(owner_id=user.id, name=body.name.strip())
     session.add(workspace)
     await session.flush()
+    session.add(
+        WorkspaceMember(
+            workspace_id=workspace.id,
+            user_id=user.id,
+            email=user.email or "",
+            email_normalized=(user.email or "").strip().casefold(),
+            role="owner",
+            invited_by=user.id,
+            joined_at=datetime.now(UTC),
+        )
+    )
     if credential is None:
         existing_labels = {item.label for item in account_credentials if item.provider == provider}
         label = "기본"
@@ -268,6 +309,15 @@ async def create_workspace(
         role: {**choice, "credentialId": str(credential.id)} for role, choice in choices.items()
     }
     session.add(workspace)
+    add_audit_event(
+        session,
+        workspace_id=workspace.id,
+        actor=user,
+        action="workspace.created",
+        target_type="workspace",
+        target_id=workspace.id,
+        details={"modelsConfigured": sorted(workspace.model_settings)},
+    )
     await session.commit()
     await session.refresh(workspace)
     return _response(workspace)
@@ -278,24 +328,23 @@ async def get_workspace(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> WorkspaceResponse:
     workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    access = await workspace_access(session, workspace_id, user)
+    workspace = access.workspace
     count = await session.exec(
         select(func.count(Source.id)).where(Source.workspace_id == workspace.id)
     )
-    return _response(workspace, count.one())
+    return _response(workspace, count.one(), access.member.role)
 
 
 @workspaces.get("/{workspace_id}/sources", response_model=list[SourceResponse])
 async def list_sources(
     workspace_id: UUID, user: CurrentUser, session: Session
 ) -> list[SourceResponse]:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    access = await workspace_access(session, workspace_id, user)
+    workspace = access.workspace
     result = await session.exec(
         select(Source)
-        .where(Source.workspace_id == workspace.id, Source.owner_id == user.id)
+        .where(Source.workspace_id == workspace.id, Source.owner_id == workspace.owner_id)
         .order_by(Source.created_at.desc())
     )
     sources = list(result.all())
@@ -358,6 +407,15 @@ async def upload_document(
     request: Request = None,
 ) -> JobResponse:
     source, _ = await _upload_source(workspace_id, file, "document", user, session, credentials)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="source.created",
+        target_type="source",
+        target_id=source.id,
+        details={"kind": "document"},
+    )
     source.status = SourceStatus.QUEUED
     source.processing_stage = ProcessingStage.UPLOADED
     await _persist_and_enqueue_source(
@@ -391,8 +449,9 @@ async def upload_recording(
         )
     except (ValidationError, ValueError, TypeError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid projectIds") from exc
+    access = await workspace_access(session, workspace_id, user, minimum_role="editor")
     for identifier in ids:
-        await active_project(session, identifier, workspace_id, user.id)
+        await active_project(session, identifier, workspace_id, access.data_owner_id)
     draft = None
     if live_draft is not None:
         try:
@@ -401,6 +460,15 @@ async def upload_recording(
         except ValidationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid live draft") from exc
     source, _ = await _upload_source(workspace_id, audio, "meeting", user, session, credentials)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="source.created",
+        target_type="source",
+        target_id=source.id,
+        details={"kind": "meeting"},
+    )
     source.transcript_source = "server"
     source.review_state = ReviewState.TRANSCRIBING
     source.project_id = ids[0] if ids else None
@@ -430,12 +498,11 @@ async def create_transcript_source(
     session: Session,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
 ) -> JobResponse:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    access = await workspace_access(session, workspace_id, user, minimum_role="editor")
+    workspace = access.workspace
     ids = _selected_projects(body.project_id, body.project_ids)
     for identifier in ids:
-        await active_project(session, identifier, workspace_id, user.id)
+        await active_project(session, identifier, workspace_id, access.data_owner_id)
     text_value = body.text.strip()
     if not text_value:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Transcript text is required")
@@ -459,7 +526,7 @@ async def create_transcript_source(
     validate_unique_utterances(utterances)
     source = Source(
         workspace_id=workspace.id,
-        owner_id=user.id,
+        owner_id=access.data_owner_id,
         kind="meeting",
         title=title,
         object_path="pending",
@@ -475,9 +542,18 @@ async def create_transcript_source(
         processing_stage=ProcessingStage.AWAITING_REVIEW,
         progress=0.45,
     )
-    source.object_path = f"{user.id}/{workspace.id}/{source.id}/transcript.txt"
+    source.object_path = f"{access.data_owner_id}/{workspace.id}/{source.id}/transcript.txt"
     await _upload_object(source, content, credentials)
     session.add(source)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="source.created",
+        target_type="source",
+        target_id=source.id,
+        details={"kind": "meeting", "transcriptSource": "browser"},
+    )
     await session.flush()
     await replace_projects(session, source, ids)
     await session.commit()
@@ -492,16 +568,14 @@ async def search_workspace(
     session: Session,
     limit: int = 10,
 ) -> list[SimilarChunkResponse]:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    access = await workspace_access(session, workspace_id, user, minimum_role="viewer")
     if not q.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Search query is required")
     try:
         rows = await IngestionPipeline().search(
             session,
             workspace_id=workspace_id,
-            owner_id=user.id,
+            owner_id=access.data_owner_id,
             query=q.strip(),
             limit=max(1, min(limit, 50)),
         )
@@ -535,6 +609,7 @@ async def _upload_source(
     )
 
     settings = get_settings()
+    access = await workspace_access(session, workspace_id, user, minimum_role="editor")
     content = await file.read(settings.max_upload_bytes + 1)
 
     async def writer(source: Source, data: bytes) -> None:
@@ -542,7 +617,7 @@ async def _upload_source(
 
     try:
         source = await SourceUploadService(session, settings).upload(
-            owner_id=user.id,
+            owner_id=access.data_owner_id,
             workspace_id=workspace_id,
             filename=file.filename,
             content_type=file.content_type,
@@ -564,9 +639,14 @@ async def _upload_object(
     )
 
     try:
-        await store_source_bytes(
-            source, content, settings=get_settings(), storage_token=credentials.credentials
+        settings = get_settings()
+        # Shared-workspace uploads write below the workspace owner's storage prefix.
+        # The API has already authorized the member, so use the server credential to
+        # avoid applying the caller's user-scoped Storage RLS to another owner's path.
+        storage_token = (
+            settings.supabase_service_role_key.get_secret_value() or credentials.credentials
         )
+        await store_source_bytes(source, content, settings=settings, storage_token=storage_token)
     except UploadServiceError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 

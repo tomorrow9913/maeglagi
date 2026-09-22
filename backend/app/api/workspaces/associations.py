@@ -83,9 +83,13 @@ async def replace_projects(
 async def get_associations(
     workspace_id: UUID, source_id: UUID, user: CurrentUser, session: Session
 ) -> AssociationsResponse:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user)
     source = await session.get(Source, source_id)
-    if source is None or source.workspace_id != workspace_id or source.owner_id != user.id:
+    if (
+        source is None
+        or source.workspace_id != workspace_id
+        or source.owner_id != workspace.owner_id
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
     return AssociationsResponse(
         revision=source.association_revision,
@@ -102,18 +106,22 @@ async def patch_associations(
     user: CurrentUser,
     session: Session,
 ) -> AssociationsResponse:
-    await owned_workspace(session, workspace_id, user.id)
+    workspace = await owned_workspace(session, workspace_id, user, minimum_role="editor")
     source = (
         await session.exec(select(Source).where(Source.id == source_id).with_for_update())
     ).first()
-    if source is None or source.workspace_id != workspace_id or source.owner_id != user.id:
+    if (
+        source is None
+        or source.workspace_id != workspace_id
+        or source.owner_id != workspace.owner_id
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
     if source.association_revision != body.revision:
         raise HTTPException(status.HTTP_409_CONFLICT, "Stale association revision")
     if len({(item.person_id, item.role) for item in body.people}) != len(body.people):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Duplicate person association")
     for item in body.people:
-        await active_person(session, item.person_id, workspace_id, user.id, lock=True)
+        await active_person(session, item.person_id, workspace_id, workspace.owner_id, lock=True)
     await replace_projects(session, source, body.project_ids, lock=True)
     await session.exec(delete(SourcePerson).where(SourcePerson.source_id == source.id))
     for item in body.people:

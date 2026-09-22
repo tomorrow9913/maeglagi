@@ -1,4 +1,4 @@
-"""Owner-scoped source reads shared by keyless workflow operations."""
+"""Membership-scoped source reads shared by keyless workflow operations."""
 
 from uuid import UUID
 
@@ -21,9 +21,12 @@ from app.modules.workspaces.infrastructure.models import (
     SourcePerson,
     SourceProject,
     Workspace,
+    WorkspaceMember,
     WorkspacePerson,
     WorkspaceProject,
 )
+
+ROLE_LEVEL = {"viewer": 0, "editor": 1, "admin": 2, "owner": 3}
 
 
 def workspace_info(workspace: Workspace) -> WorkspaceInfo:
@@ -53,23 +56,56 @@ class WorkflowRepository:
         self.session = session
 
     async def workspace(
-        self, owner_id: UUID, workspace_id: UUID, *, lock: bool = False
+        self,
+        actor_id: UUID,
+        workspace_id: UUID,
+        *,
+        lock: bool = False,
+        minimum_role: str = "viewer",
     ) -> Workspace:
         workspace = await self.session.get(
             Workspace, workspace_id, with_for_update=lock, populate_existing=lock
         )
-        if workspace is None or workspace.owner_id != owner_id:
+        if workspace is None:
+            raise WorkflowError("workspace_not_found", "Workspace not found", 404)
+        if workspace.owner_id == actor_id:
+            role = "owner"
+        elif not hasattr(self.session, "exec"):
+            role = None
+        else:
+            member = (
+                await self.session.exec(
+                    select(WorkspaceMember).where(
+                        WorkspaceMember.workspace_id == workspace_id,
+                        WorkspaceMember.user_id == actor_id,
+                    )
+                )
+            ).first()
+            role = member.role if member is not None else None
+        if role is None or ROLE_LEVEL.get(role, -1) < ROLE_LEVEL[minimum_role]:
             raise WorkflowError("workspace_not_found", "Workspace not found", 404)
         return workspace
 
     async def source(
-        self, owner_id: UUID, workspace_id: UUID, source_id: UUID, *, lock: bool = False
+        self,
+        actor_id: UUID,
+        workspace_id: UUID,
+        source_id: UUID,
+        *,
+        lock: bool = False,
+        minimum_role: str = "viewer",
     ) -> Source:
-        await self.workspace(owner_id, workspace_id, lock=lock)
+        workspace = await self.workspace(
+            actor_id, workspace_id, lock=lock, minimum_role=minimum_role
+        )
         source = await self.session.get(
             Source, source_id, with_for_update=lock, populate_existing=lock
         )
-        if source is None or source.owner_id != owner_id or source.workspace_id != workspace_id:
+        if (
+            source is None
+            or source.owner_id != workspace.owner_id
+            or source.workspace_id != workspace_id
+        ):
             raise WorkflowError("source_not_found", "Source not found", 404)
         return source
 
@@ -120,6 +156,9 @@ class WorkflowRepository:
         )
 
     async def directory_snapshot(self, owner_id: UUID, workspace_id: UUID, source: Source) -> dict:
+        # Workspace records remain partitioned under the workspace owner. ``owner_id`` is
+        # the actor at the public service boundary and must never become the data scope.
+        owner_id = source.owner_id
         person_ids = {
             UUID(str(item["personId"])) for item in source.review_utterances if item.get("personId")
         }

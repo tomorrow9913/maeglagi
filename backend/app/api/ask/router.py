@@ -24,7 +24,9 @@ from app.modules.retrieval.application.lexical import search_lexically
 from app.modules.retrieval.domain.answer import error_event
 from app.modules.retrieval.infrastructure.graph_neighborhood import GraphNeighborhood
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
-from app.modules.workspaces.infrastructure.models import Source, Workspace
+from app.modules.workspaces.application.access import workspace_access
+from app.modules.workspaces.application.audit import add_audit_event
+from app.modules.workspaces.infrastructure.models import Source
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +105,8 @@ async def ask(
     Everything that touches the database or the graph (key lookup, search, evidence) is finished
     before the first byte is sent; only the model's tokens stream. No evidence means no model call.
     """
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    access = await workspace_access(session, workspace_id, user, minimum_role="viewer")
+    data_owner_id = access.data_owner_id
 
     ingestion = IngestionPipeline(settings)
     try:
@@ -126,20 +127,20 @@ async def ask(
         return await ingestion.search_by_embedding(
             session,
             workspace_id=workspace_id,
-            owner_id=user.id,
+            owner_id=data_owner_id,
             embedding=embedding,
             limit=limit,
             source_ids=source_ids,
         )
 
     async def load_sources(ids: list[UUID]) -> dict[UUID, Source]:
-        return await _load_sources(session, workspace_id, user.id, ids)
+        return await _load_sources(session, workspace_id, data_owner_id, ids)
 
     async def lexical(question: str, source_ids: list[UUID] | None, limit: int):
         return await search_lexically(
             session,
             workspace_id=workspace_id,
-            owner_id=user.id,
+            owner_id=data_owner_id,
             question=question,
             source_ids=source_ids,
             limit=limit,
@@ -167,7 +168,24 @@ async def ask(
         if graph_store is not None:
             await graph_store.close()
 
-    store = await _load_store(session, workspace_id, user.id)
+    store = await _load_store(session, workspace_id, data_owner_id)
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="ask.asked",
+        target_type="workspace",
+        target_id=workspace_id,
+        details={
+            "questionLength": len(body.question),
+            "historyTurns": len(body.history),
+            "provider": provider.adapter.id,
+            "model": provider.model,
+            "credentialOwnerId": str(user.id),
+        },
+    )
+    if hasattr(session, "commit"):
+        await session.commit()
     events = answer_events(
         adapter=provider.adapter,
         api_key=provider.api_key,

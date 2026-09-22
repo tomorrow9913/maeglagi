@@ -28,6 +28,8 @@ from app.modules.workspaces.infrastructure.models import (
     ProviderCredential,
     Source,
     Workspace,
+    WorkspaceAuditEvent,
+    WorkspaceMember,
     WorkspacePerson,
     WorkspaceProject,
 )
@@ -57,6 +59,8 @@ async def database(monkeypatch: pytest.MonkeyPatch):
                 sync,
                 tables=[
                     Workspace.__table__,
+                    WorkspaceMember.__table__,
+                    WorkspaceAuditEvent.__table__,
                     WorkspacePerson.__table__,
                     WorkspaceProject.__table__,
                     Source.__table__,

@@ -11,11 +11,14 @@ from app.auth import bearer
 from app.auth.mcp import authenticate_mcp_token
 from app.core.database import get_session
 from app.mcp.workflow_hints import next_step
+from app.modules.agent_workflows.errors import WorkflowError
+from app.modules.agent_workflows.repositories import WorkflowRepository
 from app.modules.ingestion.application.source_upload import (
     SourceUploadService,
     UploadServiceError,
     store_source_bytes,
 )
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.infrastructure.models import Source
 
 router = APIRouter(prefix="/agent-uploads", tags=["agent-media"])
@@ -34,6 +37,12 @@ async def upload_agent_media(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(401, "MCP token is required")
     user = await authenticate_mcp_token(credentials.credentials, settings)
+    try:
+        workspace = await WorkflowRepository(session).workspace(
+            user.id, workspace_id, minimum_role="editor"
+        )
+    except WorkflowError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
     content = await file.read(settings.max_upload_bytes + 1)
 
     async def writer(source: Source, data: bytes) -> None:
@@ -46,7 +55,7 @@ async def upload_agent_media(
 
     try:
         source = await SourceUploadService(session, settings).upload(
-            owner_id=user.id,
+            owner_id=workspace.owner_id,
             workspace_id=workspace_id,
             filename=file.filename,
             content_type=file.content_type,
@@ -61,6 +70,16 @@ async def upload_agent_media(
     source.processing_stage = "awaiting_agent"
     source.review_state = "awaiting_review" if kind == "meeting" else None
     source.transcript_source = "agent" if kind == "meeting" else None
+    add_audit_event(
+        session,
+        workspace_id=workspace_id,
+        actor=user,
+        action="source.created",
+        target_type="source",
+        target_id=source.id,
+        origin="mcp",
+        details={"kind": kind},
+    )
     session.add(source)
     await session.commit()
     return {

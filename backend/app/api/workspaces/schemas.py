@@ -27,6 +27,7 @@ class WorkspaceResponse(BaseModel):
     name: str
     created_at: datetime = Field(serialization_alias="createdAt")
     source_count: int = Field(default=0, serialization_alias="sourceCount")
+    role: str = "owner"
 
 
 class SourceResponse(BaseModel):

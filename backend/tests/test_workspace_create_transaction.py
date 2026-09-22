@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.api.workspaces.schemas import CreateWorkspaceRequest
 from app.auth.models import AuthUser
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
+from app.modules.workspaces.infrastructure.models import (
+    ProviderCredential,
+    Workspace,
+    WorkspaceAuditEvent,
+    WorkspaceMember,
+)
 
 routes = import_module("app.api.workspaces.router")
 
@@ -50,7 +55,13 @@ def database() -> Session:
         cursor.close()
 
     Workspace.metadata.create_all(
-        engine, tables=[Workspace.__table__, ProviderCredential.__table__]
+        engine,
+        tables=[
+            Workspace.__table__,
+            WorkspaceMember.__table__,
+            WorkspaceAuditEvent.__table__,
+            ProviderCredential.__table__,
+        ],
     )
     with Session(engine) as session:
         yield session

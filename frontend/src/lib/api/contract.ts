@@ -28,6 +28,8 @@ import type {
   Workspace,
   WorkspaceModels,
   WorkspaceSecrets,
+  WorkspaceMember,
+  WorkspaceAuditEvent,
 } from "./types";
 
 /**
@@ -45,6 +47,11 @@ export interface MaeglagiApi {
   listWorkspaces(signal?: AbortSignal): Promise<Workspace[]>;
   getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<Workspace>;
   createWorkspace(input: CreateWorkspaceInput, signal?: AbortSignal): Promise<Workspace>;
+  listWorkspaceMembers(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceMember[]>;
+  inviteWorkspaceMember(workspaceId: string, input: { email: string; role: "admin" | "editor" | "viewer" }, signal?: AbortSignal): Promise<WorkspaceMember>;
+  updateWorkspaceMember(workspaceId: string, memberId: string, role: "admin" | "editor" | "viewer", signal?: AbortSignal): Promise<WorkspaceMember>;
+  removeWorkspaceMember(workspaceId: string, memberId: string, signal?: AbortSignal): Promise<void>;
+  listWorkspaceAuditEvents(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceAuditEvent[]>;
   /** Authenticated, explicit copy of the public demo into the caller's own workspace. */
   cloneDemoWorkspace(signal?: AbortSignal): Promise<Workspace>;
   /**

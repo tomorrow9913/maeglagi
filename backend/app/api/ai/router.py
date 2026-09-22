@@ -30,7 +30,8 @@ from app.modules.context_engine.infrastructure.provider_registry import (
     adapter_for_credential,
     provider_registry,
 )
-from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
+from app.modules.workspaces.application.access import workspace_access
+from app.modules.workspaces.infrastructure.models import ProviderCredential
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/ai")
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -39,9 +40,7 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 async def _workspace_credentials(
     workspace_id: UUID, user: CurrentUser, session: AsyncSession
 ) -> list[ProviderCredential]:
-    workspace = await session.get(Workspace, workspace_id)
-    if workspace is None or workspace.owner_id != user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    await workspace_access(session, workspace_id, user)
     result = await session.exec(
         select(ProviderCredential).where(
             ProviderCredential.owner_id == user.id,
