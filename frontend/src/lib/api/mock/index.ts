@@ -91,6 +91,8 @@ const state = {
     isDefault: true,
     updatedAt: "2026-09-08T09:00:00Z",
   }] as WorkspaceSecrets[],
+  /** 팀 연결은 계정 연결과 분리해 같은 provider/label도 서로 덮어쓰지 않습니다. */
+  workspaceCredentials: [] as Array<WorkspaceSecrets & { workspaceId: string }>,
   /** 계정 MCP 토큰의 메타데이터만 유지합니다. */
   mcpTokens: [] as McpToken[],
   /** 워크스페이스별로 저장된 모델 선택 */
@@ -186,13 +188,12 @@ function checkApiKey(provider: LlmProvider, apiKey: string, baseUrl?: string): A
 }
 
 function storeKey(
-  _workspaceId: string,
+  credentials: WorkspaceSecrets[],
   provider: LlmProvider,
   apiKey: string | undefined,
   label = "기본",
   baseUrl?: string,
 ): WorkspaceSecrets {
-  const credentials = state.accountCredentials;
   const existing = credentials.find((item) => item.provider === provider && item.label === label);
   for (const item of credentials) item.isDefault = false;
   const secrets: WorkspaceSecrets = {
@@ -208,6 +209,13 @@ function storeKey(
   if (existing) credentials.splice(credentials.indexOf(existing), 1, secrets);
   else credentials.push(secrets);
   return secrets;
+}
+
+function credentialsForWorkspace(workspaceId: string): WorkspaceSecrets[] {
+  return [
+    ...state.workspaceCredentials.filter((item) => item.workspaceId === workspaceId),
+    ...state.accountCredentials,
+  ];
 }
 
 let sequence = 0;
@@ -408,7 +416,7 @@ export const mockApi: MaeglagiApi = {
     state.workspaces.push(workspace);
 
     // BYOK 키는 저장만 하고 어떤 응답에도 포함하지 않습니다.
-    if (provider && !input.credentialId) storeKey(workspace.id, provider, input.llmApiKey ?? "", "기본", input.llmBaseUrl);
+    if (provider && !input.credentialId) storeKey(state.accountCredentials, provider, input.llmApiKey ?? "", "기본", input.llmBaseUrl);
     if (input.models) state.models.set(workspace.id, { ...input.models });
     return { ...workspace };
   },
@@ -431,7 +439,7 @@ export const mockApi: MaeglagiApi = {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
 
-    const configuredProviders = state.accountCredentials;
+    const configuredProviders = credentialsForWorkspace(workspaceId);
     return BOOTSTRAP_AI_PROVIDERS.map<AiProvider>((provider) => ({
       ...provider,
       capabilities: [...provider.capabilities],
@@ -472,7 +480,7 @@ export const mockApi: MaeglagiApi = {
 
   async getWorkspaceModels(workspaceId, provider, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const credentials = state.accountCredentials;
+    const credentials = credentialsForWorkspace(workspaceId);
     if (!state.workspaces.some((item) => item.id === workspaceId)) {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
@@ -494,7 +502,7 @@ export const mockApi: MaeglagiApi = {
 
   async updateWorkspaceModels(workspaceId, selections, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const credentials = state.accountCredentials;
+    const credentials = credentialsForWorkspace(workspaceId);
     if (!state.workspaces.some((item) => item.id === workspaceId) || credentials.length === 0) {
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
     }
@@ -541,26 +549,37 @@ export const mockApi: MaeglagiApi = {
 
   async getWorkspaceSecrets(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    return state.accountCredentials.find((item) => item.isDefault) ?? null;
+    return credentialsForWorkspace(workspaceId).find((item) => item.isDefault) ?? null;
   },
 
   async listProviderCredentials(workspaceId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId))
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
-    return state.accountCredentials.filter((item) => item.id.startsWith(`${workspaceId}:`)).map((item) => ({ ...item }));
+    return state.workspaceCredentials
+      .filter((item) => item.workspaceId === workspaceId)
+      .map(({ workspaceId: _, ...item }) => ({ ...item }));
   },
 
   async createWorkspaceCredential(workspaceId, input, signal) {
     await delay(MOCK_LATENCY_MS * 2, signal);
-    const saved = storeKey(workspaceId, input.provider, input.apiKey ?? "", input.label, input.baseUrl);
-    saved.id = `${workspaceId}:${saved.id}`;
+    const saved = storeKey(
+      state.workspaceCredentials.filter((item) => item.workspaceId === workspaceId),
+      input.provider,
+      input.apiKey ?? "",
+      input.label,
+      input.baseUrl,
+    );
+    const stored = { ...saved, workspaceId };
+    const existingIndex = state.workspaceCredentials.findIndex((item) => item.id === saved.id);
+    if (existingIndex >= 0) state.workspaceCredentials[existingIndex] = stored;
+    else state.workspaceCredentials.push(stored);
     return { ...saved };
   },
 
   async setDefaultWorkspaceCredential(workspaceId, credentialId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const items = state.accountCredentials.filter((item) => item.id.startsWith(`${workspaceId}:`));
+    const items = state.workspaceCredentials.filter((item) => item.workspaceId === workspaceId);
     const credential = items.find((item) => item.id === credentialId);
     if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.");
     for (const item of items) item.isDefault = item.id === credentialId;
@@ -569,9 +588,9 @@ export const mockApi: MaeglagiApi = {
 
   async deleteWorkspaceCredential(workspaceId, credentialId, signal) {
     await delay(MOCK_LATENCY_MS, signal);
-    const index = state.accountCredentials.findIndex((item) => item.id === credentialId && item.id.startsWith(`${workspaceId}:`));
+    const index = state.workspaceCredentials.findIndex((item) => item.id === credentialId && item.workspaceId === workspaceId);
     if (index < 0) throw new ApiError(404, "연결을 찾을 수 없습니다.");
-    state.accountCredentials.splice(index, 1);
+    state.workspaceCredentials.splice(index, 1);
   },
 
   async listAccountCredentials(signal) {
@@ -585,7 +604,7 @@ export const mockApi: MaeglagiApi = {
     if (state.accountCredentials.some((item) => item.provider === input.provider && item.label === input.label.trim())) throw new ApiError(409, "같은 이름의 연결이 있습니다.");
     const check = checkApiKey(input.provider, input.apiKey ?? "", input.baseUrl);
     if (!check.valid) throw new ApiError(422, check.message);
-    return { ...storeKey("account", input.provider, input.apiKey ?? "", input.label.trim(), input.baseUrl) };
+    return { ...storeKey(state.accountCredentials, input.provider, input.apiKey ?? "", input.label.trim(), input.baseUrl) };
   },
 
   async rotateAccountCredential(credentialId, input, signal) {
@@ -642,13 +661,18 @@ export const mockApi: MaeglagiApi = {
     const check = checkApiKey(input.provider, input.apiKey ?? "", input.baseUrl);
     if (!check.valid) throw new ApiError(422, check.message);
 
-    const saved = storeKey(workspaceId, input.provider, input.apiKey, input.label, input.baseUrl);
+    const workspaceCredentials = state.workspaceCredentials.filter((item) => item.workspaceId === workspaceId);
+    const saved = storeKey(workspaceCredentials, input.provider, input.apiKey, input.label, input.baseUrl);
+    const stored = { ...saved, workspaceId };
+    const existingIndex = state.workspaceCredentials.findIndex((item) => item.id === saved.id);
+    if (existingIndex >= 0) state.workspaceCredentials[existingIndex] = stored;
+    else state.workspaceCredentials.push(stored);
     return saved;
   },
 
   async rotateProviderCredential(workspaceId, credentialId, input, signal) {
     await delay(MOCK_LATENCY_MS * 2, signal);
-    const credential = state.accountCredentials.find((item) => item.id === credentialId);
+    const credential = state.workspaceCredentials.find((item) => item.workspaceId === workspaceId && item.id === credentialId);
     if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.");
     const check = checkApiKey(credential.provider, input.apiKey ?? (["none", "local"].includes(credential.keyHint) ? "" : "retained-secret"), input.baseUrl ?? credential.baseUrl ?? undefined);
     if (!check.valid) throw new ApiError(422, check.message);
