@@ -5,8 +5,10 @@ import Link from "next/link";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { ErrorState, ListSkeleton } from "@/components/common/state-views";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiKeyCard } from "@/features/workspace/components/api-key-card";
 import { WorkspaceModelsCard } from "@/features/workspace/components/workspace-models-card";
+import { WorkspaceSharingCard } from "@/features/workspace/components/workspace-sharing-card";
 import { useAsync } from "@/hooks/use-async";
 import { useApi } from "@/lib/api/context";
 import type { AiProvider } from "@/lib/api";
@@ -21,6 +23,7 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
         api.listAccountCredentials(signal),
         api.listProviderCredentials(workspaceId, signal),
         api.listProviders(signal),
+        api.getWorkspace(workspaceId, signal),
       ]),
     [workspaceId],
   );
@@ -28,6 +31,7 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
   const accountCredentials = data?.[0] ?? [];
   const workspaceCredentials = data?.[1] ?? [];
   const credentials = [...workspaceCredentials, ...accountCredentials];
+  const canManageWorkspace = data?.[3].role === "owner" || data?.[3].role === "admin";
   // 서버 카탈로그가 비어 있어도 Ollama는 항상 고를 수 있으므로 공급자 목록이 비는 경우는 없습니다.
   const providers: AiProvider[] = data
     ? withOllamaProvider(data[2].length > 0 ? data[2] : BOOTSTRAP_AI_PROVIDERS).map((item) => ({
@@ -64,6 +68,7 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
         <ErrorState error={error} onRetry={reload} />
       ) : (
         <div className="space-y-4">
+          <WorkspaceSharingCard workspaceId={workspaceId} />
           {error ? (
             <ErrorState
               compact
@@ -72,25 +77,46 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
               title="AI 연결 목록을 새로 불러오지 못했습니다"
             />
           ) : null}
-          <ApiKeyCard
-            workspaceId={workspaceId}
-            credentials={workspaceCredentials}
-            providers={providers}
-            onUpdated={(affectsModels) => {
-              reload();
-              if (affectsModels) setModelRevision((value) => value + 1);
-            }}
-          />
-          <section className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-            워크스페이스 연결이 없는 공급자는 내 계정 연결로 대체됩니다. 개인 연결은{" "}
-            <Link
-              className="font-medium text-primary underline-offset-2 hover:underline"
-              href="/account/ai"
-            >
-              계정 AI 연결
-            </Link>
-            에서 관리할 수 있습니다.
-          </section>
+          <Tabs defaultValue="personal" className="rounded-xl border bg-card p-4">
+            <div>
+              <h2 className="text-sm font-semibold">AI API key 설정</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                내 키를 사용하거나 팀이 같이 쓸 워크스페이스 키를 등록하세요.
+              </p>
+            </div>
+            <TabsList className="mt-3">
+              <TabsTrigger value="personal">내 키 사용</TabsTrigger>
+              <TabsTrigger value="workspace">워크스페이스 키</TabsTrigger>
+            </TabsList>
+            <TabsContent value="personal" className="mt-4">
+              <ApiKeyCard
+                credentials={accountCredentials}
+                providers={providers}
+                onUpdated={(affectsModels) => {
+                  reload();
+                  if (affectsModels) setModelRevision((value) => value + 1);
+                }}
+              />
+            </TabsContent>
+            <TabsContent value="workspace" className="mt-4">
+              {canManageWorkspace ? (
+                <ApiKeyCard
+                  workspaceId={workspaceId}
+                  credentials={workspaceCredentials}
+                  providers={providers}
+                  onUpdated={(affectsModels) => {
+                    reload();
+                    if (affectsModels) setModelRevision((value) => value + 1);
+                  }}
+                />
+              ) : (
+                <section className="rounded-xl border p-5 text-sm text-muted-foreground">
+                  워크스페이스 키는 소유자와 관리자가 관리합니다. 공유 키가 없으면 내 키를
+                  사용합니다.
+                </section>
+              )}
+            </TabsContent>
+          </Tabs>
           {hasCredential ? (
             <WorkspaceModelsCard
               key={workspaceId}
