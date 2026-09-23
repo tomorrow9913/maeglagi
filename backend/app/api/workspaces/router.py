@@ -296,7 +296,7 @@ async def create_workspace(
                 session,
                 secret=key,
                 credential_id=credential.id,
-                workspace_id=None,
+                workspace_id=workspace.id,
                 provider=provider,
             )
         session.add(credential)
