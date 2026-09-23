@@ -30,6 +30,9 @@ const actionLabel: Record<string, string> = {
   "transcript.edited": "회의록 편집",
   "analysis.requested": "분석 요청",
   "analysis.completed": "분석 완료",
+  "transcription.completed": "음성 변환 완료",
+  "embedding.completed": "임베딩 완료",
+  "embedding.skipped": "임베딩 생략",
   "ask.asked": "질문",
   "person.created": "참여자 등록",
   "person.updated": "참여자 수정",
@@ -43,10 +46,28 @@ const actionLabel: Record<string, string> = {
 };
 
 function detailSummary(details: Record<string, unknown>): string | null {
+  const methodLabel: Record<string, string> = {
+    direct_edit: "직접 편집",
+    service_model: "서비스 모델",
+    external_agent: "외부 에이전트 분석",
+    external_agent_edit: "외부 에이전트 편집",
+    lexical_fallback: "키워드 검색 대체",
+  };
   const values = [
+    typeof details.generationMethod === "string"
+      ? (methodLabel[details.generationMethod] ?? details.generationMethod)
+      : null,
     typeof details.provider === "string" ? `프로바이더 ${details.provider}` : null,
     typeof details.label === "string" ? `연결 ${details.label}` : null,
     typeof details.model === "string" ? `모델 ${details.model}` : null,
+    typeof details.agentName === "string" ? `에이전트 ${details.agentName}` : null,
+    details.provenanceTrust === "self_reported" ? "에이전트 신고 정보" : null,
+    typeof details.chunkCount === "number" ? `청크 ${details.chunkCount}개` : null,
+    details.credentialScope === "workspace"
+      ? "워크스페이스 키"
+      : details.credentialScope === "account"
+        ? "개인 키"
+        : null,
     typeof details.kind === "string" ? `유형 ${details.kind}` : null,
     typeof details.role === "string" ? `권한 ${details.role}` : null,
     typeof details.before === "string" && typeof details.after === "string"

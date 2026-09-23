@@ -36,8 +36,13 @@ def register(server: MCPServer, settings: Settings) -> None:
         expected_fingerprint: Annotated[str, Field(min_length=32, max_length=128)],
         result: dict[str, Any],
         ctx: Context,
+        model: Annotated[str | None, Field(default=None, max_length=160)] = None,
+        provider: Annotated[str | None, Field(default=None, max_length=80)] = None,
+        agent_name: Annotated[
+            str | None, Field(default=None, max_length=120, serialization_alias="agentName")
+        ] = None,
     ) -> dict[str, Any]:
-        """Store agent-produced chunks, contexts and graph; phase=done is completion."""
+        """Store agent-produced analysis. Report provider, model and agent_name for provenance."""
         owner_id = current_user(ctx).id
         submission = await workflow_call(
             settings,
@@ -48,6 +53,15 @@ def register(server: MCPServer, settings: Settings) -> None:
                 expected_revision=expected_revision,
                 expected_fingerprint=expected_fingerprint,
                 result=result,
+                provenance={
+                    key: value
+                    for key, value in {
+                        "provider": provider,
+                        "model": model,
+                        "agentName": agent_name,
+                    }.items()
+                    if value
+                },
             ),
         )
         return {

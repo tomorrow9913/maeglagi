@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth.models import AuthUser
 from app.core.config import Settings, get_settings
 from app.modules.context_engine.application.context_store import (
     ContextStoreRepository,
@@ -29,6 +30,7 @@ from app.modules.context_engine.infrastructure.context_store_repository import (
 from app.modules.ingestion.application.pipeline import IngestionError, IngestionPipeline
 from app.modules.retrieval.infrastructure.graph_store import Neo4jGraphStore
 from app.modules.retrieval.infrastructure.graph_writer import GraphWriter
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.domain.source_state import ReviewState
 from app.modules.workspaces.infrastructure.models import Source, Workspace
 
@@ -216,11 +218,26 @@ class SourceAnalysisService:
                 "phase": "done",
                 "warnings": warnings,
             }
+            provenance = checkpoint.get("provenance", {})
+            add_audit_event(
+                session,
+                workspace_id=source.workspace_id,
+                actor=AuthUser(id=source.owner_id),
+                action="analysis.completed",
+                target_type="source",
+                target_id=source.id,
+                origin="system",
+                details={
+                    "generationMethod": "service_model",
+                    "provenanceTrust": "verified_runtime",
+                    **provenance,
+                },
+            )
             session.add(source)
             await session.commit()
             return warnings
         try:
-            adapter, api_key, model = await self.ingestion.provider_with_model(
+            provider = await self.ingestion.provider_with_model(
                 session,
                 workspace_id=source.workspace_id,
                 owner_id=source.owner_id,
@@ -232,6 +249,15 @@ class SourceAnalysisService:
             return self._skip(source, str(exc))
 
         workspace = await session.get(Workspace, source.workspace_id)
+        adapter, api_key, model = provider.adapter, provider.api_key, provider.model
+        provenance = {
+            "generationMethod": "service_model",
+            "provenanceTrust": "verified_runtime",
+            "provider": provider.adapter.id,
+            "model": provider.model,
+            "credentialScope": provider.credential_scope,
+            "credentialId": str(provider.credential_id) if provider.credential_id else None,
+        }
         pipeline = ExtractionPipeline(adapter, api_key, model=model)
         context_store = ContextStoreService(
             self.repository_factory(session), ContextStoreUpdater(pipeline)
@@ -262,6 +288,7 @@ class SourceAnalysisService:
                     "phase": "extracted",
                     "result": result.model_dump(mode="json"),
                     "graph": graph.model_dump(mode="json"),
+                    "provenance": provenance,
                 }
                 session.add(source)
                 await session.commit()
@@ -307,6 +334,16 @@ class SourceAnalysisService:
                 "phase": "done",
                 "warnings": warnings,
             }
+            add_audit_event(
+                session,
+                workspace_id=source.workspace_id,
+                actor=AuthUser(id=source.owner_id),
+                action="analysis.completed",
+                target_type="source",
+                target_id=source.id,
+                origin="system",
+                details=provenance,
+            )
             session.add(source)
             await session.commit()
         finally:

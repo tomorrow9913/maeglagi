@@ -6,6 +6,7 @@ from sqlalchemy import delete, or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.auth.models import AuthUser
 from app.core.config import Settings, get_settings
 from app.core.credentials import CredentialUnavailableError, resolve_credential_secret
 from app.modules.context_engine.application.model_catalog import has_indexed_chunks
@@ -29,6 +30,7 @@ from app.modules.context_engine.infrastructure.provider_registry import (
 from app.modules.ingestion.application.chunking import CharacterOverlapChunker
 from app.modules.ingestion.application.normalization import NormalizationService
 from app.modules.ingestion.domain.models import DocumentSection, TranscriptSegment
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Source, Workspace
 
 
@@ -61,6 +63,8 @@ class ResolvedProvider(NamedTuple):
     adapter: ProviderAdapter
     api_key: str
     model: str
+    credential_id: UUID | None = None
+    credential_scope: str = "account"
 
 
 def embedding_dimensions_argument(model: str, dimensions: int) -> int | None:
@@ -176,7 +180,13 @@ class IngestionPipeline:
                 model = chosen.model
             else:
                 model = self._default_model(credential.provider, role)
-            return ResolvedProvider(adapter, api_key, model)
+            return ResolvedProvider(
+                adapter,
+                api_key,
+                model,
+                credential.id,
+                "workspace" if credential.workspace_id is not None else "account",
+            )
         if chosen is not None and credential_id is None:
             raise MissingCapabilityCredentialError(
                 "선택한 모델을 제공하는 API key가 없습니다.",
@@ -204,7 +214,7 @@ class IngestionPipeline:
             role=ModelRole.TRANSCRIPTION,
         )
         try:
-            return await provider.adapter.transcribe(
+            response = await provider.adapter.transcribe(
                 TranscriptionRequest(
                     audio=audio,
                     filename=filename,
@@ -213,6 +223,24 @@ class IngestionPipeline:
                 ),
                 provider.api_key,
             )
+            add_audit_event(
+                session,
+                workspace_id=source.workspace_id,
+                actor=AuthUser(id=source.owner_id),
+                action="transcription.completed",
+                target_type="source",
+                target_id=source.id,
+                origin="system",
+                details={
+                    "generationMethod": "service_model",
+                    "provenanceTrust": "verified_runtime",
+                    "provider": provider.adapter.id,
+                    "model": provider.model,
+                    "credentialScope": provider.credential_scope,
+                    "credentialId": str(provider.credential_id) if provider.credential_id else None,
+                },
+            )
+            return response
         except ProviderError as exc:
             raise IngestionError(str(exc)) from exc
 
@@ -250,6 +278,16 @@ class IngestionPipeline:
                 raise
             # New text remains searchable by the lexical path and available for extraction.
             embeddings: list[list[float] | None] = [None] * len(chunks)
+            add_audit_event(
+                session,
+                workspace_id=source.workspace_id,
+                actor=AuthUser(id=source.owner_id),
+                action="embedding.skipped",
+                target_type="source",
+                target_id=source.id,
+                origin="system",
+                details={"generationMethod": "lexical_fallback", "reason": str(exc)},
+            )
         else:
             try:
                 response = await provider.adapter.embedding(
@@ -272,6 +310,24 @@ class IngestionPipeline:
             ):
                 raise IngestionError("임베딩 차원이 Vector Store schema와 다릅니다.")
             embeddings = response.embeddings
+            add_audit_event(
+                session,
+                workspace_id=source.workspace_id,
+                actor=AuthUser(id=source.owner_id),
+                action="embedding.completed",
+                target_type="source",
+                target_id=source.id,
+                origin="system",
+                details={
+                    "generationMethod": "service_model",
+                    "provenanceTrust": "verified_runtime",
+                    "provider": provider.adapter.id,
+                    "model": provider.model,
+                    "credentialScope": provider.credential_scope,
+                    "credentialId": str(provider.credential_id) if provider.credential_id else None,
+                    "chunkCount": len(chunks),
+                },
+            )
 
         await session.execute(delete(Chunk).where(Chunk.source_id == source.id))
         for chunk, embedding in zip(chunks, embeddings, strict=True):

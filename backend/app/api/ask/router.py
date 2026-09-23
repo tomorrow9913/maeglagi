@@ -186,7 +186,10 @@ async def ask(
             "historyTurns": len(body.history),
             "provider": provider.adapter.id,
             "model": provider.model,
-            "credentialOwnerId": str(user.id),
+            "credentialScope": provider.credential_scope,
+            "credentialId": str(provider.credential_id) if provider.credential_id else None,
+            "generationMethod": "service_model",
+            "provenanceTrust": "verified_runtime",
         },
     )
     if hasattr(session, "commit"):
