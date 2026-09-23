@@ -77,6 +77,17 @@ function detailSummary(details: Record<string, unknown>): string | null {
   return values.length ? values.join(" · ") : null;
 }
 
+function analysisModelSummary(action: string, details: Record<string, unknown>): string | null {
+  if (action !== "analysis.completed") return null;
+  const provider = typeof details.provider === "string" ? details.provider : null;
+  const model = typeof details.model === "string" ? details.model : null;
+  if (provider && model) return `${provider} / ${model}`;
+  if (model) return model;
+  if (details.generationMethod === "external_agent") return "외부 에이전트 · 모델 미보고";
+  if (details.generationMethod === "direct_edit") return "직접 편집";
+  return "모델 정보 없음";
+}
+
 export default function AuditPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
   const api = useApi();
@@ -256,6 +267,9 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
                     작업
                   </th>
                   <th scope="col" className="px-3 py-2.5 font-medium">
+                    분석 방식/모델
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
                     대상
                   </th>
                   <th scope="col" className="px-3 py-2.5 font-medium">
@@ -266,6 +280,7 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
               <tbody className="divide-y">
                 {audit.data.map((event) => {
                   const summary = detailSummary(event.details);
+                  const analysisModel = analysisModelSummary(event.action, event.details);
                   return (
                     <tr key={event.id} className="align-top hover:bg-muted/20">
                       <td className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground">
@@ -284,6 +299,9 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
                       </td>
                       <td className="px-3 py-2.5 font-medium whitespace-nowrap">
                         {actionLabel[event.action] ?? event.action}
+                      </td>
+                      <td className="max-w-64 px-3 py-2.5 text-xs">
+                        {analysisModel ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">
                         <span>{event.targetType}</span>

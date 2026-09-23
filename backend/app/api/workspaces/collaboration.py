@@ -11,7 +11,11 @@ from app.auth import CurrentUser
 from app.core.database import get_session
 from app.modules.workspaces.application.access import normalize_email, workspace_access
 from app.modules.workspaces.application.audit import add_audit_event
-from app.modules.workspaces.infrastructure.models import WorkspaceAuditEvent, WorkspaceMember
+from app.modules.workspaces.infrastructure.models import (
+    Source,
+    WorkspaceAuditEvent,
+    WorkspaceMember,
+)
 
 router = APIRouter(prefix="/workspaces/{workspace_id}")
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -189,4 +193,35 @@ async def audit_events(
     rows = (
         await session.exec(query.order_by(WorkspaceAuditEvent.created_at.desc()).limit(limit))
     ).all()
-    return [AuditResponse.model_validate(row, from_attributes=True) for row in rows]
+    # Older/retried analysis events may predate provenance being copied onto the
+    # audit row. The checkpoint is the durable record of the model that actually
+    # produced the stored graph, so use it to complete the read response.
+    source_ids: list[UUID] = []
+    for row in rows:
+        if row.action != "analysis.completed" or not row.target_id:
+            continue
+        try:
+            source_ids.append(UUID(row.target_id))
+        except ValueError:
+            continue
+    sources = (
+        (
+            await session.exec(
+                select(Source).where(Source.workspace_id == workspace_id, Source.id.in_(source_ids))  # type: ignore[attr-defined]
+            )
+        ).all()
+        if source_ids
+        else []
+    )
+    provenance_by_source = {
+        str(source.id): (source.analysis_checkpoint or {}).get("provenance", {})
+        for source in sources
+    }
+    responses: list[AuditResponse] = []
+    for row in rows:
+        response = AuditResponse.model_validate(row, from_attributes=True)
+        provenance = provenance_by_source.get(row.target_id or "", {})
+        if isinstance(provenance, dict):
+            response.details = {**provenance, **response.details}
+        responses.append(response)
+    return responses
