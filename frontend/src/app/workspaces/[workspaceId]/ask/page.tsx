@@ -35,6 +35,11 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
   const isDemo = useDemoMode();
   const workspacePath = useWorkspacePath();
   const [sourceViewer, setSourceViewer] = useState<AnswerSource>();
+  const [personalCredentialId, setPersonalCredentialId] = useState<string>();
+  const { data: personalCredentials } = useAsync(
+    (signal) => api.listAccountCredentials(signal),
+    [],
+  );
 
   const [draft, setDraft] = useState("");
   const [isModelSaving, setIsModelSaving] = useState(false);
@@ -53,7 +58,7 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
     createConversation,
     selectConversation,
     branchFrom,
-  } = useAsk(workspaceId);
+  } = useAsk(workspaceId, personalCredentialId);
 
   const onModelSavingChange = useCallback((saving: boolean) => {
     modelSavingRef.current = saving;
@@ -177,6 +182,34 @@ export default function AskPage({ params }: { params: Promise<{ workspaceId: str
         </Link>
         을 등록해 보세요.
       </p>
+      {!isDemo && (personalCredentials?.length ?? 0) > 0 ? (
+        <div className="-mt-3 mb-6 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <label htmlFor="ask-key-scope" className="font-medium text-foreground">
+            답변 연결
+          </label>
+          <select
+            id="ask-key-scope"
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+            value={personalCredentialId ?? "workspace"}
+            disabled={isStreaming}
+            onChange={(event) =>
+              setPersonalCredentialId(
+                event.target.value === "workspace" ? undefined : event.target.value,
+              )
+            }
+          >
+            <option value="workspace">워크스페이스 기본 연결</option>
+            {personalCredentials
+              ?.filter((credential) => credential.status === "active")
+              .map((credential) => (
+                <option key={credential.id} value={credential.id}>
+                  내 연결 · {credential.label}
+                </option>
+              ))}
+          </select>
+          <span>내 연결 선택은 이 질문의 답변에만 적용됩니다.</span>
+        </div>
+      ) : null}
 
       <details className="mb-4 rounded-xl border border-border p-3 lg:hidden">
         <summary className="cursor-pointer text-sm font-medium">최근 대화 보기</summary>

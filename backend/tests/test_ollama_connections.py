@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -99,7 +100,7 @@ async def database(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(secrets.credential_vault, "delete", delete_secret)
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[get_current_user] = lambda: AuthUser(
-        id=str(current_owner[0]), metadata={}
+        id=str(current_owner[0]), last_sign_in_at=datetime.now(UTC), metadata={}
     )
     try:
         yield factory, owner, outsider, current_owner, vault
@@ -161,6 +162,12 @@ async def test_owner_boundary_base_url_and_key_rotation(database, monkeypatch) -
 
         changed = await client.put(
             f"{path}/{credential_id}", json={"baseUrl": "https://two.example"}
+        )
+        assert changed.status_code == 422
+
+        changed = await client.put(
+            f"{path}/{credential_id}",
+            json={"baseUrl": "https://two.example", "apiKey": "secret-one"},
         )
         assert changed.status_code == 200
         assert changed.json()["baseUrl"] == "https://two.example"
@@ -387,10 +394,10 @@ async def test_deleting_inline_workspace_retains_account_connection(database, mo
         credential_id = UUID(listed[0]["id"])
     async with factory() as session:
         credential = await session.get(ProviderCredential, credential_id)
-        assert credential.workspace_id == workspace_id
+        assert credential.workspace_id is None
         await session.delete(await session.get(Workspace, workspace_id))
         await session.commit()
-        await session.refresh(credential)
+        assert await session.get(ProviderCredential, credential_id) is not None
         assert credential.workspace_id is None
         assert credential.owner_id == owner
         assert credential.base_url == "https://inline.example"

@@ -255,7 +255,7 @@ class AgentWorkflowService:
             action="source.created",
             target_type="source",
             target_id=source.id,
-            details={"kind": kind},
+            details={"kind": kind, "generationMethod": "external_agent"},
         )
         await self.session.commit()
         return source_info(source)
@@ -321,6 +321,7 @@ class AgentWorkflowService:
             action="source.edited",
             target_type="source",
             target_id=source.id,
+            details={"generationMethod": "external_agent_edit"},
         )
         self.session.add(source)
         await self.session.commit()
@@ -369,6 +370,7 @@ class AgentWorkflowService:
             action="transcript.edited",
             target_type="source",
             target_id=source.id,
+            details={"generationMethod": "external_agent_edit"},
         )
         self.session.add(source)
         await self.session.commit()
@@ -513,6 +515,7 @@ class AgentWorkflowService:
         expected_revision: int,
         expected_fingerprint: str,
         result: dict[str, Any] | ExtractionResult,
+        provenance: dict[str, str] | None = None,
     ) -> AnalysisSubmission:
         if self.session.bind is None:
             raise RuntimeError("Agent workflow session must be bound to PostgreSQL")
@@ -528,6 +531,7 @@ class AgentWorkflowService:
                 expected_revision=expected_revision,
                 expected_fingerprint=expected_fingerprint,
                 result=result,
+                provenance=provenance,
             )
 
     async def _submit_analysis_locked(
@@ -539,6 +543,7 @@ class AgentWorkflowService:
         expected_revision: int,
         expected_fingerprint: str,
         result: dict[str, Any] | ExtractionResult,
+        provenance: dict[str, str] | None = None,
     ) -> AnalysisSubmission:
         source = await self.repository.source(
             owner_id,
@@ -624,6 +629,11 @@ class AgentWorkflowService:
                     "phase": "extracted",
                     "result": extraction.model_dump(mode="json"),
                     "graph": resolved.model_dump(mode="json"),
+                    "provenance": {
+                        "generationMethod": "external_agent",
+                        "provenanceTrust": "self_reported",
+                        **(provenance or {}),
+                    },
                 }
                 source.processing_stage = ProcessingStage.ANALYZING
                 self.session.add(source)
@@ -675,6 +685,11 @@ class AgentWorkflowService:
                 action="analysis.completed",
                 target_type="source",
                 target_id=source.id,
+                details={
+                    "generationMethod": "external_agent",
+                    "provenanceTrust": "self_reported",
+                    **(source.analysis_checkpoint.get("provenance", {})),
+                },
             )
             self.session.add(source)
             await self.session.commit()

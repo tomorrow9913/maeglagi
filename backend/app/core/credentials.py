@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import get_settings
+from app.core.credential_vault import CredentialVault
 
 
 class CredentialUnavailableError(RuntimeError):
@@ -58,7 +59,7 @@ class SupabaseCredentialVault:
         return str(secret)
 
 
-credential_vault = SupabaseCredentialVault()
+credential_vault: CredentialVault = SupabaseCredentialVault()
 
 
 def _legacy_fernet() -> Fernet:

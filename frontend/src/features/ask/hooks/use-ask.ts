@@ -48,7 +48,7 @@ function readStored(workspaceId: string): State {
   }
 }
 
-export function useAsk(workspaceId: string) {
+export function useAsk(workspaceId: string, credentialId?: string) {
   const api = useApi();
   const [state, setState] = useState<State>({ activeId: "", conversations: [] });
   const [isStreaming, setIsStreaming] = useState(false);
@@ -115,7 +115,13 @@ export function useAsk(workspaceId: string) {
       controllerRef.current = controller;
 
       try {
-        for await (const event of api.ask(workspaceId, trimmed, controller.signal, history)) {
+        for await (const event of api.ask(
+          workspaceId,
+          trimmed,
+          controller.signal,
+          history,
+          credentialId,
+        )) {
           commit(reduceTurn(turn, event));
           if (turn.status !== "streaming") break;
         }
@@ -143,7 +149,7 @@ export function useAsk(workspaceId: string) {
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     },
-    [workspaceId, setTurns, api, turns, isRestored],
+    [workspaceId, setTurns, api, turns, isRestored, credentialId],
   );
 
   const ask = useCallback((question: string) => run(question), [run]);

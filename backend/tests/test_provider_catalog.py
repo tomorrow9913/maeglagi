@@ -160,3 +160,24 @@ def test_workspace_catalog_includes_defaults_and_excludes_retired_models(
         ]
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_workspace_ai_proxy_sees_team_credentials_and_only_callers_account_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace_id = uuid4()
+    user = AuthUser(id=str(uuid4()), metadata={})
+    session = SimpleNamespace(
+        exec=AsyncMock(return_value=SimpleNamespace(all=lambda: [])),
+    )
+    monkeypatch.setattr(ai_router, "workspace_access", AsyncMock())
+
+    await ai_router._workspace_credentials(workspace_id, user, session)
+
+    statement = session.exec.await_args.args[0]
+    sql = str(statement)
+    assert "provider_credentials.workspace_id =" in sql
+    assert "provider_credentials.owner_id =" in sql
+    assert "provider_credentials.workspace_id IS NULL" in sql
+    assert " OR " in sql

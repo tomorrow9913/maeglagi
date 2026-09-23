@@ -85,7 +85,7 @@ def request() -> CreateWorkspaceRequest:
 
 
 @pytest.mark.asyncio
-async def test_create_workspace_persists_valid_credential_fk(
+async def test_create_workspace_flushes_before_storing_account_credential(
     database: Session, valid_provider: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def store_secret(*_args: object, **kwargs: object):
@@ -105,7 +105,7 @@ async def test_create_workspace_persists_valid_credential_fk(
     workspace = database.get(Workspace, result.id)
     credential = database.query(ProviderCredential).one()
     assert workspace is not None
-    assert credential.workspace_id == workspace.id
+    assert credential.workspace_id is None
     assert credential.owner_id == owner
     assert database.execute(text("PRAGMA foreign_key_check")).all() == []
 

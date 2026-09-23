@@ -16,14 +16,21 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
   const { workspaceId } = use(params);
   const api = useApi();
   const { data, error, isLoading, reload } = useAsync(
-    (signal) => Promise.all([api.listAccountCredentials(signal), api.listProviders(signal)]),
+    (signal) =>
+      Promise.all([
+        api.listAccountCredentials(signal),
+        api.listProviderCredentials(workspaceId, signal),
+        api.listProviders(signal),
+      ]),
     [workspaceId],
   );
   const [modelRevision, setModelRevision] = useState(0);
-  const credentials = data?.[0] ?? [];
+  const accountCredentials = data?.[0] ?? [];
+  const workspaceCredentials = data?.[1] ?? [];
+  const credentials = [...workspaceCredentials, ...accountCredentials];
   // 서버 카탈로그가 비어 있어도 Ollama는 항상 고를 수 있으므로 공급자 목록이 비는 경우는 없습니다.
   const providers: AiProvider[] = data
-    ? withOllamaProvider(data[1].length > 0 ? data[1] : BOOTSTRAP_AI_PROVIDERS).map((item) => ({
+    ? withOllamaProvider(data[2].length > 0 ? data[2] : BOOTSTRAP_AI_PROVIDERS).map((item) => ({
         ...item,
         configured: credentials.some(
           (credential) => credential.provider === item.id && credential.status === "active",
@@ -36,7 +43,7 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
     <>
       <PageHeader
         title="설정"
-        description="계정 AI 연결과 이 워크스페이스에서 쓸 모델을 관리합니다."
+        description="팀 공용 AI 연결과 개인 연결의 대체 사용, 용도별 모델을 관리합니다."
       />
       <section className="mb-5 rounded-xl border border-border bg-card p-5">
         <h2 className="text-sm font-semibold">내 에이전트로 작업하기</h2>
@@ -66,13 +73,24 @@ export default function SettingsPage({ params }: { params: Promise<{ workspaceId
             />
           ) : null}
           <ApiKeyCard
-            credentials={credentials}
+            workspaceId={workspaceId}
+            credentials={workspaceCredentials}
             providers={providers}
             onUpdated={(affectsModels) => {
               reload();
               if (affectsModels) setModelRevision((value) => value + 1);
             }}
           />
+          <section className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+            워크스페이스 연결이 없는 공급자는 내 계정 연결로 대체됩니다. 개인 연결은{" "}
+            <Link
+              className="font-medium text-primary underline-offset-2 hover:underline"
+              href="/account/ai"
+            >
+              계정 AI 연결
+            </Link>
+            에서 관리할 수 있습니다.
+          </section>
           {hasCredential ? (
             <WorkspaceModelsCard
               key={workspaceId}

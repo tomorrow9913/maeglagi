@@ -3,6 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -42,9 +43,21 @@ async def _workspace_credentials(
 ) -> list[ProviderCredential]:
     await workspace_access(session, workspace_id, user)
     result = await session.exec(
-        select(ProviderCredential).where(
-            ProviderCredential.owner_id == user.id,
+        select(ProviderCredential)
+        .where(
             ProviderCredential.status == "active",
+            or_(
+                ProviderCredential.workspace_id == workspace_id,
+                (
+                    (ProviderCredential.owner_id == user.id)
+                    & (ProviderCredential.workspace_id.is_(None))
+                ),
+            ),
+        )
+        .order_by(
+            (ProviderCredential.workspace_id == workspace_id).desc(),
+            ProviderCredential.is_default.desc(),
+            ProviderCredential.created_at,
         )
     )
     return list(result.all())

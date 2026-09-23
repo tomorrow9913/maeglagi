@@ -162,7 +162,10 @@ async def get_workspace_models(
     workspace = await _owned_workspace(workspace_id, user, session)
     if provider is not None and provider not in {adapter.id for adapter in provider_registry.all()}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Unknown provider")
-    options = await options_for_workspace(session, workspace.id, user.id, provider)
+    # Workspace model settings are shared and background jobs run as the data
+    # owner. Only shared credentials and the workspace owner's fallback can be
+    # persisted here; a member's personal credential remains available to Ask.
+    options = await options_for_workspace(session, workspace.id, workspace.owner_id, provider)
     return _response(options, workspace.model_settings, await _locked_roles(session, workspace))
 
 
@@ -178,7 +181,7 @@ async def update_workspace_models(
     workspace = await _owned_workspace(
         workspace_id, user, session, for_update=True, minimum_role="admin"
     )
-    options = await options_for_workspace(session, workspace.id, user.id)
+    options = await options_for_workspace(session, workspace.id, workspace.owner_id)
     problems = invalid_selections(body.selections, options)
     if problems:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, " ".join(problems))
@@ -195,7 +198,7 @@ async def update_workspace_models(
                 legacy = await IngestionPipeline(settings).provider_with_model(
                     session,
                     workspace_id=workspace.id,
-                    owner_id=user.id,
+                    owner_id=workspace.owner_id,
                     role=ModelRole.EMBEDDING,
                 )
                 unchanged = requested == ModelOption(provider=legacy.adapter.id, model=legacy.model)
