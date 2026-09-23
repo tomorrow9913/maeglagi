@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -29,6 +29,9 @@ from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter()
+RECENT_AUTH_WINDOW = timedelta(minutes=10)
+RECENT_AUTH_REQUIRED = "Recent authentication required"
+OLLAMA_ENDPOINT_KEY_REQUIRED = "Changing an Ollama endpoint requires a new API key"
 
 
 def _credential_key(provider: str, value: str | None) -> str:
@@ -56,6 +59,20 @@ def _base_url(provider: str, value: str | None, *, existing: str | None = None) 
 
 def _key_hint(provider: str, key: str) -> str:
     return ("configured" if key else "none") if provider == "ollama" else key[-4:]
+
+
+def _require_recent_authentication(user: CurrentUser) -> None:
+    signed_in_at = user.last_sign_in_at
+    if signed_in_at is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, RECENT_AUTH_REQUIRED)
+    if signed_in_at.tzinfo is None:
+        signed_in_at = signed_in_at.replace(tzinfo=UTC)
+    if datetime.now(UTC) - signed_in_at > RECENT_AUTH_WINDOW:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, RECENT_AUTH_REQUIRED)
+
+
+def _ollama_endpoint_changed(credential: ProviderCredential, base_url: str | None) -> bool:
+    return credential.provider == "ollama" and base_url != credential.base_url
 
 
 async def _validate(provider: str, key: str, base_url: str | None) -> tuple[bool, str]:
@@ -233,6 +250,11 @@ async def rotate_credential(
         if body.base_url is not None
         else credential.base_url
     )
+    endpoint_changed = _ollama_endpoint_changed(credential, base_url)
+    if endpoint_changed:
+        _require_recent_authentication(user)
+        if "api_key" not in body.model_fields_set or not body.api_key:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, OLLAMA_ENDPOINT_KEY_REQUIRED)
     key = (
         await resolve_credential_secret(session, credential)
         if credential.provider == "ollama" and "api_key" not in body.model_fields_set
@@ -419,6 +441,10 @@ async def upsert_default_credential(
         if body.base_url is not None or credential is None or body.provider != "ollama"
         else credential.base_url
     )
+    if credential is not None and _ollama_endpoint_changed(credential, base_url):
+        _require_recent_authentication(user)
+        if not body.api_key:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, OLLAMA_ENDPOINT_KEY_REQUIRED)
     key = (
         await resolve_credential_secret(session, credential)
         if credential is not None and body.provider == "ollama" and body.api_key is None

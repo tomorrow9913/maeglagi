@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -214,6 +215,69 @@ def test_invalid_provider_key_is_rejected_before_vault_write(setup_api, monkeypa
     assert case.create.await_count == 0
     assert case.update.await_count == 0
     assert case.second.key_hint == "0002"
+
+
+def test_changing_ollama_endpoint_requires_recent_login_and_a_new_key(setup_api, monkeypatch):
+    case = setup_api
+    case.second.provider = "ollama"
+    case.second.base_url = "https://old-ollama.example"
+    path = f"/api/v1/workspaces/{case.workspace.id}/provider-credentials/{case.second.id}"
+    reveal = AsyncMock(return_value="stored-secret")
+    monkeypatch.setattr(routes, "resolve_credential_secret", reveal)
+
+    stale = case.client.put(
+        path,
+        json={"baseUrl": "https://new-ollama.example", "apiKey": "new-secret"},
+    )
+    assert stale.status_code == 403
+    assert stale.json()["detail"] == routes.RECENT_AUTH_REQUIRED
+    reveal.assert_not_awaited()
+
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=str(case.workspace.owner_id),
+        last_sign_in_at=datetime.now(UTC),
+        metadata={},
+    )
+    missing_key = case.client.put(path, json={"baseUrl": "https://new-ollama.example"})
+    assert missing_key.status_code == 422
+    assert missing_key.json()["detail"] == routes.OLLAMA_ENDPOINT_KEY_REQUIRED
+    reveal.assert_not_awaited()
+
+    changed = case.client.put(
+        path,
+        json={"baseUrl": "https://new-ollama.example", "apiKey": "new-secret"},
+    )
+    assert changed.status_code == 200
+    assert case.second.base_url == "https://new-ollama.example"
+    reveal.assert_not_awaited()
+
+
+def test_legacy_default_route_does_not_reveal_ollama_key_before_endpoint_checks(
+    setup_api, monkeypatch
+):
+    case = setup_api
+    case.second.provider = "ollama"
+    case.second.base_url = "https://old-ollama.example"
+    reveal = AsyncMock(return_value="stored-secret")
+    monkeypatch.setattr(routes, "resolve_credential_secret", reveal)
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=str(case.workspace.owner_id),
+        last_sign_in_at=datetime.now(UTC),
+        metadata={},
+    )
+
+    response = case.client.put(
+        f"/api/v1/workspaces/{case.workspace.id}/llm-key",
+        json={
+            "provider": "ollama",
+            "label": case.second.label,
+            "baseUrl": "https://new-ollama.example",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == routes.OLLAMA_ENDPOINT_KEY_REQUIRED
+    reveal.assert_not_awaited()
 
 
 @pytest.mark.asyncio

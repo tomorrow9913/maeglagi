@@ -40,6 +40,8 @@ function noticeFromQuery(params: URLSearchParams): Notice | null {
     };
   if (params.get("reason") === "expired")
     return { tone: "info", text: "로그인이 만료됐습니다. 다시 로그인해 주세요." };
+  if (params.get("reason") === "reauth")
+    return { tone: "info", text: "보안 설정을 변경하려면 다시 로그인해 주세요." };
   return null;
 }
 

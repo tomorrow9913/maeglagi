@@ -29,6 +29,7 @@ import {
   CREDENTIAL_DEFAULT_MESSAGE,
   credentialDefaultErrorMessage,
   credentialDeleteErrorMessage,
+  credentialServerDetail,
   credentialStatusInfo,
 } from "../lib/credential-messages";
 import { ollamaUrlShapeError } from "../lib/ollama-url";
@@ -100,7 +101,9 @@ export function ApiKeyCard({
   const isEditing = mode === "edit" && editingCredential !== undefined;
   // 키가 저장돼 있지 않은 Ollama 연결에는 유지·제거할 대상이 없으므로 선택지를 보여주지 않습니다.
   const choosesKeyAction = isEditing && isOllama && hasStoredKey(editingCredential);
-  const needsValidation = !choosesKeyAction || keyAction === "replace";
+  const endpointChanged =
+    isEditing && isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "");
+  const needsValidation = endpointChanged || !choosesKeyAction || keyAction === "replace";
   const trimmedLabel = label.trim();
   const duplicateLabel =
     !isEditing &&
@@ -154,7 +157,7 @@ export function ApiKeyCard({
     setIsSaving(true);
     try {
       if (isEditing) {
-        const keepsKey = choosesKeyAction && keyAction === "keep";
+        const keepsKey = choosesKeyAction && keyAction === "keep" && !endpointChanged;
         await (workspaceId
           ? api.rotateProviderCredential(workspaceId, editingCredential.id, {
               ...(isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "")
@@ -183,6 +186,11 @@ export function ApiKeyCard({
       closeForm();
       onUpdated(true);
     } catch (error) {
+      if (credentialServerDetail(error).includes("Recent authentication required")) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        window.location.assign(`/login?reason=reauth&next=${encodeURIComponent(next)}`);
+        return;
+      }
       toast.error(toUserMessage(error, "AI 연결을 저장하지 못했습니다."));
     } finally {
       setIsSaving(false);
@@ -434,8 +442,16 @@ export function ApiKeyCard({
             <ApiKeyField
               id="settings-key"
               provider={provider}
-              authMode={isOllama ? "optionalApiKey" : "apiKey"}
-              label={isOllama ? "API key (선택 사항)" : isEditing ? "새 API key" : "API key"}
+              authMode={isOllama && !endpointChanged ? "optionalApiKey" : "apiKey"}
+              label={
+                endpointChanged
+                  ? "새 API key"
+                  : isOllama
+                    ? "API key (선택 사항)"
+                    : isEditing
+                      ? "새 API key"
+                      : "API key"
+              }
               value={apiKey}
               baseUrlField={
                 isOllama
@@ -459,6 +475,11 @@ export function ApiKeyCard({
             >
               {choosesKeyAction ? (
                 <div className="space-y-2">
+                  {endpointChanged ? (
+                    <p className="text-xs text-warning">
+                      서버 주소를 바꾸면 기존 키를 전달하지 않습니다. 다시 로그인한 뒤 새 API key를 입력해 주세요.
+                    </p>
+                  ) : null}
                   <p id="settings-key-action-label" className="text-sm font-medium">
                     기존 API key
                   </p>
