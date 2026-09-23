@@ -548,7 +548,30 @@ export const mockApi: MaeglagiApi = {
     await delay(MOCK_LATENCY_MS, signal);
     if (!state.workspaces.some((item) => item.id === workspaceId))
       throw new ApiError(404, "워크스페이스를 찾을 수 없습니다.");
-    return state.accountCredentials.map((item) => ({ ...item }));
+    return state.accountCredentials.filter((item) => item.id.startsWith(`${workspaceId}:`)).map((item) => ({ ...item }));
+  },
+
+  async createWorkspaceCredential(workspaceId, input, signal) {
+    await delay(MOCK_LATENCY_MS * 2, signal);
+    const saved = storeKey(workspaceId, input.provider, input.apiKey ?? "", input.label, input.baseUrl);
+    saved.id = `${workspaceId}:${saved.id}`;
+    return { ...saved };
+  },
+
+  async setDefaultWorkspaceCredential(workspaceId, credentialId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const items = state.accountCredentials.filter((item) => item.id.startsWith(`${workspaceId}:`));
+    const credential = items.find((item) => item.id === credentialId);
+    if (!credential) throw new ApiError(404, "연결을 찾을 수 없습니다.");
+    for (const item of items) item.isDefault = item.id === credentialId;
+    return { ...credential };
+  },
+
+  async deleteWorkspaceCredential(workspaceId, credentialId, signal) {
+    await delay(MOCK_LATENCY_MS, signal);
+    const index = state.accountCredentials.findIndex((item) => item.id === credentialId && item.id.startsWith(`${workspaceId}:`));
+    if (index < 0) throw new ApiError(404, "연결을 찾을 수 없습니다.");
+    state.accountCredentials.splice(index, 1);
   },
 
   async listAccountCredentials(signal) {
@@ -1016,7 +1039,7 @@ export const mockApi: MaeglagiApi = {
     return graph;
   },
 
-  async *ask(_workspaceId, question, signal): AsyncGenerator<AnswerEvent, void, undefined> {
+  async *ask(_workspaceId, question, signal, _history = [], _credentialId?: string): AsyncGenerator<AnswerEvent, void, undefined> {
     await delay(MOCK_LATENCY_MS, signal);
 
     const matched = answers.find((answer) => answer.match.test(question));

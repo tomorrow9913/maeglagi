@@ -127,6 +127,15 @@ export const httpApi: MaeglagiApi = {
   listProviderCredentials: (workspaceId, signal) =>
     apiFetch<WorkspaceSecrets[]>(`/workspaces/${workspaceId}/provider-credentials`, { signal }),
 
+  createWorkspaceCredential: (workspaceId, input, signal) =>
+    apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/provider-credentials`, { method: "POST", body: JSON.stringify(input), signal }),
+
+  setDefaultWorkspaceCredential: (workspaceId, credentialId, signal) =>
+    apiFetch<WorkspaceSecrets>(`/workspaces/${workspaceId}/provider-credentials/${credentialId}/default`, { method: "PUT", signal }),
+
+  deleteWorkspaceCredential: (workspaceId, credentialId, signal) =>
+    apiFetch<void>(`/workspaces/${workspaceId}/provider-credentials/${credentialId}`, { method: "DELETE", signal }),
+
   listAccountCredentials: (signal) =>
     apiFetch<WorkspaceSecrets[]>("/provider-credentials", { signal }),
 
@@ -239,10 +248,10 @@ export const httpApi: MaeglagiApi = {
     );
   },
 
-  ask(workspaceId, question, signal, history = []) {
+  ask(workspaceId, question, signal, history = [], credentialId) {
     return apiStream(`/workspaces/${workspaceId}/ask`, {
       method: "POST",
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ question, history, ...(credentialId ? { credentialId } : {}) }),
       signal,
     }) as AsyncIterable<AnswerEvent>;
   },

@@ -475,6 +475,34 @@ async def test_selected_model_uses_the_key_that_offers_it(monkeypatch: pytest.Mo
     assert (resolved.api_key, resolved.model) == ("second", "gpt-second")
 
 
+async def test_ask_can_explicitly_use_the_requesters_account_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def secret(session: Any, credential: Any) -> str:
+        return credential.label
+
+    monkeypatch.setattr(pipeline_module, "resolve_credential_secret", secret)
+    session = Session(
+        {"answer": {"provider": "openai", "model": "gpt-workspace"}}, ["openai", "openai"]
+    )
+    workspace_credential, personal_credential = session.credentials
+    workspace_credential.label = "workspace"
+    personal_credential.label = "personal"
+    personal_credential.workspace_id = None
+
+    resolved = await IngestionPipeline(
+        Settings(_env_file=None, provider_default_models={"openai": {"answer": "gpt-personal"}})
+    ).provider_with_model(
+        session,  # type: ignore[arg-type]
+        workspace_id=WORKSPACE,
+        owner_id=OWNER,
+        role=ModelRole.ANSWER,
+        credential_id=personal_credential.id,
+    )
+
+    assert (resolved.api_key, resolved.model) == ("personal", "gpt-personal")
+
+
 async def test_first_and_later_indexes_keep_the_legacy_model_without_saving_a_choice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

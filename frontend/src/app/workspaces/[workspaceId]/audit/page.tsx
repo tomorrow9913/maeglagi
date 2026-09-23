@@ -36,11 +36,16 @@ const actionLabel: Record<string, string> = {
   "project.created": "프로젝트 등록",
   "project.updated": "프로젝트 수정",
   "project.participants_updated": "프로젝트 참여자 변경",
+  "credential.created": "워크스페이스 AI 연결 등록",
+  "credential.rotated": "워크스페이스 AI 연결 수정",
+  "credential.default_changed": "기본 AI 연결 변경",
+  "credential.deleted": "워크스페이스 AI 연결 삭제",
 };
 
 function detailSummary(details: Record<string, unknown>): string | null {
   const values = [
     typeof details.provider === "string" ? `프로바이더 ${details.provider}` : null,
+    typeof details.label === "string" ? `연결 ${details.label}` : null,
     typeof details.model === "string" ? `모델 ${details.model}` : null,
     typeof details.kind === "string" ? `유형 ${details.kind}` : null,
     typeof details.role === "string" ? `권한 ${details.role}` : null,

@@ -40,6 +40,7 @@ INTERNAL_ERROR = "답변을 만드는 중 문제가 생겼습니다. 잠시 후 
 class AskRequest(BaseModel):
     question: str = Field(max_length=2000)
     history: list["AskHistoryTurn"] = Field(default_factory=list, max_length=6)
+    credential_id: UUID | None = Field(default=None, alias="credentialId")
 
     @field_validator("question")
     @classmethod
@@ -111,7 +112,11 @@ async def ask(
     ingestion = IngestionPipeline(settings)
     try:
         provider = await ingestion.provider_with_model(
-            session, workspace_id=workspace_id, owner_id=user.id, role=ModelRole.ANSWER
+            session,
+            workspace_id=workspace_id,
+            owner_id=user.id,
+            role=ModelRole.ANSWER,
+            credential_id=body.credential_id,
         )
     except IngestionError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc

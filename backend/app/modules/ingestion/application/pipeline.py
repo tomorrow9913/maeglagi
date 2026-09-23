@@ -2,7 +2,7 @@ from datetime import date
 from typing import NamedTuple
 from uuid import UUID
 
-from sqlalchemy import delete
+from sqlalchemy import delete, or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -102,15 +102,22 @@ class IngestionPipeline:
         workspace_id: UUID,
         owner_id: UUID,
         role: ModelRole,
+        credential_id: UUID | None = None,
     ) -> ResolvedProvider:
-        """Resolve the workspace model through the requesting account's own connection."""
+        """Resolve a shared workspace connection first, then the requester's account connection."""
         capability = ROLE_CAPABILITY[role]
         workspace = await session.get(Workspace, workspace_id)
         chosen = selection_of(workspace.model_settings if workspace else None, role)
         result = await session.exec(
             select(ProviderCredential)
             .where(
-                ProviderCredential.owner_id == owner_id,
+                or_(
+                    ProviderCredential.workspace_id == workspace_id,
+                    (
+                        (ProviderCredential.workspace_id.is_(None))
+                        & (ProviderCredential.owner_id == owner_id)
+                    ),
+                ),
                 ProviderCredential.status == "active",
             )
             .order_by(
@@ -120,7 +127,15 @@ class IngestionPipeline:
             )
         )
         credentials = list(result.all())
-        if chosen is not None:
+        if credential_id is not None:
+            credentials = [
+                credential
+                for credential in credentials
+                if credential.id == credential_id
+                and credential.workspace_id is None
+                and credential.owner_id == owner_id
+            ]
+        if chosen is not None and credential_id is None:
             credentials = [
                 c
                 for c in credentials
@@ -146,7 +161,7 @@ class IngestionPipeline:
                 api_key = await resolve_credential_secret(session, credential)
             except CredentialUnavailableError:
                 continue
-            if chosen is not None:
+            if chosen is not None and credential_id is None:
                 if needs_key_match:
                     try:
                         offered = await adapter.list_model_infos(api_key)
@@ -162,7 +177,7 @@ class IngestionPipeline:
             else:
                 model = self._default_model(credential.provider, role)
             return ResolvedProvider(adapter, api_key, model)
-        if chosen is not None:
+        if chosen is not None and credential_id is None:
             raise MissingCapabilityCredentialError(
                 "선택한 모델을 제공하는 API key가 없습니다.",
                 capability=capability,

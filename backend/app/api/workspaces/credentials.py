@@ -25,6 +25,7 @@ from app.modules.context_engine.infrastructure.credential_validation import (
     validate_provider_credential,
 )
 from app.modules.workspaces.application.access import workspace_access
+from app.modules.workspaces.application.audit import add_audit_event
 from app.modules.workspaces.infrastructure.models import ProviderCredential, Workspace
 
 router = APIRouter()
@@ -118,7 +119,9 @@ async def _owned_credential(
     workspace_id: UUID | None, credential_id: UUID, user: CurrentUser, session: AsyncSession
 ) -> ProviderCredential:
     credential = await session.get(ProviderCredential, credential_id)
-    if credential is None or credential.owner_id != user.id:
+    if credential is None or credential.workspace_id != workspace_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Credential not found")
+    if workspace_id is None and credential.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Credential not found")
     return credential
 
@@ -126,13 +129,15 @@ async def _owned_credential(
 async def _workspace_credentials(
     workspace_id: UUID | None, user: CurrentUser, session: AsyncSession
 ) -> list[ProviderCredential]:
-    result = await session.exec(
-        select(ProviderCredential)
-        .where(
+    statement = select(ProviderCredential)
+    if workspace_id is None:
+        statement = statement.where(
             ProviderCredential.owner_id == user.id,
+            ProviderCredential.workspace_id.is_(None),
         )
-        .order_by(ProviderCredential.created_at)
-    )
+    else:
+        statement = statement.where(ProviderCredential.workspace_id == workspace_id)
+    result = await session.exec(statement.order_by(ProviderCredential.created_at))
     return list(result.all())
 
 
@@ -168,7 +173,8 @@ async def add_credential(
 ) -> CredentialResponse:
     await _lock_account(session, user.id)
     if workspace_id is not None:
-        await _owned_workspace(workspace_id, user, session, for_update=True)
+        access = await workspace_access(session, workspace_id, user, minimum_role="admin")
+        await _owned_workspace(access.workspace.id, user, session, for_update=True)
     key = _credential_key(body.provider, body.api_key)
     base_url = _base_url(body.provider, body.base_url)
     valid, message = await _validate(body.provider, key, base_url)
@@ -184,11 +190,21 @@ async def add_credential(
         label=body.label,
         key_hint=_key_hint(body.provider, key),
         base_url=base_url,
-        is_default=workspace_id is None and not any(item.is_default for item in credentials),
+        is_default=not any(item.is_default for item in credentials),
     )
     if key:
         await _set_secret(session, credential, key)
     session.add(credential)
+    if workspace_id is not None:
+        add_audit_event(
+            session,
+            workspace_id=workspace_id,
+            actor=user,
+            action="credential.created",
+            target_type="provider_credential",
+            target_id=credential.id,
+            details={"provider": credential.provider, "label": credential.label},
+        )
     await session.commit()
     await session.refresh(credential)
     return _response(credential)
@@ -207,7 +223,8 @@ async def rotate_credential(
 ) -> CredentialResponse:
     await _lock_account(session, user.id)
     if workspace_id is not None:
-        await _owned_workspace(workspace_id, user, session, for_update=True)
+        access = await workspace_access(session, workspace_id, user, minimum_role="admin")
+        await _owned_workspace(access.workspace.id, user, session, for_update=True)
     credential = await _owned_credential(workspace_id, credential_id, user, session)
     # Missing Ollama fields preserve the existing connection and secret. Legacy rows
     # without base_url continue to use the administrator endpoint.
@@ -230,6 +247,16 @@ async def rotate_credential(
     credential.status = "active"
     credential.updated_at = datetime.now(UTC)
     session.add(credential)
+    if workspace_id is not None:
+        add_audit_event(
+            session,
+            workspace_id=workspace_id,
+            actor=user,
+            action="credential.rotated",
+            target_type="provider_credential",
+            target_id=credential.id,
+            details={"provider": credential.provider, "label": credential.label},
+        )
     await session.commit()
     await session.refresh(credential)
     return _response(credential)
@@ -244,7 +271,8 @@ async def choose_default_credential(
 ) -> CredentialResponse:
     await _lock_account(session, user.id)
     if workspace_id is not None:
-        await _owned_workspace(workspace_id, user, session, for_update=True)
+        access = await workspace_access(session, workspace_id, user, minimum_role="admin")
+        await _owned_workspace(access.workspace.id, user, session, for_update=True)
     credential = await _owned_credential(workspace_id, credential_id, user, session)
     if credential.status != "active":
         raise HTTPException(status.HTTP_409_CONFLICT, "Credential is not active")
@@ -257,6 +285,16 @@ async def choose_default_credential(
     credential.is_default = True
     credential.updated_at = datetime.now(UTC)
     session.add(credential)
+    if workspace_id is not None:
+        add_audit_event(
+            session,
+            workspace_id=workspace_id,
+            actor=user,
+            action="credential.default_changed",
+            target_type="provider_credential",
+            target_id=credential.id,
+            details={"provider": credential.provider, "label": credential.label},
+        )
     await session.commit()
     await session.refresh(credential)
     return _response(credential)
@@ -270,21 +308,21 @@ async def remove_credential(
     workspace_id: UUID | None, credential_id: UUID, user: CurrentUser, session: Session
 ) -> None:
     await _lock_account(session, user.id)
-    workspace = (
-        await _owned_workspace(workspace_id, user, session, for_update=True)
-        if workspace_id is not None
-        else None
-    )
+    workspace = None
+    if workspace_id is not None:
+        await workspace_access(session, workspace_id, user, minimum_role="admin")
+        workspace = await _owned_workspace(workspace_id, user, session, for_update=True)
     credential = await _owned_credential(workspace_id, credential_id, user, session)
     credentials = await _workspace_credentials(workspace_id, user, session)
     if credential.is_default and len(credentials) > 1:
         raise HTTPException(status.HTTP_409_CONFLICT, "Choose another default before deletion")
-    workspace_rows = (
-        await session.exec(select(Workspace).where(Workspace.owner_id == user.id))
-    ).all()
-    workspaces = [item for item in workspace_rows if isinstance(item, Workspace)]
-    if workspace is not None and all(item.id != workspace.id for item in workspaces):
-        workspaces.append(workspace)
+    if workspace_id is None:
+        workspace_rows = (
+            await session.exec(select(Workspace).where(Workspace.owner_id == user.id))
+        ).all()
+        workspaces = [item for item in workspace_rows if isinstance(item, Workspace)]
+    else:
+        workspaces = [workspace] if workspace is not None else []
     selections = [
         selection
         for owned in workspaces
@@ -310,6 +348,16 @@ async def remove_credential(
         )
     if credential.vault_secret_id is not None:
         await credential_vault.delete(session, secret_id=credential.vault_secret_id)
+    if workspace_id is not None:
+        add_audit_event(
+            session,
+            workspace_id=workspace_id,
+            actor=user,
+            action="credential.deleted",
+            target_type="provider_credential",
+            target_id=credential.id,
+            details={"provider": credential.provider, "label": credential.label},
+        )
     await session.delete(credential)
     await session.commit()
 
@@ -321,11 +369,20 @@ async def get_default_credential(
     await _owned_workspace(workspace_id, user, session)
     result = await session.exec(
         select(ProviderCredential).where(
-            ProviderCredential.owner_id == user.id,
+            ProviderCredential.workspace_id == workspace_id,
             ProviderCredential.is_default.is_(True),
         )
     )
     credential = result.first()
+    if credential is None:
+        fallback = await session.exec(
+            select(ProviderCredential).where(
+                ProviderCredential.workspace_id.is_(None),
+                ProviderCredential.owner_id == user.id,
+                ProviderCredential.is_default.is_(True),
+            )
+        )
+        credential = fallback.first()
     return _response(credential) if credential else None
 
 
@@ -337,10 +394,11 @@ async def upsert_default_credential(
     session: Session,
 ) -> CredentialResponse:
     await _lock_account(session, user.id)
+    await workspace_access(session, workspace_id, user, minimum_role="admin")
     await _owned_workspace(workspace_id, user, session, for_update=True)
     existing_result = await session.exec(
         select(ProviderCredential).where(
-            ProviderCredential.owner_id == user.id,
+            ProviderCredential.workspace_id == workspace_id,
         )
     )
     credentials = list(existing_result.all())

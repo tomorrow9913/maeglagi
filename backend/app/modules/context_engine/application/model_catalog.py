@@ -1,6 +1,7 @@
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -59,14 +60,24 @@ async def options_for_key(
 async def options_for_workspace(
     session: AsyncSession, workspace_id: UUID, owner_id: UUID, provider: str | None = None
 ) -> dict[ModelRole, list[ModelOption]]:
-    """Models from the owner's active account connections for this workspace."""
+    """Models from shared workspace connections plus the requester's account connections."""
     statement = (
         select(ProviderCredential)
         .where(
-            ProviderCredential.owner_id == owner_id,
+            or_(
+                ProviderCredential.workspace_id == workspace_id,
+                (
+                    (ProviderCredential.workspace_id.is_(None))
+                    & (ProviderCredential.owner_id == owner_id)
+                ),
+            ),
             ProviderCredential.status == "active",
         )
-        .order_by(ProviderCredential.is_default.desc(), ProviderCredential.created_at)
+        .order_by(
+            (ProviderCredential.workspace_id == workspace_id).desc(),
+            ProviderCredential.is_default.desc(),
+            ProviderCredential.created_at,
+        )
     )
     if provider is not None:
         statement = statement.where(ProviderCredential.provider == provider)
