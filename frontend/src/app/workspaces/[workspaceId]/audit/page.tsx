@@ -1,13 +1,9 @@
 "use client";
 
-import { use, useState } from "react";
-import { Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { use, useMemo, useState } from "react";
 
 import { EmptyState, ErrorState, ListSkeleton } from "@/components/common/state-views";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -91,58 +87,40 @@ function analysisModelSummary(action: string, details: Record<string, unknown>):
 export default function AuditPage({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params);
   const api = useApi();
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"admin" | "editor" | "viewer">("editor");
-  const [busy, setBusy] = useState(false);
-  const workspace = useAsync((signal) => api.getWorkspace(workspaceId, signal), [workspaceId]);
-  const members = useAsync(
-    (signal) => api.listWorkspaceMembers(workspaceId, signal),
-    [workspaceId],
-  );
+  const [query, setQuery] = useState("");
+  const [origin, setOrigin] = useState("all");
+  const [action, setAction] = useState("all");
   const audit = useAsync(
     (signal) => api.listWorkspaceAuditEvents(workspaceId, signal),
     [workspaceId],
   );
 
-  const invite = async () => {
-    if (!email.trim()) return;
-    setBusy(true);
-    try {
-      await api.inviteWorkspaceMember(workspaceId, { email: email.trim(), role });
-      setEmail("");
-      toast.success("워크스페이스 멤버를 초대했습니다.");
-      members.reload();
-      audit.reload();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "초대하지 못했습니다.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const canManage = workspace.data?.role === "owner" || workspace.data?.role === "admin";
-
-  const changeRole = async (memberId: string, nextRole: "admin" | "editor" | "viewer") => {
-    try {
-      await api.updateWorkspaceMember(workspaceId, memberId, nextRole);
-      toast.success("멤버 권한을 변경했습니다.");
-      members.reload();
-      audit.reload();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "권한을 변경하지 못했습니다.");
-    }
-  };
-
-  const remove = async (memberId: string) => {
-    try {
-      await api.removeWorkspaceMember(workspaceId, memberId);
-      toast.success("멤버를 제거했습니다.");
-      members.reload();
-      audit.reload();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "멤버를 제거하지 못했습니다.");
-    }
-  };
+  const filteredEvents = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("ko-KR");
+    return (audit.data ?? []).filter((event) => {
+      if (origin !== "all" && event.origin !== origin) return false;
+      if (action !== "all" && event.action !== action) return false;
+      if (!needle) return true;
+      const searchable = [
+        event.actorEmail,
+        event.actorId,
+        event.origin,
+        event.action,
+        actionLabel[event.action],
+        event.targetType,
+        event.targetId,
+        ...Object.values(event.details).filter(
+          (value): value is string | number =>
+            typeof value === "string" || typeof value === "number",
+        ),
+      ];
+      return searchable.some((value) =>
+        String(value ?? "")
+          .toLocaleLowerCase("ko-KR")
+          .includes(needle),
+      );
+    });
+  }, [action, audit.data, origin, query]);
 
   return (
     <div className="space-y-6">
@@ -153,90 +131,39 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
         </p>
       </header>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">워크스페이스 공유</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {canManage ? (
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                aria-label="초대 이메일"
-                placeholder="team@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-              <Select value={role} onValueChange={(value) => setRole(value as typeof role)}>
-                <SelectTrigger className="sm:w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">관리자</SelectItem>
-                  <SelectItem value="editor">편집자</SelectItem>
-                  <SelectItem value="viewer">조회자</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button disabled={busy || !email.trim()} onClick={() => void invite()}>
-                초대
-              </Button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              멤버 초대와 권한 변경은 소유자와 관리자만 할 수 있습니다.
-            </p>
-          )}
-          {members.error ? (
-            <ErrorState error={members.error} onRetry={members.reload} />
-          ) : members.isLoading && !members.data ? (
-            <ListSkeleton count={2} label="멤버를 불러오는 중" />
-          ) : (
-            <ul className="divide-y rounded-md border">
-              {(members.data ?? []).map((member) => (
-                <li
-                  key={member.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
-                >
-                  <span className="min-w-0 truncate">{member.email || "워크스페이스 소유자"}</span>
-                  <div className="flex items-center gap-2">
-                    {canManage && member.role !== "owner" ? (
-                      <Select
-                        value={member.role}
-                        onValueChange={(value) =>
-                          void changeRole(member.id, value as "admin" | "editor" | "viewer")
-                        }
-                      >
-                        <SelectTrigger className="h-8 w-28" aria-label={`${member.email} 권한`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin">관리자</SelectItem>
-                          <SelectItem value="editor">편집자</SelectItem>
-                          <SelectItem value="viewer">조회자</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Badge variant="secondary">{member.role}</Badge>
-                    )}
-                    <span className="text-xs text-muted-foreground">
-                      {member.joinedAt ? "참여 중" : "초대 대기"}
-                    </span>
-                    {canManage && member.role !== "owner" ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${member.email} 제거`}
-                        onClick={() => void remove(member.id)}
-                      >
-                        <Trash2 className="size-4" aria-hidden />
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-[minmax(240px,1fr)_180px_220px]">
+        <Input
+          aria-label="감사 기록 검색"
+          placeholder="계정명, 모델명, 활동, 대상 검색"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <Select value={origin} onValueChange={setOrigin}>
+          <SelectTrigger aria-label="활동 경로">
+            <SelectValue placeholder="모든 활동 경로" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">모든 활동 경로</SelectItem>
+            <SelectItem value="web">WEB</SelectItem>
+            <SelectItem value="mcp">MCP</SelectItem>
+            <SelectItem value="api">API</SelectItem>
+            <SelectItem value="system">SYSTEM</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={action} onValueChange={setAction}>
+          <SelectTrigger aria-label="작업 유형">
+            <SelectValue placeholder="모든 작업 유형" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">모든 작업 유형</SelectItem>
+            {Object.entries(actionLabel).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">활동</h2>
@@ -249,6 +176,8 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
             title="아직 감사 기록이 없습니다"
             description="멤버 초대, 자료 등록, 질문과 분석 기록이 이곳에 쌓입니다."
           />
+        ) : !filteredEvents.length ? (
+          <EmptyState title="검색 결과가 없습니다" description="검색어나 필터를 변경해 보세요." />
         ) : (
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full min-w-[760px] text-left text-sm">
@@ -278,7 +207,7 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {audit.data.map((event) => {
+                {filteredEvents.map((event) => {
                   const summary = detailSummary(event.details);
                   const analysisModel = analysisModelSummary(event.action, event.details);
                   return (
@@ -300,9 +229,7 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
                       <td className="px-3 py-2.5 font-medium whitespace-nowrap">
                         {actionLabel[event.action] ?? event.action}
                       </td>
-                      <td className="max-w-64 px-3 py-2.5 text-xs">
-                        {analysisModel ?? "—"}
-                      </td>
+                      <td className="max-w-64 px-3 py-2.5 text-xs">{analysisModel ?? "—"}</td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">
                         <span>{event.targetType}</span>
                         {event.targetId ? (
