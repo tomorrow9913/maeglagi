@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -99,7 +100,7 @@ async def database(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(secrets.credential_vault, "delete", delete_secret)
     app.dependency_overrides[get_session] = session_override
     app.dependency_overrides[get_current_user] = lambda: AuthUser(
-        id=str(current_owner[0]), metadata={}
+        id=str(current_owner[0]), last_sign_in_at=datetime.now(UTC), metadata={}
     )
     try:
         yield factory, owner, outsider, current_owner, vault
