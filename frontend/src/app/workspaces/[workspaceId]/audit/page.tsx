@@ -30,18 +30,44 @@ const actionLabel: Record<string, string> = {
   "transcript.edited": "회의록 편집",
   "analysis.requested": "분석 요청",
   "analysis.completed": "분석 완료",
+  "transcription.completed": "음성 변환 완료",
+  "embedding.completed": "임베딩 완료",
+  "embedding.skipped": "임베딩 생략",
   "ask.asked": "질문",
   "person.created": "참여자 등록",
   "person.updated": "참여자 수정",
   "project.created": "프로젝트 등록",
   "project.updated": "프로젝트 수정",
   "project.participants_updated": "프로젝트 참여자 변경",
+  "credential.created": "워크스페이스 AI 연결 등록",
+  "credential.rotated": "워크스페이스 AI 연결 수정",
+  "credential.default_changed": "기본 AI 연결 변경",
+  "credential.deleted": "워크스페이스 AI 연결 삭제",
 };
 
 function detailSummary(details: Record<string, unknown>): string | null {
+  const methodLabel: Record<string, string> = {
+    direct_edit: "직접 편집",
+    service_model: "서비스 모델",
+    external_agent: "외부 에이전트 분석",
+    external_agent_edit: "외부 에이전트 편집",
+    lexical_fallback: "키워드 검색 대체",
+  };
   const values = [
+    typeof details.generationMethod === "string"
+      ? (methodLabel[details.generationMethod] ?? details.generationMethod)
+      : null,
     typeof details.provider === "string" ? `프로바이더 ${details.provider}` : null,
+    typeof details.label === "string" ? `연결 ${details.label}` : null,
     typeof details.model === "string" ? `모델 ${details.model}` : null,
+    typeof details.agentName === "string" ? `에이전트 ${details.agentName}` : null,
+    details.provenanceTrust === "self_reported" ? "에이전트 신고 정보" : null,
+    typeof details.chunkCount === "number" ? `청크 ${details.chunkCount}개` : null,
+    details.credentialScope === "workspace"
+      ? "워크스페이스 키"
+      : details.credentialScope === "account"
+        ? "개인 키"
+        : null,
     typeof details.kind === "string" ? `유형 ${details.kind}` : null,
     typeof details.role === "string" ? `권한 ${details.role}` : null,
     typeof details.before === "string" && typeof details.after === "string"
@@ -49,6 +75,17 @@ function detailSummary(details: Record<string, unknown>): string | null {
       : null,
   ].filter(Boolean);
   return values.length ? values.join(" · ") : null;
+}
+
+function analysisModelSummary(action: string, details: Record<string, unknown>): string | null {
+  if (action !== "analysis.completed") return null;
+  const provider = typeof details.provider === "string" ? details.provider : null;
+  const model = typeof details.model === "string" ? details.model : null;
+  if (provider && model) return `${provider} / ${model}`;
+  if (model) return model;
+  if (details.generationMethod === "external_agent") return "외부 에이전트 · 모델 미보고";
+  if (details.generationMethod === "direct_edit") return "직접 편집";
+  return "모델 정보 없음";
 }
 
 export default function AuditPage({ params }: { params: Promise<{ workspaceId: string }> }) {
@@ -230,6 +267,9 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
                     작업
                   </th>
                   <th scope="col" className="px-3 py-2.5 font-medium">
+                    분석 방식/모델
+                  </th>
+                  <th scope="col" className="px-3 py-2.5 font-medium">
                     대상
                   </th>
                   <th scope="col" className="px-3 py-2.5 font-medium">
@@ -240,6 +280,7 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
               <tbody className="divide-y">
                 {audit.data.map((event) => {
                   const summary = detailSummary(event.details);
+                  const analysisModel = analysisModelSummary(event.action, event.details);
                   return (
                     <tr key={event.id} className="align-top hover:bg-muted/20">
                       <td className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground">
@@ -258,6 +299,9 @@ export default function AuditPage({ params }: { params: Promise<{ workspaceId: s
                       </td>
                       <td className="px-3 py-2.5 font-medium whitespace-nowrap">
                         {actionLabel[event.action] ?? event.action}
+                      </td>
+                      <td className="max-w-64 px-3 py-2.5 text-xs">
+                        {analysisModel ?? "—"}
                       </td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">
                         <span>{event.targetType}</span>

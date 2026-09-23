@@ -22,7 +22,7 @@ function statusOf(error: unknown): number | undefined {
 }
 
 /** `ApiError.detail`은 응답 본문 전체(`{ detail: "..." }`)입니다. */
-function serverDetail(error: unknown): string {
+export function credentialServerDetail(error: unknown): string {
   if (!error || typeof error !== "object" || !("detail" in error)) return "";
   const body = (error as { detail: unknown }).detail;
   if (typeof body === "string") return body;
@@ -34,7 +34,7 @@ function serverDetail(error: unknown): string {
 export function credentialDeleteErrorMessage(error: unknown): string {
   const status = statusOf(error);
   if (status === 409) {
-    const detail = serverDetail(error);
+    const detail = credentialServerDetail(error);
     if (detail.includes("selected by a workspace model")) return CREDENTIAL_IN_USE_MESSAGE;
     if (detail.includes("another default")) return CREDENTIAL_DEFAULT_MESSAGE;
     if (detail.includes("last active credential")) return CREDENTIAL_LAST_FOR_PROVIDER_MESSAGE;

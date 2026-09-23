@@ -352,7 +352,7 @@ async def save_review(
         action="transcript.edited",
         target_type="source",
         target_id=source.id,
-        details={"revision": source.review_revision},
+        details={"revision": source.review_revision, "generationMethod": "direct_edit"},
     )
     session.add(source)
     await session.commit()

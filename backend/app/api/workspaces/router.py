@@ -205,7 +205,10 @@ async def create_workspace(
     account_credentials = list(
         (
             await session.exec(
-                select(ProviderCredential).where(ProviderCredential.owner_id == user.id)
+                select(ProviderCredential).where(
+                    ProviderCredential.owner_id == user.id,
+                    ProviderCredential.workspace_id.is_(None),
+                )
             )
         ).all()
     )
@@ -280,7 +283,7 @@ async def create_workspace(
             label = f"기본 {suffix}"
             suffix += 1
         credential = ProviderCredential(
-            workspace_id=workspace.id,
+            workspace_id=None,
             owner_id=user.id,
             provider=provider,
             label=label,

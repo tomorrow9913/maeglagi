@@ -29,6 +29,7 @@ import {
   CREDENTIAL_DEFAULT_MESSAGE,
   credentialDefaultErrorMessage,
   credentialDeleteErrorMessage,
+  credentialServerDetail,
   credentialStatusInfo,
 } from "../lib/credential-messages";
 import { ollamaUrlShapeError } from "../lib/ollama-url";
@@ -41,9 +42,17 @@ const hasStoredKey = (credential: WorkspaceSecrets) =>
 type KeyAction = "keep" | "replace" | "remove";
 
 const KEY_ACTIONS: { value: KeyAction; label: string; hint?: string }[] = [
-  { value: "keep", label: "유지", hint: "저장된 API key를 그대로 씁니다. 저장할 때 서버 연결을 확인합니다." },
+  {
+    value: "keep",
+    label: "유지",
+    hint: "저장된 API key를 그대로 씁니다. 저장할 때 서버 연결을 확인합니다.",
+  },
   { value: "replace", label: "교체" },
-  { value: "remove", label: "제거", hint: "저장된 API key를 지웁니다. 저장할 때 API key 없이 서버 연결을 확인합니다." },
+  {
+    value: "remove",
+    label: "제거",
+    hint: "저장된 API key를 지웁니다. 저장할 때 API key 없이 서버 연결을 확인합니다.",
+  },
 ];
 
 /**
@@ -56,11 +65,14 @@ export function ApiKeyCard({
   credentials,
   providers,
   onUpdated,
+  workspaceId,
 }: {
   credentials: WorkspaceSecrets[];
   providers: AiProvider[];
   /** 연결이 바뀐 뒤 호출됩니다. 쓸 수 있는 모델 목록까지 달라지는 변경이면 true입니다. */
   onUpdated: (affectsModels: boolean) => void;
+  /** 있으면 팀이 공유하는 워크스페이스 연결을, 없으면 개인 계정 연결을 관리합니다. */
+  workspaceId?: string;
 }) {
   const api = useApi();
   const [mode, setMode] = useState<"idle" | "add" | "edit">("idle");
@@ -89,7 +101,9 @@ export function ApiKeyCard({
   const isEditing = mode === "edit" && editingCredential !== undefined;
   // 키가 저장돼 있지 않은 Ollama 연결에는 유지·제거할 대상이 없으므로 선택지를 보여주지 않습니다.
   const choosesKeyAction = isEditing && isOllama && hasStoredKey(editingCredential);
-  const needsValidation = !choosesKeyAction || keyAction === "replace";
+  const endpointChanged =
+    isEditing && isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "");
+  const needsValidation = endpointChanged || !choosesKeyAction || keyAction === "replace";
   const trimmedLabel = label.trim();
   const duplicateLabel =
     !isEditing &&
@@ -143,25 +157,40 @@ export function ApiKeyCard({
     setIsSaving(true);
     try {
       if (isEditing) {
-        const keepsKey = choosesKeyAction && keyAction === "keep";
-        await api.rotateAccountCredential(editingCredential.id, {
-          ...(isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "")
-            ? { baseUrl: baseUrl.trim() }
-            : {}),
-          ...(keepsKey ? {} : { apiKey: keyAction === "remove" ? "" : apiKey.trim() }),
-        });
+        const keepsKey = choosesKeyAction && keyAction === "keep" && !endpointChanged;
+        await (workspaceId
+          ? api.rotateProviderCredential(workspaceId, editingCredential.id, {
+              ...(isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "")
+                ? { baseUrl: baseUrl.trim() }
+                : {}),
+              ...(keepsKey ? {} : { apiKey: keyAction === "remove" ? "" : apiKey.trim() }),
+            })
+          : api.rotateAccountCredential(editingCredential.id, {
+              ...(isOllama && baseUrl.trim() !== (editingCredential.baseUrl ?? "")
+                ? { baseUrl: baseUrl.trim() }
+                : {}),
+              ...(keepsKey ? {} : { apiKey: keyAction === "remove" ? "" : apiKey.trim() }),
+            }));
       } else {
-        await api.createAccountCredential({
+        const input = {
           provider,
           label: trimmedLabel,
           apiKey: apiKey.trim(),
           ...(isOllama ? { baseUrl: baseUrl.trim() } : {}),
-        });
+        };
+        await (workspaceId
+          ? api.createWorkspaceCredential(workspaceId, input)
+          : api.createAccountCredential(input));
       }
       toast.success(isEditing ? "AI 연결을 수정했습니다." : "AI 연결을 추가했습니다.");
       closeForm();
       onUpdated(true);
     } catch (error) {
+      if (credentialServerDetail(error).includes("Recent authentication required")) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        window.location.assign(`/login?reason=reauth&next=${encodeURIComponent(next)}`);
+        return;
+      }
       toast.error(toUserMessage(error, "AI 연결을 저장하지 못했습니다."));
     } finally {
       setIsSaving(false);
@@ -172,7 +201,9 @@ export function ApiKeyCard({
     if (defaultPendingId) return;
     setDefaultPendingId(credential.id);
     try {
-      await api.setDefaultAccountCredential(credential.id);
+      await (workspaceId
+        ? api.setDefaultWorkspaceCredential(workspaceId, credential.id)
+        : api.setDefaultAccountCredential(credential.id));
       toast.success("기본 연결을 바꿨습니다.");
       onUpdated(false);
     } catch (error) {
@@ -191,7 +222,9 @@ export function ApiKeyCard({
     setIsDeleting(true);
     setDeleteError(undefined);
     try {
-      await api.deleteAccountCredential(deleteTarget.id);
+      await (workspaceId
+        ? api.deleteWorkspaceCredential(workspaceId, deleteTarget.id)
+        : api.deleteAccountCredential(deleteTarget.id));
       toast.success("AI 연결을 삭제했습니다.");
       if (editingCredential?.id === deleteTarget.id) closeForm();
       setDeleteTarget(undefined);
@@ -212,16 +245,27 @@ export function ApiKeyCard({
           <KeyRound className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <h2 className="text-sm font-medium">계정 AI 연결</h2>
+              <h2 className="text-sm font-medium">
+                {workspaceId ? "워크스페이스 AI 연결" : "계정 AI 연결"}
+              </h2>
               {credentials.length > 0 ? (
-                <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={beginAdd}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={isBusy}
+                  onClick={beginAdd}
+                >
                   <Plus aria-hidden />
                   연결 추가
                 </Button>
               ) : null}
             </div>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {AI_CONNECTION_EXPLAINER} 이 계정의 모든 워크스페이스가 함께 씁니다.
+              {AI_CONNECTION_EXPLAINER}{" "}
+              {workspaceId
+                ? "관리자가 등록하며 모든 멤버의 분석과 기본 Ask에 우선 사용됩니다."
+                : "내가 참여한 워크스페이스에 공유 연결이 없을 때 사용합니다."}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{DEFAULT_CONNECTION_EXPLAINER}</p>
 
@@ -249,9 +293,13 @@ export function ApiKeyCard({
                       className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border px-3 py-2 text-sm"
                     >
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="text-muted-foreground">{providerName(credential.provider)}</span>
+                        <span className="text-muted-foreground">
+                          {providerName(credential.provider)}
+                        </span>
                         <span className="font-medium break-words">{credential.label}</span>
-                        {credential.isDefault ? <StatusBadge tone="info">기본 연결</StatusBadge> : null}
+                        {credential.isDefault ? (
+                          <StatusBadge tone="info">기본 연결</StatusBadge>
+                        ) : null}
                         <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
                         {credential.baseUrl ? (
                           <span className="min-w-0 text-xs break-all text-muted-foreground">
@@ -394,8 +442,16 @@ export function ApiKeyCard({
             <ApiKeyField
               id="settings-key"
               provider={provider}
-              authMode={isOllama ? "optionalApiKey" : "apiKey"}
-              label={isOllama ? "API key (선택 사항)" : isEditing ? "새 API key" : "API key"}
+              authMode={isOllama && !endpointChanged ? "optionalApiKey" : "apiKey"}
+              label={
+                endpointChanged
+                  ? "새 API key"
+                  : isOllama
+                    ? "API key (선택 사항)"
+                    : isEditing
+                      ? "새 API key"
+                      : "API key"
+              }
               value={apiKey}
               baseUrlField={
                 isOllama
@@ -419,6 +475,11 @@ export function ApiKeyCard({
             >
               {choosesKeyAction ? (
                 <div className="space-y-2">
+                  {endpointChanged ? (
+                    <p className="text-xs text-warning">
+                      서버 주소를 바꾸면 기존 키를 전달하지 않습니다. 다시 로그인한 뒤 새 API key를 입력해 주세요.
+                    </p>
+                  ) : null}
                   <p id="settings-key-action-label" className="text-sm font-medium">
                     기존 API key
                   </p>
@@ -436,7 +497,8 @@ export function ApiKeyCard({
                       if (!step || isSaving) return;
                       event.preventDefault();
                       const index = KEY_ACTIONS.findIndex((item) => item.value === keyAction);
-                      const next = KEY_ACTIONS[(index + step + KEY_ACTIONS.length) % KEY_ACTIONS.length];
+                      const next =
+                        KEY_ACTIONS[(index + step + KEY_ACTIONS.length) % KEY_ACTIONS.length];
                       setKeyAction(next.value);
                       resetSecretInputs();
                       event.currentTarget
@@ -483,7 +545,13 @@ export function ApiKeyCard({
               >
                 저장
               </Button>
-              <Button type="button" variant="ghost" size="sm" disabled={isSaving} onClick={closeForm}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isSaving}
+                onClick={closeForm}
+              >
                 취소
               </Button>
             </div>

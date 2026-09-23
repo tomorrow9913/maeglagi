@@ -99,6 +99,9 @@ export interface MaeglagiApi {
   getWorkspaceSecrets(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets | null>;
   /** 기존 워크스페이스 경로의 계정 연결 목록입니다. */
   listProviderCredentials(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceSecrets[]>;
+  createWorkspaceCredential(workspaceId: string, input: { provider: LlmProvider; label: string; apiKey?: string; baseUrl?: string }, signal?: AbortSignal): Promise<WorkspaceSecrets>;
+  setDefaultWorkspaceCredential(workspaceId: string, credentialId: string, signal?: AbortSignal): Promise<WorkspaceSecrets>;
+  deleteWorkspaceCredential(workspaceId: string, credentialId: string, signal?: AbortSignal): Promise<void>;
   /** 로그인 계정에서 공유하는 AI 연결 목록입니다. */
   listAccountCredentials(signal?: AbortSignal): Promise<WorkspaceSecrets[]>;
   createAccountCredential(
@@ -194,5 +197,6 @@ export interface MaeglagiApi {
     question: string,
     signal?: AbortSignal,
     history?: { question: string; answer: string }[],
+    credentialId?: string,
   ): AsyncIterable<AnswerEvent>;
 }

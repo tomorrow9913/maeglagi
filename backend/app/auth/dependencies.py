@@ -39,6 +39,7 @@ async def get_current_user(
     return AuthUser(
         id=payload["id"],
         email=payload.get("email"),
+        last_sign_in_at=payload.get("last_sign_in_at"),
         metadata=payload.get("user_metadata") or {},
     )
 

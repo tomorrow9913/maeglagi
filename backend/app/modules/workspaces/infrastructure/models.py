@@ -218,9 +218,6 @@ class Source(SQLModel, table=True):
 class ProviderCredential(SQLModel, table=True):
     __tablename__ = "provider_credentials"
     __table_args__ = (
-        UniqueConstraint(
-            "owner_id", "provider", "label", name="uq_provider_credential_owner_label"
-        ),
         CheckConstraint(
             "provider = 'ollama' or vault_secret_id is not null or encrypted_secret is not null",
             name="ck_provider_credentials_has_secret",
@@ -228,17 +225,39 @@ class ProviderCredential(SQLModel, table=True):
         Index("provider_credentials_workspace_id_idx", "workspace_id"),
         Index("provider_credentials_owner_id_idx", "owner_id"),
         Index(
-            "provider_credentials_one_default_idx",
+            "provider_credentials_account_label_idx",
+            "owner_id",
+            "provider",
+            "label",
+            unique=True,
+            postgresql_where=text("workspace_id is null"),
+        ),
+        Index(
+            "provider_credentials_workspace_label_idx",
+            "workspace_id",
+            "provider",
+            "label",
+            unique=True,
+            postgresql_where=text("workspace_id is not null"),
+        ),
+        Index(
+            "provider_credentials_account_default_idx",
             "owner_id",
             unique=True,
-            postgresql_where=text("is_default"),
+            postgresql_where=text("is_default and workspace_id is null"),
+        ),
+        Index(
+            "provider_credentials_workspace_default_idx",
+            "workspace_id",
+            unique=True,
+            postgresql_where=text("is_default and workspace_id is not null"),
         ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     workspace_id: UUID | None = Field(
         default=None,
-        sa_column=Column(ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True),
+        sa_column=Column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True),
     )
     owner_id: UUID
     provider: str = Field(max_length=40)
