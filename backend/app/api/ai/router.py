@@ -43,7 +43,8 @@ async def _workspace_credentials(
 ) -> list[ProviderCredential]:
     await workspace_access(session, workspace_id, user)
     result = await session.exec(
-        select(ProviderCredential).where(
+        select(ProviderCredential)
+        .where(
             ProviderCredential.status == "active",
             or_(
                 ProviderCredential.workspace_id == workspace_id,
@@ -52,6 +53,11 @@ async def _workspace_credentials(
                     & (ProviderCredential.workspace_id.is_(None))
                 ),
             ),
+        )
+        .order_by(
+            (ProviderCredential.workspace_id == workspace_id).desc(),
+            ProviderCredential.is_default.desc(),
+            ProviderCredential.created_at,
         )
     )
     return list(result.all())

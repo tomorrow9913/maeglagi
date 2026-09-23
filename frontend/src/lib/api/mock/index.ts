@@ -195,7 +195,7 @@ function storeKey(
   baseUrl?: string,
 ): WorkspaceSecrets {
   const existing = credentials.find((item) => item.provider === provider && item.label === label);
-  for (const item of credentials) item.isDefault = false;
+  const isDefault = existing?.isDefault ?? credentials.length === 0;
   const secrets: WorkspaceSecrets = {
     id: existing?.id ?? nextId("credential"),
     provider,
@@ -203,7 +203,7 @@ function storeKey(
     keyHint: apiKey === undefined ? existing?.keyHint ?? "none" : provider === "ollama" ? (apiKey.trim() ? "configured" : "none") : apiKey.trim().slice(-4),
     baseUrl: baseUrl ?? existing?.baseUrl ?? null,
     status: "active",
-    isDefault: true,
+    isDefault,
     updatedAt: new Date().toISOString(),
   };
   if (existing) credentials.splice(credentials.indexOf(existing), 1, secrets);

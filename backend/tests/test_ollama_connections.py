@@ -163,6 +163,12 @@ async def test_owner_boundary_base_url_and_key_rotation(database, monkeypatch) -
         changed = await client.put(
             f"{path}/{credential_id}", json={"baseUrl": "https://two.example"}
         )
+        assert changed.status_code == 422
+
+        changed = await client.put(
+            f"{path}/{credential_id}",
+            json={"baseUrl": "https://two.example", "apiKey": "secret-one"},
+        )
         assert changed.status_code == 200
         assert changed.json()["baseUrl"] == "https://two.example"
         assert next(iter(vault.values())) == "secret-one"
