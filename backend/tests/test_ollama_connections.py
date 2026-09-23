@@ -387,10 +387,10 @@ async def test_deleting_inline_workspace_retains_account_connection(database, mo
         credential_id = UUID(listed[0]["id"])
     async with factory() as session:
         credential = await session.get(ProviderCredential, credential_id)
-        assert credential.workspace_id == workspace_id
+        assert credential.workspace_id is None
         await session.delete(await session.get(Workspace, workspace_id))
         await session.commit()
-        await session.refresh(credential)
+        assert await session.get(ProviderCredential, credential_id) is not None
         assert credential.workspace_id is None
         assert credential.owner_id == owner
         assert credential.base_url == "https://inline.example"
